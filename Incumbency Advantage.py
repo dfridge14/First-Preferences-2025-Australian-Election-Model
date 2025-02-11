@@ -123,10 +123,14 @@ between_election_year_range = [str(i) for i in range(int(election_years[-2]),int
 before_last_election_year_range = [str(i) for i in range(int(election_years[0]),int(election_years[-2]))]
 print(between_election_year_range)
 
-Candidate_Incumbency = Final_x_df.loc[Final_x_df["HistoricElected"]=="Y",].merge(incumbent_df[['Surname', 'GivenNm','Year']], on=['Surname', 'GivenNm'], how='left')
-Candidate_Incumbency['Year'] = Candidate_Incumbency['Year'].apply(ast.literal_eval)  # make it back into list - somehow a mistake has been made!
-Candidate_Incumbency.loc[:,"is_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: any(year in between_election_year_range for year in years)) # true if recent incumbent
-Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: not any(year in between_election_year_range for year in years) and any(year in between_election_year_range for year in years))
+Candidate_Incumbency = Final_x_df.merge(incumbent_df[['Surname', 'GivenNm','Year']], on=['Surname', 'GivenNm'], how='left')
+import pdb;pdb.set_trace()
+Candidate_Incumbency['Year'] = Candidate_Incumbency['Year'].apply(lambda entry: ast.literal_eval(entry) if pd.notna(entry) else np.nan)  # make it back into list - somehow a mistake has been made!
+Candidate_Incumbency.loc[:,"is_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: any(year in between_election_year_range for year in years) if years and isinstance(years, list) else np.nan) # true if recent incumbent
+Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: not any(year in between_election_year_range for year in years) and any(year in before_last_election_year_range for year in years) if years and isinstance(years, list) else np.nan)
+import pdb;pdb.set_trace()
+
+
 
 Final_x_df = Final_x_df.merge(Candidate_Incumbency, on=Final_x_df.columns.tolist(), how='left')
 Final_x_df.loc[:,["is_incumbent","is_historic_incumbent"]].fillna(0) # replace non-historic-elected with 0s
