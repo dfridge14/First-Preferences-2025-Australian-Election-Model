@@ -104,18 +104,12 @@ for div in Div_DOP_dict.keys():
         print(div)
 
 
-no_indeps_Final_x_divs = []
-for div in Final_x_div_dict.keys():
-    for i in range(FINAL_CAND_NO):
-        if "IND" in Final_x_div_dict[div]["PartyAb"].values[i]:
-            no_indeps_Final_x_divs.append(div)
-print(no_indeps_Final_x_divs)
+
 
 
 # df with div_nm,PartyAb,House_Pct,Surname,GivenNm,HistoricElected
 Final_x_df = pd.concat(Final_x_div_dict.values(), ignore_index=False)
 Final_x_df = Final_x_df.merge(Candidates_By_Division_df, on = ['div_nm','PartyAb'], how = 'left')
-
 
 # remove middle name!
 Final_x_df.loc[Final_x_df["GivenNm"].apply(lambda x: len(x.split(' ')) > 1),"GivenNm"] = Final_x_df.loc[Final_x_df["GivenNm"].apply(lambda x: len(x.split(' ')) > 1), "GivenNm"].apply(lambda x: x.split(' ')[0]) # only first name
@@ -139,20 +133,31 @@ Final_x_df.loc[:,["is_incumbent","is_historic_incumbent"]].fillna(0) # replace n
 Final_x_df = Final_x_df.drop(columns = ['Surname', 'GivenNm','HistoricElected','Year'])
 
 
+# remove those with final 5 that are not in senate - extend to any party whose not in the senate
+indeps_Final_x_divs = []
+for div in Final_x_div_dict.keys():
+    for i in range(FINAL_CAND_NO):
+        if "IND" in Final_x_div_dict[div]["PartyAb"].values[i]:
+            indeps_Final_x_divs.append(div)
+indeps_Final_x_divs.append('Solomon')
+indeps_Final_x_divs.append('Lingiari')
+indeps_Final_x_divs.append('Fenner')
+
+Senate_cands_by_state = pd.read_csv("SenateFirstPrefsByStateByVoteTypeDownload-27966.csv", skiprows=1)[["StateAb","PartyName"]].drop_duplicates().reset_index(drop=True)
+import pdb;pdb.set_trace()
+
+Senate_cands_by_state_dict = {state: list(Senate_cands_by_state.loc[Senate_cands_by_state['StateAb'] == state, 'PartyName']) for state in Senate_cands_by_state['StateAb'].unique()}
+print(Senate_cands_by_state_dict)
+# need to make more progress here
 
 
-states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
-for state in states: # currently only 2016 onwards
-    filename = f"2022FormalPrefs{state}.csv"
-
-Formal_prefs_VIC = pd.read_csv("2022FormalPrefsVIC", index_col=None)
-Formal_prefs_NSW = 1
+print(indeps_Final_x_divs)
 
 
 
+Final_x_df_for_Incumbency = Final_x_df.loc[~Final_x_df["div_nm"].isin(indeps_Final_x_divs),]
+Final_x_df_for_Incumbency.to_csv("Final_x_for_Incumbency.csv", index=False)
 
-
-Final_x_df.loc[:,"Senate_Pct"] = "allocate using Formal Preferences"
 
 
 import pdb;pdb.set_trace()
