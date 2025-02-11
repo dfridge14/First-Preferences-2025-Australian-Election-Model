@@ -29,13 +29,9 @@ start = time.time()
 
 
 
-formal_prefs_full = pd.read_csv("FormalPrefs_Deakin.csv")
-print("done", time.time() - start)
+#formal_prefs_full = pd.read_csv("FormalPrefs_Deakin.csv")
 
 
-Formal_prefs_VIC = pd.read_csv("aec-senate-formalpreferences-27966-VIC.csv", index_col=None)
-print("done", time.time() - start)
-import pdb;pdb.set_trace()
 
 
 def allocate_Formal_preferences_to_selected_party_list(div, allocation_abvs_list):
@@ -303,18 +299,28 @@ for state in states: # currently only 2016 onwards
     curr_Formal_prefs = pd.read_csv(filename).rename(columns = {"Division": "div_nm"})
 
 
-    state_div_Formal_prefs_dict = {div: group.reset_index() for div, group in curr_Formal_prefs.groupby("div_nm")} 
+    state_div_Formal_prefs_dict = {div: group.reset_index() for div, group in curr_Formal_prefs.groupby("div_nm")} # maybe fix up indexing reset as this is important!!!
     for key, group in state_div_Formal_prefs_dict.items():
         Formal_prefs_default_dict[key].append(group)
 
+    print("done", time.time() - start)
+
+
 Formal_prefs_dict = dict(Formal_prefs_default_dict)
+import pdb;pdb.set_trace()
 
-
+# TO DO:
+# 1. Fix up indexing so each element of dict starts with 0
+# 2. First preferences allocate - useful for all!!!
+# 3. get ordered list of 5 parties from Incumbent Advantage csv
+# 4. For each div allocate to specific one
+# 5. aggregate into whole or by pp_id
+# 6. Use 2022Polling PlacesRepository for correspondence between names and pp_id
+# 7. write to csv of senate prefs
         
 
 
-Formal_prefs_VIC = pd.read_csv("2022FormalPrefsVIC", index_col=None)
-Formal_prefs_NSW = 1
+
 
 
 def allocate_Formal_preferences_to_selected_party_list(div, allocation_abvs_list):
