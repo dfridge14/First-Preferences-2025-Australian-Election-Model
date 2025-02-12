@@ -55,7 +55,7 @@ def allocate_Formal_preferences_to_selected_party_list(div, allocation_abvs_list
 
     party_abvs_list = []
     for party in party_names_list:
-        print(party)
+        #print(party)
         if party:
             if party == "Liberal/The Nationals": # handle LIB/NAT Exception - I think best to treat them as one party in the Senate as they always contest together, and then reverse engineer House split if needed
                 party_abvs_list.append('COAL')
@@ -309,14 +309,16 @@ def allocate_Formal_preferences_to_selected_party_list(div, allocation_abvs_list
 
 
 Formal_prefs_dict = {}
-states = ['SA']
-#states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
+states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
 for state in states: # currently only 2016 onwards
     filename = f"2022FormalPrefs{state}.csv"
 
     curr_Formal_prefs = pd.read_csv(filename).rename(columns = {"Division": "div_nm"})
 
-    state_div_Formal_prefs_dict = {div: group.reset_index(drop=True) for div, group in curr_Formal_prefs.groupby("div_nm")} # maybe fix up indexing reset as this is important!!!
+    # Not enough memory --> downcast floats to lower order for numeric columns
+    state_div_Formal_prefs_dict = {div: group.reset_index(drop=True).apply(
+        lambda col: pd.to_numeric(col, downcast='float', errors='ignore') if pd.api.types.is_numeric_dtype(col) else col
+    ) for div, group in curr_Formal_prefs.groupby("div_nm")} 
     for key, group in state_div_Formal_prefs_dict.items():
         Formal_prefs_dict[key] = group # assumes no keys (divs) overlap for different states :)
 
@@ -331,13 +333,12 @@ for state in states: # currently only 2016 onwards
 # 5. aggregate into whole or by pp_id                                               DONE
 # 6. Use 2022Polling PlacesRepository for correspondence between names and pp_id
 # 7. write to csv of senate prefs
-# 8. For 3. Make list of all top 5 that match senate: Senate_Party_Abs per division
+# 8. For 3. Make list of all top 5 that match senate: Senate_Party_Abs per division DONE
         
 
 Final_x_House_df = pd.read_csv("Final_x_for_Incumbency.csv")
-Final_x_House_df = Final_x_House_df.loc[Final_x_House_df['div_nm'].isin(list(Formal_prefs_dict.keys())),] # extra for testing!
-Final_x_House_dict = {name: list(set(Final_x_House_df.loc[Final_x_House_df['div_nm'] == name, 'PartyAb'])) for name in Final_x_House_df['div_nm'].unique()}
-import pdb;pdb.set_trace()
+#Final_x_House_df = Final_x_House_df.loc[Final_x_House_df['div_nm'].isin(list(Formal_prefs_dict.keys())),] # extra for testing!
+Final_x_House_dict = {name: list(Final_x_House_df.loc[Final_x_House_df['div_nm'] == name, 'PartyAb']) for name in Final_x_House_df['div_nm'].unique()}
 
 
 
@@ -419,7 +420,7 @@ def abbreviate_party_names(party_names_list, general_party_df):
     party_abvs_list = []
 
     for party in party_names_list:
-        print(party)
+        #print(party)
         if party:
             if party == "Liberal/The Nationals" or party == "Liberal & Nationals": # handle LIB/NAT Exception - I think best to treat them as one party in the Senate as they always contest together, and then reverse engineer House split if needed
                 party_abvs_list.append('COAL')
@@ -490,7 +491,7 @@ list4 = []
 
 def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_set):
 
-    Final_allocated_votes = pd.DataFrame(index=formal_prefs_div.index, columns=allocation_set, data = 0) # df of allocated votes for each candidate
+    Final_allocated_votes = pd.DataFrame(index=formal_prefs_div.index, columns=allocation_set, data = 0) # df of allocated votes for each candidate, should preserve order of df
     Final_allocated_votes["First_Preferences"] = formal_prefs_div["Vote"]
 
     # building groups based on first preference vote, either allocate vote directly to allocation_set if one of them, else allocate by group among later preferences
@@ -539,7 +540,7 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
     #Final_allocated_votes_aggregated_df = Final_allocated_votes_df.groupby(["div_nm", "Vote Collection Point Name"], as_index=False).sum()
     Final_allocated_votes_aggregated_df = Final_allocated_votes_df.drop(columns = ["Vote Collection Point Name"]).groupby(["div_nm"], as_index=False).sum()
 
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
     return Final_allocated_votes_aggregated_df
 
@@ -548,7 +549,7 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
 def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, application_dict):
     #### application_dict is one of 1,2,3 (incumbency_advantage),4
 
-    Final_allocated_votes_aggregated_dict = {}
+    Final_allocated_pcts_aggregated_dict = {}
 
     for div in application_dict.keys(): # only apply to relevant divisions
 
@@ -556,14 +557,21 @@ def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, app
         allocation_abvs_list = application_dict[div] # list of PartyAb to allocate to
 
         allocation_set = []
-        for i, party in enumerate(Senate_party_abvs_dict[div]):
-            if party in allocation_abvs_list:
-                allocation_set.append(Formal_prefs_dict[div].columns[2:len(Senate_party_abvs_dict[div])+2][i]) # add corresponding group 'letter' to allocation_set | len is equivalent to number of ATL parties + 3 starting columns
+        # Goal is to preserve order of allocation_abvs_list in allocation_set
+        for party in allocation_abvs_list:  # Iterate through allocation_abvs_list directly
+            if party in Senate_party_abvs_dict[div]: 
+            
+                i = Senate_party_abvs_dict[div].index(party) # Find the index of the party in this div and use it to get the corresponding Senate Group name
+                allocation_set.append(Formal_prefs_dict[div].columns[2:len(Senate_party_abvs_dict[div])+2][i])  # Append the corresponding group 'letter'
+        #for i, party in enumerate(Senate_party_abvs_dict[div]):
+        #    if party in allocation_abvs_list:
+        #        allocation_set.append(Formal_prefs_dict[div].columns[2:len(Senate_party_abvs_dict[div])+2][i]) # add corresponding group 'letter' to allocation_set | len is equivalent to number of ATL parties + 3 starting columns
 
-        # allocate to allocation_set
-        Final_allocated_votes_aggregated_dict[div] = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[div], allocation_set)
+        # allocate to allocation_set and convert to percentages
+        Final_allocated_pcts_aggregated_dict[div] = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[div], allocation_set)
+        Final_allocated_pcts_aggregated_dict[div].iloc[:,1:] = Final_allocated_pcts_aggregated_dict[div].iloc[:,1:]/Final_allocated_pcts_aggregated_dict[div].drop(columns=['div_nm']).sum(axis=1).iloc[0]  
 
-    return Final_allocated_votes_aggregated_dict
+    return Final_allocated_pcts_aggregated_dict
 
 
 
@@ -572,6 +580,11 @@ def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, app
 def whole_procedure(Formal_prefs_dict,general_party_df):
     Formal_prefs_dict, Senate_party_abvs_dict = allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_party_df)
 
+    # make list of senate parties for check if they match house ones
+    Senate_parties_by_div =  pd.DataFrame(list(Senate_party_abvs_dict.items()), columns=["div_nm", "PartyAbList"])
+    #Senate_parties_by_div.to_csv("Senate_parties_by_div.csv", index=False) # currently off
+    import pdb;pdb.set_trace()
+
 
     application_dict = {}
     application_dict['Bass'] = ['JLN','GRN','LP','ON','ALP']
@@ -579,18 +592,26 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
 
     application_dict = Final_x_House_dict
 
-    Final_allocated_votes_aggregated_dict = allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, application_dict)
+    Final_allocated_pcts_aggregated_dict = allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, application_dict)
 
     import pdb;pdb.set_trace()
 
-    return Final_allocated_votes_aggregated_dict
+    return Final_allocated_pcts_aggregated_dict
 
 
 
-whole_procedure(Formal_prefs_dict,general_party_df)
+Final_allocated_pcts_aggregated_dict = whole_procedure(Formal_prefs_dict,general_party_df)
+import pdb;pdb.set_trace()
+
+Senate_votes = pd.concat([df.melt(id_vars=["div_nm"], value_vars=df.columns[1:], var_name="PartyAb", value_name="Senate_Pct") for df in Final_allocated_pcts_aggregated_dict.values()], ignore_index=True).reset_index(drop=True)
+print(Senate_votes)
+import pdb;pdb.set_trace()
+Final_x_HS_df = pd.concat([Final_x_House_df, Senate_votes.drop(columns=['div_nm', 'PartyAb'])], axis=1)[["div_nm","PartyAb","is_incumbent","is_historic_incumbent","House_Pct","Senate_Pct"]]
+Final_x_HS_df.loc[:,"Senate_Pct"] = (Final_x_HS_df.loc[:,"Senate_Pct"]*100).round(2)
+#Final_x_House_df.merge(Senate_votes, on = ['div_nm','PartyAb'], how = 'left')
 
 
-
+Final_x_HS_df.to_csv("Final_x_HS_df.csv", index=False)
 
 
 

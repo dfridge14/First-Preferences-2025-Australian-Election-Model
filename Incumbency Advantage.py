@@ -79,7 +79,8 @@ for div in Div_DOP_dict.keys():
 
     DOP_table_vote_pcts_long.loc[:,'PartyAb'] = pd.concat([adjusted_party_names] * num_pref_counts, ignore_index=True).values
     DOP_table_vote_pcts_long.loc[DOP_table_vote_pcts_long["PartyAb"] == "GVIC","PartyAb"] = 'GRN' # change any GVIC into GRN ------ manual fix!
-
+    
+    
 
 
     # add to candidates_df - only relevant columns
@@ -123,12 +124,11 @@ between_election_year_range = [str(i) for i in range(int(election_years[-2]),int
 before_last_election_year_range = [str(i) for i in range(int(election_years[0]),int(election_years[-2]))]
 print(between_election_year_range)
 
+# is_incumbent may be equivalent to HistoricElected, but is_historic_incumbent captures all previous
 Candidate_Incumbency = Final_x_df.merge(incumbent_df[['Surname', 'GivenNm','Year']], on=['Surname', 'GivenNm'], how='left')
-import pdb;pdb.set_trace()
 Candidate_Incumbency['Year'] = Candidate_Incumbency['Year'].apply(lambda entry: ast.literal_eval(entry) if pd.notna(entry) else np.nan)  # make it back into list - somehow a mistake has been made!
 Candidate_Incumbency.loc[:,"is_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: any(year in between_election_year_range for year in years) if years and isinstance(years, list) else np.nan) # true if recent incumbent
 Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: not any(year in between_election_year_range for year in years) and any(year in before_last_election_year_range for year in years) if years and isinstance(years, list) else np.nan)
-import pdb;pdb.set_trace()
 
 
 
@@ -147,19 +147,45 @@ indeps_Final_x_divs.append('Solomon')
 indeps_Final_x_divs.append('Lingiari')
 indeps_Final_x_divs.append('Fenner')
 
-Senate_cands_by_state = pd.read_csv("SenateFirstPrefsByStateByVoteTypeDownload-27966.csv", skiprows=1)[["StateAb","PartyName"]].drop_duplicates().reset_index(drop=True)
+general_party_df = pd.read_csv("2022GeneralPartyDetails.csv", skiprows = 1)
+general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',] = 'GRN' # handle exceptions, but think GVIC is the only one
+
+
+
+Senate_parties_by_div = pd.read_csv("Senate_parties_by_div.csv")
+Senate_parties_by_div["PartyAbList"] = Senate_parties_by_div["PartyAbList"].apply(ast.literal_eval)
+
+
+# get state-to-div dict
+div_to_state = pd.read_csv("2022HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+div_to_state_dict = {div: div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
+
+import pdb;pdb.set_trace()
+# change parties in NSW/VIC due to Coalition on senate ticket
+Final_x_df.loc[((Final_x_df["div_nm"].map(div_to_state_dict) == 'VIC') | (Final_x_df["div_nm"].map(div_to_state_dict) == 'NSW')) & (Final_x_df["PartyAb"].isin(['LP','NP'])),'PartyAb'] = 'COAL'
+
+
+Final_x_party_not_in_senate = []
+for div in Final_x_df["div_nm"].unique(): #Final_x_div_dict.keys():
+
+    # handle coalition if VIC,NSW
+
+    for i in range(FINAL_CAND_NO):
+        print(Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i])
+        if Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i] not in Senate_parties_by_div.loc[Senate_parties_by_div["div_nm"] == div,"PartyAbList"].iloc[0]:
+            Final_x_party_not_in_senate.append(div)
+
+#Senate_cands_by_state_dict = {state: list(Senate_cands_by_state.loc[Senate_cands_by_state['StateAb'] == state, 'PartyName']) for state in Senate_cands_by_state['StateAb'].unique()}
+#Senate_parties_by_state_dict = {state: abbreviate_party_names(Senate_cands_by_state_dict[state], general_party_df) for state in Senate_cands_by_state_dict.keys()}
+# need to make more progress here
 import pdb;pdb.set_trace()
 
-Senate_cands_by_state_dict = {state: list(Senate_cands_by_state.loc[Senate_cands_by_state['StateAb'] == state, 'PartyName']) for state in Senate_cands_by_state['StateAb'].unique()}
-print(Senate_cands_by_state_dict)
-# need to make more progress here
 
-
-print(indeps_Final_x_divs)
+print(Final_x_party_not_in_senate)
 
 
 
-Final_x_df_for_Incumbency = Final_x_df.loc[~Final_x_df["div_nm"].isin(indeps_Final_x_divs),]
+Final_x_df_for_Incumbency = Final_x_df.loc[~Final_x_df["div_nm"].isin(Final_x_party_not_in_senate),]
 Final_x_df_for_Incumbency.to_csv("Final_x_for_Incumbency.csv", index=False)
 
 
