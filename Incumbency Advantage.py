@@ -6,16 +6,20 @@ import ast
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
 
+data_year = "2019"
+
 
 incumbent_df = pd.read_csv("incumbent_df.csv")
 
 election_years = ['1993','1996','1998','2001','2004','2007','2010','2013','2016','2019','2022']
-FINAL_CAND_NO = 5
+
+final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
+FINAL_CAND_NO = final_cand_no_dict[data_year]
 
 
 # Next task - add 2 columns to Top 5 DOP in each electorate: was elected last year (or byelection???) 
 
-DOP_By_Division = pd.read_csv("HouseDOPByDivisionDownload-27966.csv", skiprows=1)
+DOP_By_Division = pd.read_csv(f"{data_year}HouseDOPByDivision.csv", skiprows=1)
 
 DOP_By_Division.rename(columns={'DivisionNm': 'div_nm', 'CandidateID': 'cand_id'}, inplace=True)
 
@@ -147,7 +151,7 @@ indeps_Final_x_divs.append('Solomon')
 indeps_Final_x_divs.append('Lingiari')
 indeps_Final_x_divs.append('Fenner')
 
-general_party_df = pd.read_csv("2022GeneralPartyDetails.csv", skiprows = 1)
+general_party_df = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", skiprows = 1)
 general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',] = 'GRN' # handle exceptions, but think GVIC is the only one
 
 
@@ -157,27 +161,21 @@ Senate_parties_by_div["PartyAbList"] = Senate_parties_by_div["PartyAbList"].appl
 
 
 # get state-to-div dict
-div_to_state = pd.read_csv("2022HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+div_to_state = pd.read_csv(f"{data_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
 div_to_state_dict = {div: div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
 
-import pdb;pdb.set_trace()
+
+# CURRENTLY IGNORES SEATS WITH BOTH LIBS,NATS BUT ONLY LIBS IN SENATE LIKE IN WESTERN AUSTRALIA
 # change parties in NSW/VIC due to Coalition on senate ticket
 Final_x_df.loc[((Final_x_df["div_nm"].map(div_to_state_dict) == 'VIC') | (Final_x_df["div_nm"].map(div_to_state_dict) == 'NSW')) & (Final_x_df["PartyAb"].isin(['LP','NP'])),'PartyAb'] = 'COAL'
-
 
 Final_x_party_not_in_senate = []
 for div in Final_x_df["div_nm"].unique(): #Final_x_div_dict.keys():
 
-    # handle coalition if VIC,NSW
-
     for i in range(FINAL_CAND_NO):
-        print(Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i])
         if Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i] not in Senate_parties_by_div.loc[Senate_parties_by_div["div_nm"] == div,"PartyAbList"].iloc[0]:
             Final_x_party_not_in_senate.append(div)
 
-#Senate_cands_by_state_dict = {state: list(Senate_cands_by_state.loc[Senate_cands_by_state['StateAb'] == state, 'PartyName']) for state in Senate_cands_by_state['StateAb'].unique()}
-#Senate_parties_by_state_dict = {state: abbreviate_party_names(Senate_cands_by_state_dict[state], general_party_df) for state in Senate_cands_by_state_dict.keys()}
-# need to make more progress here
 import pdb;pdb.set_trace()
 
 

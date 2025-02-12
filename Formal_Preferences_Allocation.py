@@ -7,6 +7,9 @@ os.chdir('C:\\Dania\\2024\\Australian Election')
 start = time.time()
 
 
+data_year = '2019'
+
+
 
 # Game plan:
 # Four different places where FormalPrefs will be necessary:
@@ -49,7 +52,7 @@ def allocate_Formal_preferences_to_selected_party_list(div, allocation_abvs_list
     group_party_names = formal_prefs_full.iloc[:, 6:].columns[:start_of_BTL_index] # include both group and party names
     party_names_list = group_party_names.str.split(':').str[-1].tolist()
 
-    general_party_df = pd.read_csv("2022GeneralPartyDetails.csv", skiprows = 1)
+    general_party_df = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", skiprows = 1)
     general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',] = 'GRN' # handle exceptions, but think GVIC is the only one
 
 
@@ -311,7 +314,7 @@ def allocate_Formal_preferences_to_selected_party_list(div, allocation_abvs_list
 Formal_prefs_dict = {}
 states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
 for state in states: # currently only 2016 onwards
-    filename = f"2022FormalPrefs{state}.csv"
+    filename = f"{data_year}FormalPrefs{state}.csv"
 
     curr_Formal_prefs = pd.read_csv(filename).rename(columns = {"Division": "div_nm"})
 
@@ -331,19 +334,19 @@ for state in states: # currently only 2016 onwards
 # 3. get ordered list of 5 parties from Incumbent Advantage csv                     DONE
 # 4. For each div allocate to specific one                                          DONE
 # 5. aggregate into whole or by pp_id                                               DONE
-# 6. Use 2022Polling PlacesRepository for correspondence between names and pp_id
+# 6. Use PollingPlacesRepository for correspondence between names and pp_id
 # 7. write to csv of senate prefs
 # 8. For 3. Make list of all top 5 that match senate: Senate_Party_Abs per division DONE
         
 
-Final_x_House_df = pd.read_csv("Final_x_for_Incumbency.csv")
+Final_x_House_df = pd.read_csv(f"{data_year}Final_x_for_Incumbency.csv")
 #Final_x_House_df = Final_x_House_df.loc[Final_x_House_df['div_nm'].isin(list(Formal_prefs_dict.keys())),] # extra for testing!
 Final_x_House_dict = {name: list(Final_x_House_df.loc[Final_x_House_df['div_nm'] == name, 'PartyAb']) for name in Final_x_House_df['div_nm'].unique()}
 
 
 
 
-general_party_df = pd.read_csv("2022GeneralPartyDetails.csv", skiprows = 1)
+general_party_df = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", skiprows = 1)
 general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',] = 'GRN' # handle exceptions, but think GVIC is the only one
 
 
@@ -583,12 +586,12 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
     # make list of senate parties for check if they match house ones
     Senate_parties_by_div =  pd.DataFrame(list(Senate_party_abvs_dict.items()), columns=["div_nm", "PartyAbList"])
     #Senate_parties_by_div.to_csv("Senate_parties_by_div.csv", index=False) # currently off
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
 
-    application_dict = {}
-    application_dict['Bass'] = ['JLN','GRN','LP','ON','ALP']
-    application_dict['Franklin'] = ['TLOC','ALP','JLN','LP','GRN']
+    #application_dict = {}
+    #application_dict['Bass'] = ['JLN','GRN','LP','ON','ALP']
+    #application_dict['Franklin'] = ['TLOC','ALP','JLN','LP','GRN']
 
     application_dict = Final_x_House_dict
 
@@ -601,17 +604,16 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
 
 
 Final_allocated_pcts_aggregated_dict = whole_procedure(Formal_prefs_dict,general_party_df)
-import pdb;pdb.set_trace()
 
 Senate_votes = pd.concat([df.melt(id_vars=["div_nm"], value_vars=df.columns[1:], var_name="PartyAb", value_name="Senate_Pct") for df in Final_allocated_pcts_aggregated_dict.values()], ignore_index=True).reset_index(drop=True)
 print(Senate_votes)
 import pdb;pdb.set_trace()
 Final_x_HS_df = pd.concat([Final_x_House_df, Senate_votes.drop(columns=['div_nm', 'PartyAb'])], axis=1)[["div_nm","PartyAb","is_incumbent","is_historic_incumbent","House_Pct","Senate_Pct"]]
-Final_x_HS_df.loc[:,"Senate_Pct"] = (Final_x_HS_df.loc[:,"Senate_Pct"]*100).round(2)
+Final_x_HS_df.loc[:,"Senate_Pct"] = (pd.to_numeric(Final_x_HS_df.loc[:, "Senate_Pct"].astype(str), errors="coerce") * 100).round(2) # fixes issues with string values somehow????
 #Final_x_House_df.merge(Senate_votes, on = ['div_nm','PartyAb'], how = 'left')
 
 
-Final_x_HS_df.to_csv("Final_x_HS_df.csv", index=False)
+Final_x_HS_df.to_csv(f"{data_year}Final_x_HS_df.csv", index=False)
 
 
 
