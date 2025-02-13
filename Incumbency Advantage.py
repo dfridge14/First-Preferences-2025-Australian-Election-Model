@@ -23,9 +23,16 @@ DOP_By_Division = pd.read_csv(f"{data_year}HouseDOPByDivision.csv", skiprows=1)
 
 DOP_By_Division.rename(columns={'DivisionNm': 'div_nm', 'CandidateID': 'cand_id'}, inplace=True)
 
+for i, year in enumerate(election_years):
+    if year == data_year:
+        between_election_year_range = [str(j) for j in range(int(election_years[i-1]),int(election_years[i]))] # accounts for last election and byelections
+        before_last_election_year_range = [str(k) for k in range(int(election_years[0]),int(election_years[i-1]))]
 
-between_election_year_range = [str(i) for i in range(int(election_years[-2]),int(election_years[-1]))] # accounts for last election and byelections
 print(between_election_year_range)
+print(before_last_election_year_range)
+
+
+
 
 DOP_By_Division_Incumbency = DOP_By_Division.merge(incumbent_df, on=['Surname', 'GivenNm'], how='left')
 DOP_By_Division_Incumbency["is_incumbent"] = DOP_By_Division_Incumbency['Year'].apply(lambda years: any(year in between_election_year_range for year in years) if isinstance(years, list) and years else 0) # true if recent incumbent
@@ -119,14 +126,14 @@ Final_x_df = Final_x_df.merge(Candidates_By_Division_df, on = ['div_nm','PartyAb
 # remove middle name!
 Final_x_df.loc[Final_x_df["GivenNm"].apply(lambda x: len(x.split(' ')) > 1),"GivenNm"] = Final_x_df.loc[Final_x_df["GivenNm"].apply(lambda x: len(x.split(' ')) > 1), "GivenNm"].apply(lambda x: x.split(' ')[0]) # only first name
 
+# handle exceptions where multiple versions of name etc: Prosser, Horne, Smith, Sidebottom, StClair, Barresi
+Final_x_df.loc[(Final_x_df["Surname"]=="BARRESI")&(Final_x_df["GivenNm"]=="Phillip"),"GivenNm"] = "Phil"
+Final_x_df.loc[(Final_x_df["Surname"]=="PROSSER")&(Final_x_df["GivenNm"]=="Geoffrey"),"GivenNm"] = "Geoff"
+Final_x_df.loc[(Final_x_df["Surname"]=="SIDEBOTTOM")&(Final_x_df["GivenNm"]=="Peter"),"GivenNm"] = "Sid"
+Final_x_df.loc[(Final_x_df["Surname"]=="Horne")&(Final_x_df["GivenNm"]=="Robert"),"GivenNm"] = "Bob"
+Final_x_df.loc[(Final_x_df["Surname"]=="ST CLAIR")&(Final_x_df["GivenNm"]=="Stuart"),"Surname"] = "STCLAIR" # only relevant for 2001...?
+# Tony1 SMITH irrelevant as before 2001!!!
 
-
-#Final_x_df.apply(lambda row: 1 if row["HistoricElected"]=="Y" else 0)
-
-
-between_election_year_range = [str(i) for i in range(int(election_years[-2]),int(election_years[-1]))] # accounts for last election and byelections
-before_last_election_year_range = [str(i) for i in range(int(election_years[0]),int(election_years[-2]))]
-print(between_election_year_range)
 
 # is_incumbent may be equivalent to HistoricElected, but is_historic_incumbent captures all previous
 Candidate_Incumbency = Final_x_df.merge(incumbent_df[['Surname', 'GivenNm','Year']], on=['Surname', 'GivenNm'], how='left')
@@ -141,22 +148,26 @@ Final_x_df.loc[:,["is_incumbent","is_historic_incumbent"]].fillna(0) # replace n
 Final_x_df = Final_x_df.drop(columns = ['Surname', 'GivenNm','HistoricElected','Year'])
 
 
+
+
+#indeps_Final_x_divs = []
+#for div in Final_x_div_dict.keys():
+#    for i in range(FINAL_CAND_NO):
+#        if "IND" in Final_x_div_dict[div]["PartyAb"].values[i]:
+#            indeps_Final_x_divs.append(div)
+#indeps_Final_x_divs.append('Solomon')
+#indeps_Final_x_divs.append('Lingiari')
+#indeps_Final_x_divs.append('Fenner')
+
 # remove those with final 5 that are not in senate - extend to any party whose not in the senate
-indeps_Final_x_divs = []
-for div in Final_x_div_dict.keys():
-    for i in range(FINAL_CAND_NO):
-        if "IND" in Final_x_div_dict[div]["PartyAb"].values[i]:
-            indeps_Final_x_divs.append(div)
-indeps_Final_x_divs.append('Solomon')
-indeps_Final_x_divs.append('Lingiari')
-indeps_Final_x_divs.append('Fenner')
+
 
 general_party_df = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", skiprows = 1)
 general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',] = 'GRN' # handle exceptions, but think GVIC is the only one
 
 
 
-Senate_parties_by_div = pd.read_csv("Senate_parties_by_div.csv")
+Senate_parties_by_div = pd.read_csv(f"{data_year}Senate_parties_by_div.csv")
 Senate_parties_by_div["PartyAbList"] = Senate_parties_by_div["PartyAbList"].apply(ast.literal_eval)
 
 
@@ -184,7 +195,7 @@ print(Final_x_party_not_in_senate)
 
 
 Final_x_df_for_Incumbency = Final_x_df.loc[~Final_x_df["div_nm"].isin(Final_x_party_not_in_senate),]
-Final_x_df_for_Incumbency.to_csv("Final_x_for_Incumbency.csv", index=False)
+Final_x_df_for_Incumbency.to_csv(f"{data_year}Final_x_for_Incumbency.csv", index=False)
 
 
 

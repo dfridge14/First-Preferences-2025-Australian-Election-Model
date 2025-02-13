@@ -36,6 +36,10 @@ for year in election_years: # currently only 2016 onwards
             curr_year_elected.loc[curr_year_elected["Name"] == "Peter Sid Sidebottom","Name"] = "Sid Sidebottom"
             curr_year_elected.loc[curr_year_elected["Name"] == "Stuart St Clair","Name"] = "Stuart StClair"
             curr_year_elected.loc[curr_year_elected["Name"] == "Phillip Barresi","Name"] = "Phil Barresi"
+
+        # also manually tweaked apostrophe symbol in O'Byrne, Connor, Keefe from 1996-2001 for some reason
+
+
         
         # remove middle names
         curr_year_elected.loc[curr_year_elected["Name"].apply(lambda x: len(x.split(' ')) > 2),"Name"] = curr_year_elected.loc[curr_year_elected["Name"].apply(lambda x: len(x.split(' ')) > 2), "Name"].apply(
@@ -61,6 +65,11 @@ for year in election_years: # currently only 2016 onwards
     else:
         curr_year_elected = pd.read_csv(filename, skiprows=1)[["Surname","GivenNm","DivisionNm","PartyAb"]].rename(columns = {"DivisionNm": "div_nm"}) # only relevant columns
         
+
+        
+        # make surname all capital - exception for Bert van Manen: VANMANEN
+        curr_year_elected.loc[curr_year_elected["Surname"] == 'van MANEN',"Surname"] = "VAN MANEN"
+
         # remove middle name!
         curr_year_elected.loc[curr_year_elected["GivenNm"].apply(lambda x: len(x.split(' ')) > 1),"GivenNm"] = curr_year_elected.loc[curr_year_elected["GivenNm"].apply(lambda x: len(x.split(' ')) > 1), "GivenNm"].apply(lambda x: x.split(' ')[0]) # only first name
         

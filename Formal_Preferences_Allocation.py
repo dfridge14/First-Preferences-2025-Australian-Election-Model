@@ -293,30 +293,99 @@ def allocate_Formal_preferences_to_selected_party_list(div, allocation_abvs_list
 
 
 
+def abbreviate_party_names(party_names_list, general_party_df):
+    # handle exceptions to party names
+    party_abvs_list = []
+
+    for party in party_names_list:
+        #print(party)
+        if party:
+            if party.lower() == "Liberal/The Nationals".lower() or party.lower() == "Liberal & Nationals".lower(): # handle LIB/NAT Exception - I think best to treat them as one party in the Senate as they always contest together, and then reverse engineer House split if needed
+                party_abvs_list.append('COAL')
+            elif party == " Science, Pirate, Secular, Climate Emergency": # SOPA exception
+                party_abvs_list.append('SOPA')
+            elif party == "Labor/Country Labor":
+                party_abvs_list.append('ALP')
+            else:
+                party_abvs_list.append(general_party_df.loc[(general_party_df["PartyNm"] == party) | (general_party_df["RegisteredPartyAb"] == party),"PartyAb"].iloc[0])
+        else:
+            party_abvs_list.append('')
+
+
+        #import pdb;pdb.set_trace()
+
+    return party_abvs_list
+
+
+general_party_df = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", skiprows = 1)
+general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',"PartyAb"] = 'GRN' # handle exceptions, but think GVIC is the only one
+
+
+def get_Senate_party_abvs_dict():
+    # quickly extracts abvs from the senate without needing to read all of Formal Prefs
+
+
+    Formal_prefs_dict = {}
+    states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
+
+    #### basic version to get the party names lists for cheap - read only 2 rows each!
+    for state in states: # currently only 2016 onwards
+        filename = f"{data_year}FormalPrefs{state}.csv"
+
+        state_Formal_prefs = pd.read_csv(filename, nrows=2)
+
+        state_Formal_prefs_dict = {state: group.reset_index(drop=True).apply(
+            lambda col: pd.to_numeric(col, downcast='float', errors='ignore') if pd.api.types.is_numeric_dtype(col) else col
+        ) for state, group in state_Formal_prefs.groupby("State")} 
+        for key, group in state_Formal_prefs_dict.items():
+            Formal_prefs_dict[key] = group # assumes no keys (divs) overlap for different states :)
+    import pdb;pdb.set_trace()
+
+    # get state-to-div dict
+    div_to_state = pd.read_csv(f"{data_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+    div_to_state_dict = {div: div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
+
+
+
+    Senate_party_abvs_dict = {}
+    for div in div_to_state_dict.keys():
+        #import pdb;pdb.set_trace()
+        state = div_to_state_dict[div] # gets StateAb
+        formal_prefs_full = Formal_prefs_dict[state]
+        formal_prefs = formal_prefs_full.iloc[:, 6:]
+        formal_prefs.columns = formal_prefs.columns.str.split(':').str[0] # keep only party grouping as key
+        start_of_BTL_index = next(i for i, col in enumerate(formal_prefs.columns) if formal_prefs.columns[:i].tolist().count(col) == 1) # locates first instance of column name count repeated
+
+        # store group party names (from ATL) in Senate_party_names_dict
+        group_party_names = formal_prefs_full.iloc[:, 6:].columns[:start_of_BTL_index] # includes both group and party names
+        party_names_list = group_party_names.str.split(':').str[-1].tolist() # records only party names
+        print(div)
+        party_abvs_list = abbreviate_party_names(party_names_list, general_party_df)
+        Senate_party_abvs_dict[div] = party_abvs_list
+    
+    # write to csv
+    Senate_parties_by_div =  pd.DataFrame(list(Senate_party_abvs_dict.items()), columns=["div_nm", "PartyAbList"])
+    Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) 
+
+    return 1
+
+
+#get_Senate_party_abvs_dict()
 
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
+import pyarrow.csv as pv_csv
+import pyarrow as pa
 
 Formal_prefs_dict = {}
 states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
 for state in states: # currently only 2016 onwards
+    print(state)
     filename = f"{data_year}FormalPrefs{state}.csv"
 
-    curr_Formal_prefs = pd.read_csv(filename).rename(columns = {"Division": "div_nm"})
+    curr_Formal_prefs = pd.read_csv(filename, engine="pyarrow", dtype=str).rename(columns = {"Division": "div_nm"})
 
     # Not enough memory --> downcast floats to lower order for numeric columns
     state_div_Formal_prefs_dict = {div: group.reset_index(drop=True).apply(
@@ -327,6 +396,7 @@ for state in states: # currently only 2016 onwards
 
     print("done", time.time() - start)
 
+import pdb;pdb.set_trace()
 
 # TO DO:
 # 1. Fix up indexing so each element of dict starts with 0                          DONE
@@ -335,19 +405,16 @@ for state in states: # currently only 2016 onwards
 # 4. For each div allocate to specific one                                          DONE
 # 5. aggregate into whole or by pp_id                                               DONE
 # 6. Use PollingPlacesRepository for correspondence between names and pp_id
-# 7. write to csv of senate prefs
+# 7. write to csv of senate prefs                                                   DONE
 # 8. For 3. Make list of all top 5 that match senate: Senate_Party_Abs per division DONE
         
 
-Final_x_House_df = pd.read_csv(f"{data_year}Final_x_for_Incumbency.csv")
-#Final_x_House_df = Final_x_House_df.loc[Final_x_House_df['div_nm'].isin(list(Formal_prefs_dict.keys())),] # extra for testing!
-Final_x_House_dict = {name: list(Final_x_House_df.loc[Final_x_House_df['div_nm'] == name, 'PartyAb']) for name in Final_x_House_df['div_nm'].unique()}
 
 
 
 
 general_party_df = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", skiprows = 1)
-general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',] = 'GRN' # handle exceptions, but think GVIC is the only one
+general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',"PartyAb"] = 'GRN' # handle exceptions, but think GVIC is the only one
 
 
 def find_earliest_preference_id(preferences):
@@ -585,13 +652,19 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
 
     # make list of senate parties for check if they match house ones
     Senate_parties_by_div =  pd.DataFrame(list(Senate_party_abvs_dict.items()), columns=["div_nm", "PartyAbList"])
-    #Senate_parties_by_div.to_csv("Senate_parties_by_div.csv", index=False) # currently off
-    #import pdb;pdb.set_trace()
+    Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) # currently off
+    import pdb;pdb.set_trace()
 
 
     #application_dict = {}
     #application_dict['Bass'] = ['JLN','GRN','LP','ON','ALP']
     #application_dict['Franklin'] = ['TLOC','ALP','JLN','LP','GRN']
+
+
+    Final_x_House_df = pd.read_csv(f"{data_year}Final_x_for_Incumbency.csv")
+    #Final_x_House_df = Final_x_House_df.loc[Final_x_House_df['div_nm'].isin(list(Formal_prefs_dict.keys())),] # extra for testing!
+    Final_x_House_dict = {name: list(Final_x_House_df.loc[Final_x_House_df['div_nm'] == name, 'PartyAb']) for name in Final_x_House_df['div_nm'].unique()}
+
 
     application_dict = Final_x_House_dict
 
@@ -599,21 +672,24 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
 
     import pdb;pdb.set_trace()
 
-    return Final_allocated_pcts_aggregated_dict
+
+    Final_allocated_pcts_aggregated_dict = whole_procedure(Formal_prefs_dict,general_party_df)
+
+    Senate_votes = pd.concat([df.melt(id_vars=["div_nm"], value_vars=df.columns[1:], var_name="PartyAb", value_name="Senate_Pct") for df in Final_allocated_pcts_aggregated_dict.values()], ignore_index=True).reset_index(drop=True)
+    print(Senate_votes)
+    import pdb;pdb.set_trace()
+    Final_x_HS_df = pd.concat([Final_x_House_df, Senate_votes.drop(columns=['div_nm', 'PartyAb'])], axis=1)[["div_nm","PartyAb","is_incumbent","is_historic_incumbent","House_Pct","Senate_Pct"]]
+    Final_x_HS_df.loc[:,"Senate_Pct"] = (pd.to_numeric(Final_x_HS_df.loc[:, "Senate_Pct"].astype(str), errors="coerce") * 100).round(2) # fixes issues with string values somehow????
 
 
+    Final_x_HS_df.to_csv(f"{data_year}Final_x_HS_df.csv", index=False)
 
-Final_allocated_pcts_aggregated_dict = whole_procedure(Formal_prefs_dict,general_party_df)
+    return Final_allocated_pcts_aggregated_dict, Final_x_HS_df
 
-Senate_votes = pd.concat([df.melt(id_vars=["div_nm"], value_vars=df.columns[1:], var_name="PartyAb", value_name="Senate_Pct") for df in Final_allocated_pcts_aggregated_dict.values()], ignore_index=True).reset_index(drop=True)
-print(Senate_votes)
+
+#Final_allocated_pcts_aggregated_dict, Final_x_HS_df = whole_procedure(Formal_prefs_dict,general_party_df)
 import pdb;pdb.set_trace()
-Final_x_HS_df = pd.concat([Final_x_House_df, Senate_votes.drop(columns=['div_nm', 'PartyAb'])], axis=1)[["div_nm","PartyAb","is_incumbent","is_historic_incumbent","House_Pct","Senate_Pct"]]
-Final_x_HS_df.loc[:,"Senate_Pct"] = (pd.to_numeric(Final_x_HS_df.loc[:, "Senate_Pct"].astype(str), errors="coerce") * 100).round(2) # fixes issues with string values somehow????
-#Final_x_House_df.merge(Senate_votes, on = ['div_nm','PartyAb'], how = 'left')
 
-
-Final_x_HS_df.to_csv(f"{data_year}Final_x_HS_df.csv", index=False)
 
 
 
