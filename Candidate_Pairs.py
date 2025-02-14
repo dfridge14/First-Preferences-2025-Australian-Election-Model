@@ -63,7 +63,7 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
     if DOP_type == "VoteCount":
         for div in Div_DOP_dict.keys():
 
-            DOP_table_long = Div_DOP_dict[div].loc[Div_DOP_dict[div]["CalculationType"] == "Preference Percent",].reset_index(drop=True)
+            DOP_table_long = Div_DOP_dict[div].loc[Div_DOP_dict[div]["CalculationType"] == "Preference Count",].reset_index(drop=True)
 
             # fill in empty PartyAb column with IND - in 2022, only Steve Khouw
             DOP_table_long.loc[:,'PartyAb'] = DOP_table_long['PartyAb'].fillna('IND') 
@@ -83,7 +83,7 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
             DOP_table_long.loc[DOP_table_long["PartyAb"] == "GVIC","PartyAb"] = 'GRN' # change any GVIC into GRN ------ manual fix!
             #DOP_table_long = DOP_table_long[["CountNumber","PartyAb","CalculationValue"]] # only values needed
             DOP_table_wide = convert_to_wide_format(DOP_table_long, "DOP")
-            DOP_table_wide_dict[div] = DOP_table_wide
+            DOP_table_wide_dict[div] = DOP_table_wide.astype(int)
 
     if DOP_type == "EliminationOrder":
         for div in Div_DOP_dict.keys():
@@ -143,7 +143,7 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
             DOP_table_wide = convert_to_wide_format(DOP_table_long, "DOP")
 
             DOP_table_wide = DOP_table_wide.rename(columns = {"GVIC": "GRN"}) # GVIC issue resolve!
-            DOP_table_wide_dict[div] = DOP_table_wide
+            DOP_table_wide_dict[div] = DOP_table_wide.astype(int)
 
 
 
@@ -188,9 +188,9 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
 
 
 
-#expanded_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Expand")
+expand_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Expand")
 #reduce_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Reduce")
-#Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
+Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
 VoteCount_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "VoteCount")
 
 import pdb;pdb.set_trace()
@@ -214,33 +214,75 @@ def find_c1_c2(elimination_list, common_set):
         
     return 0/0 # should never happen!
 
-def redistribution_party_type(div1,div2, Elimination_order_dict, expand_dict):
+def redistribution_party_type(div1,div2, Elimination_order_dict, expand_dict, VoteCount_dict):
+    # order of div1,div2 important - candidate set change from div1 to div2
     list_div1, list_div2 = Elimination_order_dict[div1], Elimination_order_dict[div2]
     set1,set2 = set(list_div1), set(list_div2)
+
     common = set1 & set2
     m = len(common)
 
     if set(list_div1[:m]) == set(list_div2[:m]):
         redistribution_party_type = "simple"
+        c1,c2 = len(set1), len(set2) # direct as simple type
+        redistributed_votes = simple_redistribution(div1,div2,expand_dict, VoteCount_dict,m,c1,c2)
+
     else:
         redistribution_party_type = "complex"
         c1 = find_c1_c2(list_div1, common) # length of relevant subset of list_div1
         c2 = find_c1_c2(list_div2, common) # length of relevant subset of list_div2
 
-
-    return redistribution_party_type
-
-print(redistribution_party_type("Deakin","Aston"))
+        import pdb;pdb.set_trace()
+        redistributed_votes = complex_redistribution(div1,div2,expand_dict, VoteCount_dict,m,c1,c2,set1,set2)
 
 
-def simple_redistribution():
 
-    return 1
+    return redistributed_votes
+
+print(redistribution_party_type("Deakin","Aston", Elimination_order_dict, expand_dict, VoteCount_dict))
+import pdb;pdb.set_trace()
 
 
-def complex_redistribution():
 
-    return 1
+
+def simple_redistribution(div1,div2,expand_dict, VoteCount_dict,m,c1,c2):
+
+
+    reduced_votes = VoteCount_dict[div1].iloc[c1-m,1:]
+    reduced_votes = reduced_votes[reduced_votes>0].sort_index() # sort parties alphabetically
+    redistributed_votes = reduced_votes
+    for i in reversed(range(c2-m)):
+        #         expand_dict[div2].iloc[:c2-m,] s1.sort_index().dot(s2.sort_index())
+        expand_div2 = expand_dict[div2].iloc[i,1:]
+        common_div2 = expand_div2[expand_div2>0].sort_index()
+
+        lost_votes = round(common_div2*redistributed_votes).astype(int) # alphabetically-sorted 
+        redistributed_votes = reduced_votes - lost_votes
+        to_expand_party = pd.Series([sum(lost_votes)], index=expand_div2[expand_div2==0].index) # expand_div2 has 0 entry for the party that is being expanded to
+        redistributed_votes = pd.concat([redistributed_votes, to_expand_party]).sort_index()
+    return redistributed_votes
+
+
+def complex_redistribution(div1,div2,expand_dict, VoteCount_dict,m,c1,c2,set1,set2):
+
+    reduced_votes = VoteCount_dict[div1].iloc[len(set1)-c1,1:]
+    reduced_votes = reduced_votes[reduced_votes>0].sort_index()
+    redistributed_votes = reduced_votes
+
+    # Use FP to get senate versions of A) reduced_votes = c1 B) common votes = m C) expanded votes = c2
+    # calculate the % shifts in both A>B,B>C
+    # apply to reduced_votes --> c2
+
+    for i in reversed(range(len(set2)-c2)):
+        expand_div2 = expand_dict[div2].iloc[i,1:]
+        common_div2 = expand_div2[expand_div2>0].sort_index()
+
+        lost_votes = round(common_div2*redistributed_votes).astype(int) # alphabetically-sorted 
+        redistributed_votes = reduced_votes - lost_votes
+        to_expand_party = pd.Series([sum(lost_votes)], index=expand_div2[expand_div2==0].index) # expand_div2 has 0 entry for the party that is being expanded to
+        redistributed_votes = pd.concat([redistributed_votes, to_expand_party]).sort_index()
+
+    return redistributed_votes
 
 def independent_redistribution():
 

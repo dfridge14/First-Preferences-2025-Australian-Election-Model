@@ -376,16 +376,66 @@ def get_Senate_party_abvs_dict():
 
 
 
-import pyarrow.csv as pv_csv
+import pyarrow.csv as pv
 import pyarrow as pa
+import pyarrow.compute as pc
+
 
 Formal_prefs_dict = {}
-states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
+states = ['NSW']
+#states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
 for state in states: # currently only 2016 onwards
     print(state)
     filename = f"{data_year}FormalPrefs{state}.csv"
 
-    curr_Formal_prefs = pd.read_csv(filename, engine="pyarrow", dtype=str).rename(columns = {"Division": "div_nm"})
+    column_names = pd.read_csv(filename, nrows=1).columns.tolist()
+
+    #with open(filename, 'r') as f:
+    #    lines = f.readlines()
+
+    # Check for lines that do not match the expected column count
+    #expected_columns = len(column_names)  # or whatever your expected column count is
+    #cleaned_lines = [line for line in lines if len(line.split(',')) == expected_columns]
+    #import pdb;pdb.set_trace()
+
+    #with open(filename, "r", encoding="utf-8") as f:
+    #    for i in range(20):  # Print first 20 lines
+    #        print(f.readline().strip())
+
+
+
+    #column_names = pd.read_csv(filename, nrows=1).columns.tolist()
+    #import pdb;pdb.set_trace()
+    #schema = pa.schema([(col, pa.string()) for col in column_names])
+
+
+    #table = pv.read_csv(
+    #filename,
+    #read_options=pv.ReadOptions(column_names=column_names, skip_rows=1),
+    #convert_options=pv.ConvertOptions(null_values=[""], strings_can_be_null=True),
+#)
+    #table = pv.read_csv(
+    #filename,
+    #convert_options=pv.ConvertOptions(null_values=[""], strings_can_be_null=True)
+    #)
+    print("done", time.time() - start)
+    import csv
+    rows = []
+
+    with open(filename, 'r') as file:
+        reader = csv.reader(file)
+        for i, row in enumerate(reader):
+            if i > 0:
+                while len(row) < len(column_names):
+                    row.append('')  # or use None or 'NaN' depending on your preference
+                rows.append(row)
+
+    # Convert the processed rows back into a pandas DataFrame
+    curr_Formal_prefs = pd.DataFrame(rows)
+    curr_Formal_prefs.columns = column_names
+    print("done", time.time() - start)
+    #curr_Formal_prefs = pd.read_csv(filename, nrows=269300, header=None, usecols=range(len(column_names)))
+    import pdb;pdb.set_trace()
 
     # Not enough memory --> downcast floats to lower order for numeric columns
     state_div_Formal_prefs_dict = {div: group.reset_index(drop=True).apply(

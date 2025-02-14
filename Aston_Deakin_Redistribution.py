@@ -8,6 +8,8 @@ from matplotlib import pyplot as plt
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
 
+data_year = "2022"
+
 SA1_By_PP_Complete = pd.read_csv("SA1_By_PP_Complete.csv", index_col=None)
 
 
@@ -37,7 +39,7 @@ Deakin_Aston_SA1s = [int(x) for x in Deakin_Aston_SA1s]
 
 
 # preliminary dictionary imports and massaging
-First_Prefs_by_PP_Complete = pd.read_csv('FirstPrefsByPP2022Complete.csv', index_col=None)
+First_Prefs_by_PP_Complete = pd.read_csv(f'{data_year}FirstPrefsByPPComplete.csv', index_col=None)
 
 # Dictionaries of all division first_prefs and SA1s
 
@@ -213,6 +215,7 @@ def rectify_Deakin_SA1_votes():
 
     # Update the DataFrame with decremented values
     all.loc[:, all.columns[1:-4].tolist()+all.columns[-1:].tolist()] = updated_counts
+    all = all.copy() # to evade PerformanceWarning
 
     # check if now totals reach K - Yes they do!!!
     all["New_K"] = all.iloc[:, 1:-4].sum(axis=1)
@@ -421,7 +424,7 @@ def candidate_prior_simulation(div_nm):
 
 
 
-PP_Booth_type = pd.read_csv("PPBoothtype2022.csv")
+PP_Booth_type = pd.read_csv(f"{data_year}PPBoothtype.csv")
 
 SA1_centroids_2016 = pd.read_csv("SA1_centroids_2016.csv")
 SA1_centroids_2016 = SA1_centroids_2016.rename(columns={"SA1_7DIG16": "SA1_CODE16"})
@@ -579,7 +582,7 @@ def candidate_totals_rebalancing(SA1_vote_array, Booth_type_actual_vote_totals):
         raise ValueError("Mine: SA1_vote_array's global vote totals don't match")
 
     adj_weights = SA1_vote_totals / overall_vote_total # proportional to size of SA1
-    difference_vector = curr_cand_totals - Booth_type_actual_vote_totals
+    difference_vector = Booth_type_actual_vote_totals - curr_cand_totals
     # print(difference_vector)
 
     weighted_difference_array = np.tile(difference_vector, (len(adj_weights),1)) * adj_weights[:,None] # of height equal to #SA1s
@@ -656,21 +659,28 @@ def candidate_prior_simulation_weighted(div_nm, mean):
 
         expected_Other_array = result_array_pcts * Div_SA1_By_PP_dict_wide["Deakin"].iloc[0,1:].to_numpy()[:,np.newaxis] # multiply by the n_i from 'Other' for each SA1
 
-        print(expected_Other_array)
+        #print(expected_Other_array)
         print("Comparison")
         print(Other_PP_cand_totals)
-        print(np.sum(expected_Other_array, axis=0))
+        print(np.round(np.sum(expected_Other_array, axis=0),2))
 
         Other_adjusted_array = candidate_totals_rebalancing(expected_Other_array, Other_PP_cand_totals)    
-        print("Here we go")
-        print(Other_adjusted_array)   
+        print("Here we go - Other_adjusted_array")
+        #print(Other_adjusted_array)   
         print((Other_adjusted_array<0).any())
         neg_indices = np.where(Other_adjusted_array < 0)
-        print(neg_indices)
+        #print(neg_indices)
         for i in neg_indices:
             print(np.round(Other_adjusted_array[neg_indices],2)) 
 
         result_array += Other_adjusted_array
+        print("overall negative votes")
+        print((result_array<0).any())
+        neg_indices = np.where(result_array < 0)
+        #print(neg_indices)
+        for i in neg_indices:
+            print(np.round(Other_adjusted_array[neg_indices],2)) 
+
         return np.round(result_array,6)
 
         #import pdb;pdb.set_trace()
@@ -694,11 +704,13 @@ def candidate_prior_simulation_weighted(div_nm, mean):
 
 
 def SA1_candidate_prior_df_output(div_nm,mean):
+    ### gets array of SA1 vote using weighted algorithm, working with the mean if mean == 1 else using MMHg
 
     array = candidate_prior_simulation_weighted("Deakin", mean)
 
     SA1s = Div_SA1_By_PP_dict_wide[div_nm].columns[1:].tolist()
     candidates = Div_First_Prefs_PP_dict_wide[div_nm].columns[1:].tolist()
+    print("printing SA1s and candidates")
     print(SA1s)
     print(candidates)
 
