@@ -188,13 +188,10 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
 
 
 
-expand_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Expand")
+#expand_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Expand")
 #reduce_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Reduce")
-Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
-VoteCount_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "VoteCount")
-
-import pdb;pdb.set_trace()
-
+#Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
+#VoteCount_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "VoteCount")
 
 
     
@@ -239,8 +236,9 @@ def redistribution_party_type(div1,div2, Elimination_order_dict, expand_dict, Vo
 
     return redistributed_votes
 
-print(redistribution_party_type("Deakin","Aston", Elimination_order_dict, expand_dict, VoteCount_dict))
-import pdb;pdb.set_trace()
+
+
+#print(redistribution_party_type("Deakin","Aston", Elimination_order_dict, expand_dict, VoteCount_dict))
 
 
 
@@ -297,4 +295,30 @@ def complex_independent_redistribution():
 # expand dict (key='div_nm') contains proportion of party's current vote that was transferred in last count - calculation required (in wide format)
 reduce_dict = {}
 expand_dict = {}
+
+SA1_By_PP_Votes_2022 = pd.read_csv("2022SA1_By_PP_Votes.csv", index_col=None)
+
+SA1s_with_votes = set(SA1_By_PP_Votes_2022.iloc[:,1])
+
+Redistribution_SA1_changes_2024 = pd.read_csv("Redistribution_SA1_changes2024.csv", index_col=None)
+Redistribution_SA1_changes_2024 = Redistribution_SA1_changes_2024.loc[Redistribution_SA1_changes_2024["SA1_CODE21"].isin(SA1s_with_votes),]
+Redistribution_SA1_changes_2024_dict = Redistribution_SA1_changes_2024.groupby(['old_div', 'new_div'])['SA1_CODE21'].apply(list).to_dict()
+Redistribution_pairs = list(Redistribution_SA1_changes_2024_dict.keys())
+
+Redistribution_pair = {key: [] for key in Redistribution_pairs}
+
+
+# want to get the c1 and c2 for each redistribution pair (unless simple)
+
+# 1. For all pairs, figure if simple, complex, independent (simple needs no further action)
+# 2. For all complex/complex independent pairs, figure out c1 and c2
+# 3. Store c1 and c2 in a dictionary - to be applied to Formal Preferences!
+
+for key in Redistribution_pairs:
+    
+    redistribution_party_type("Deakin","Aston", Elimination_order_dict, expand_dict, VoteCount_dict)
+
+
+
+
 import pdb;pdb.set_trace()
