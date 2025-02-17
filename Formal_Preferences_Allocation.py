@@ -1,6 +1,17 @@
 import pandas as pd
+#import modin.pandas as pd
+#import dask
+#dask.config.set({'distributed.dashboard.link': 'http://127.0.0.1:62031/status'})
+#import multiprocessing
+
 import numpy as np
 import os,time
+
+
+#if __name__ == '__main__':
+#    from dask.distributed import Client
+#    client = Client()  # Start Dask Client
+#    print(client)
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
 
@@ -373,12 +384,7 @@ def get_Senate_party_abvs_dict():
 #get_Senate_party_abvs_dict()
 
 
-
-
-
-import pyarrow.csv as pv
-import pyarrow as pa
-import pyarrow.compute as pc
+import polars as pl
 
 
 Formal_prefs_dict = {}
@@ -388,58 +394,19 @@ for state in states: # currently only 2016 onwards
     print(state)
     filename = f"{data_year}FormalPrefs{state}.csv"
 
-    column_names = pd.read_csv(filename, nrows=1).columns.tolist()
-
-    #with open(filename, 'r') as f:
-    #    lines = f.readlines()
-
-    # Check for lines that do not match the expected column count
-    #expected_columns = len(column_names)  # or whatever your expected column count is
-    #cleaned_lines = [line for line in lines if len(line.split(',')) == expected_columns]
-    #import pdb;pdb.set_trace()
-
-    #with open(filename, "r", encoding="utf-8") as f:
-    #    for i in range(20):  # Print first 20 lines
-    #        print(f.readline().strip())
-
-
-
-    #column_names = pd.read_csv(filename, nrows=1).columns.tolist()
-    #import pdb;pdb.set_trace()
-    #schema = pa.schema([(col, pa.string()) for col in column_names])
-
-
-    #table = pv.read_csv(
-    #filename,
-    #read_options=pv.ReadOptions(column_names=column_names, skip_rows=1),
-    #convert_options=pv.ConvertOptions(null_values=[""], strings_can_be_null=True),
-#)
-    #table = pv.read_csv(
-    #filename,
-    #convert_options=pv.ConvertOptions(null_values=[""], strings_can_be_null=True)
-    #)
+    df = pl.read_csv(filename, schema_overrides={"int_column": pl.Int32, "float_column": pl.Float32}, n_rows = 4_695_325)
+    df = df.rename({"Division": "div_nm"})
     print("done", time.time() - start)
-    import csv
-    rows = []
-
-    with open(filename, 'r') as file:
-        reader = csv.reader(file)
-        for i, row in enumerate(reader):
-            if i > 0:
-                while len(row) < len(column_names):
-                    row.append('')  # or use None or 'NaN' depending on your preference
-                rows.append(row)
-
-    # Convert the processed rows back into a pandas DataFrame
-    curr_Formal_prefs = pd.DataFrame(rows)
-    curr_Formal_prefs.columns = column_names
-    print("done", time.time() - start)
-    #curr_Formal_prefs = pd.read_csv(filename, nrows=269300, header=None, usecols=range(len(column_names)))
     import pdb;pdb.set_trace()
+    curr_Formal_prefs = df.to_pandas()
+    print("done", time.time() - start)
+    import pdb;pdb.set_trace()
+
+    #curr_Formal_prefs = pd.read_csv(filename, index_col=None).rename(columns={"Division": "div_nm"})
 
     # Not enough memory --> downcast floats to lower order for numeric columns
     state_div_Formal_prefs_dict = {div: group.reset_index(drop=True).apply(
-        lambda col: pd.to_numeric(col, downcast='float', errors='ignore') if pd.api.types.is_numeric_dtype(col) else col
+        lambda col: pd.to_numeric(col, downcast='float') if pd.api.types.is_numeric_dtype(col) else col
     ) for div, group in curr_Formal_prefs.groupby("div_nm")} 
     for key, group in state_div_Formal_prefs_dict.items():
         Formal_prefs_dict[key] = group # assumes no keys (divs) overlap for different states :)
@@ -657,10 +624,10 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
 
 
     # This is where to return in the pp_id column 
-    #Final_allocated_votes_aggregated_df = Final_allocated_votes_df.groupby(["div_nm", "Vote Collection Point Name"], as_index=False).sum()
-    Final_allocated_votes_aggregated_df = Final_allocated_votes_df.drop(columns = ["Vote Collection Point Name"]).groupby(["div_nm"], as_index=False).sum()
+    Final_allocated_votes_aggregated_df = Final_allocated_votes_df.groupby(["div_nm", "Vote Collection Point Name"], as_index=False).sum()
+    #Final_allocated_votes_aggregated_df = Final_allocated_votes_df.drop(columns = ["Vote Collection Point Name"]).groupby(["div_nm"], as_index=False).sum()
 
-    #import pdb;pdb.set_trace()
+    import pdb;pdb.set_trace()
 
     return Final_allocated_votes_aggregated_df
 
@@ -738,18 +705,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
 
 
 #Final_allocated_pcts_aggregated_dict, Final_x_HS_df = whole_procedure(Formal_prefs_dict,general_party_df)
+
+
+
 import pdb;pdb.set_trace()
-
-
-
-
-
-# find who didnt preference any i.e. NA_set
-#NA_set = formal_prefs_allocated.loc[formal_prefs_allocated["Vote"].isna(),:]
-#first_votes = pd.DataFrame(index=NA_set.index, columns=['1st'])
-#first_votes.loc[:,'1st'] = find_earliest_preference_id(NA_set.iloc[:,:start_of_BTL_index])
-#NA_set_BTL = NA_set.iloc[:,start_of_BTL_index:]
-#first_votes.loc[:,'1st'] = first_votes.loc[:,'1st'].fillna(find_earliest_preference_id(NA_set_BTL.groupby(NA_set_BTL.columns, axis=1).min()))
-##cs = first_votes.value_counts(dropna=False)
-# check if 2nd level NaNs occur - they should not!
-#NA_set_1st_prefs = pd.concat([NA_set, first_votes], axis=1)

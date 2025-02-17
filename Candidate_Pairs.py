@@ -2,6 +2,7 @@ import pandas as pd
 import geopandas as gpd
 import numpy as np
 import os, time
+import ast
 
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
@@ -13,7 +14,7 @@ start = time.time()
 DOP_By_Division = pd.read_csv(f"{data_year}HouseDOPByDivision.csv", skiprows=1)
 
 DOP_By_Division.rename(columns={'DivisionNm': 'div_nm', 'CandidateID': 'cand_id'}, inplace=True)
-print(DOP_By_Division)
+#print(DOP_By_Division)
 
 Div_DOP_dict = {div: group.drop(columns=['div_nm']) for div, group in DOP_By_Division[["div_nm","CountNumber","cand_id", "PartyAb","CalculationType", "CalculationValue"]].groupby("div_nm")}
 
@@ -55,6 +56,8 @@ def compute_ratio(group):
 
 
 
+
+
 def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
     
     DOP_table_wide_dict = {}
@@ -86,8 +89,12 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
             DOP_table_wide_dict[div] = DOP_table_wide.astype(int)
 
     if DOP_type == "EliminationOrder":
+        # get state-to-div dict
+        div_to_state = pd.read_csv(f"{data_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+        div_to_state_dict = {div: div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
+
         for div in Div_DOP_dict.keys():
-            print(div)
+            #print(div)
             FP_pcts = Div_DOP_dict[div].loc[(Div_DOP_dict[div]["CountNumber"] == 0) & (Div_DOP_dict[div]["CalculationType"] == "Preference Percent"),]
             Transfer_pcts = Div_DOP_dict[div].loc[(Div_DOP_dict[div]["CountNumber"] > 0) & (Div_DOP_dict[div]["CalculationType"] == "Transfer Percent"),]
             DOP_table_long = pd.concat([FP_pcts, Transfer_pcts], ignore_index=True)
@@ -114,6 +121,19 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
             Elim_order_list_part = DOP_table_wide.iloc[1:,].apply(lambda row: row[row == -100.00].index[0], axis=1).tolist()# Apply the function row-wise to get the column names
             Final_2_Parties = DOP_table_wide.iloc[-1,1:][DOP_table_wide.iloc[-1,] > 0].index.tolist()
             Elim_order_list = Elim_order_list_part + Final_2_Parties
+
+            # give INDs distinct names based on division and convert LP and NP into COAL in Victoria
+            for i, party in enumerate(Elim_order_list):
+                if party.startswith('IND'):
+                    Elim_order_list[i] = party + div # e.g. IND1Goldstein
+
+                # convert LP and NP in VIC/NSW to COAL
+                if div_to_state_dict[div] in ['VIC','NSW']:
+                    if (party=='NP') | (party =='LP'):
+                        Elim_order_list[i] = 'COAL'
+
+            
+
 
             DOP_table_wide_dict[div] = Elim_order_list[::-1] # need to still reverse
     
@@ -190,13 +210,13 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
 
 #expand_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Expand")
 #reduce_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Reduce")
-#Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
+Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
 #VoteCount_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "VoteCount")
 
 
     
 print(time.time() - start, "seconds")
-#import pdb;pdb.set_trace()
+import pdb;pdb.set_trace()
 
 
 def find_c1_c2(elimination_list, common_set):
@@ -207,7 +227,7 @@ def find_c1_c2(elimination_list, common_set):
         if elimination_list[c] in common_set:
             seen.add(elimination_list[c])  # Track seen elements from the set
         if seen == common_set:  # Stop once all elements have appeared
-            return c  
+            return c+1 # inedx+1  
         
     return 0/0 # should never happen!
 
@@ -239,6 +259,129 @@ def redistribution_party_type(div1,div2, Elimination_order_dict, expand_dict, Vo
 
 
 #print(redistribution_party_type("Deakin","Aston", Elimination_order_dict, expand_dict, VoteCount_dict))
+
+###### FIND CANDIDATES THAT DO NOT APPEAR IN SENATE & REMOVE
+Senate_parties_by_div = pd.read_csv(f"{data_year}Senate_parties_by_div.csv")
+Senate_parties_by_div["PartyAbList"] = Senate_parties_by_div["PartyAbList"].apply(ast.literal_eval)
+
+# CURRENTLY IGNORES SEATS WITH BOTH LIBS,NATS BUT ONLY LIBS IN SENATE LIKE IN WESTERN AUSTRALIA
+
+
+def remove_non_senate_cands_useless(div,list_div,Senate_parties_by_div):
+
+    for party in list_div:
+        non_senate_parties = []
+        if party not in Senate_parties_by_div[div]:
+            non_senate_parties.append(party)
+    list_div_in_senate = [x for x in list_div if x not in non_senate_parties]
+
+    return list_div_in_senate # returns parties in elimination list excluding those that are not in the senate
+
+
+
+def remove_non_senate_cands(list_div1_c1,list_div2_c2,Senate_parties):
+    non_senate_parties = []
+    for party in list_div1_c1:
+        
+        if party not in Senate_parties:
+            non_senate_parties.append(party)
+    list_div1_FP = [x for x in list_div1_c1 if x not in non_senate_parties]
+
+    non_senate_parties = []
+    for party in list_div2_c2:
+        if party not in Senate_parties:
+            non_senate_parties.append(party)
+    list_div2_FP = [x for x in list_div2_c2 if x not in non_senate_parties]
+
+    return list_div1_FP,list_div2_FP # returns parties in elimination lists excluding those that are not in the senate
+
+
+
+
+def get_c1_c2_sets(Redistribution_pairs_df, Elimination_order_dict, Senate_parties_by_div, new_seats_list):
+    # input is df with columns corresponding to giver division and receiver division, respectively. Returns the candidate sets of size c1 and c2 for those requiring complex redistr.
+    # If independent is involved, this should be dealt with prior to this function.
+
+    # initialise df to input into Formal Preferences Allocation
+    columns_list = Redistribution_pairs_df.columns.tolist()
+    columns_list.extend(['c1_list','c2_list'])
+    Redistribution_pair_complex_c1_c2_lists = pd.DataFrame(columns=Redistribution_pairs_df.columns.tolist())
+
+    redistribution_divs_set = set(Redistribution_pairs_df.iloc[1:,0])|set(Redistribution_pairs_df.iloc[1:,:1]) - {'old_div'} # all relevant divisions
+    simplerd, complexrd = 0,0
+
+    # check if double LP/NP contest
+    LPNP_double_divs = []
+    for div in redistribution_divs_set:
+        if Elimination_order_dict[div].count('COAL') == 2:
+            LPNP_double_divs.append(div)
+
+
+
+
+    for i in range(Redistribution_pairs_df.shape[0]):
+        div1, div2 = Redistribution_pairs_df.iloc[i].tolist() # get giver and receiver for pair i
+
+        # perform different calculations if it double divs are involved
+        if (div1 in LPNP_double_divs) or (div2 in LPNP_double_divs):
+            print("doubledivs", div1, div2)
+
+
+        if div2 in new_seats_list:
+            print("new seat", div1,div2)
+            list_div2 = ['LP','ALP','GRN','UAPP','ON'] ################################### TO DO: generalise to all common parties accounting for COAL or NP or LP for specific election
+            list_div1 = Elimination_order_dict[div1]
+            
+        else:
+            list_div1, list_div2 = Elimination_order_dict[div1], Elimination_order_dict[div2] # get elimination orders
+
+        set1,set2 = set(list_div1), set(list_div2)
+
+        common = set1 & set2
+        m = len(common)
+
+        # find common candidates, see if simple/complex
+        if set(list_div1[:m]) == set(list_div2[:m]):
+            redistribution_party_type = "simple"
+            print("simple", div1,div2)
+            simplerd += 1
+        else:
+            redistribution_party_type = "non-simple"
+            print("not simple", div1,div2)
+
+            c1 = find_c1_c2(list_div1, common) # length of relevant subset of list_div1
+            c2 = find_c1_c2(list_div2, common) # length of relevant subset of list_div2
+
+            Senate_parties = Senate_parties_by_div.loc[Senate_parties_by_div['div_nm'] == div1,"PartyAbList"].iloc[0] # both div1 and div2 are in the same state so are identical
+            list_div1_FP,list_div2_FP = remove_non_senate_cands(list_div1[:c1],list_div2[:c2],Senate_parties)
+
+            newset1,newset2 = set(list_div1_FP), set(list_div2_FP)
+            
+            newcommon = newset1 & newset2
+            m = len(newcommon)
+
+            if set(list_div1_FP[:m]) == set(list_div2_FP[:m]):
+                redistribution_party_type = "now simple"
+                print("now simple", div1,div2)
+                simplerd += 1
+            else:
+                print("complex or independent complex",div1,div2) 
+                complexrd += 1    
+
+                mlist = [x for x in newcommon]
+                list1 = mlist + [x for x in list_div1_FP if x not in newcommon] # order with first m parties, then remaining ci-m parties
+                list2 = mlist + [x for x in list_div2_FP if x not in newcommon]
+
+                complex_pair_row = {'old_div': div1, 'new_div': div2, 'c1_list': list1, 'm_list': mlist,'c2_list': list2}
+                Redistribution_pair_complex_c1_c2_lists = pd.concat([Redistribution_pair_complex_c1_c2_lists, pd.DataFrame([complex_pair_row])], ignore_index=True)
+
+            
+
+    print(simplerd, complexrd)
+    import pdb;pdb.set_trace()
+
+    return Redistribution_pair_complex_c1_c2_lists
+
 
 
 
@@ -300,12 +443,27 @@ SA1_By_PP_Votes_2022 = pd.read_csv("2022SA1_By_PP_Votes.csv", index_col=None)
 
 SA1s_with_votes = set(SA1_By_PP_Votes_2022.iloc[:,1])
 
+new_seats_list = ['Bullwinkel']
+
 Redistribution_SA1_changes_2024 = pd.read_csv("Redistribution_SA1_changes2024.csv", index_col=None)
 Redistribution_SA1_changes_2024 = Redistribution_SA1_changes_2024.loc[Redistribution_SA1_changes_2024["SA1_CODE21"].isin(SA1s_with_votes),]
 Redistribution_SA1_changes_2024_dict = Redistribution_SA1_changes_2024.groupby(['old_div', 'new_div'])['SA1_CODE21'].apply(list).to_dict()
 Redistribution_pairs = list(Redistribution_SA1_changes_2024_dict.keys())
 
 Redistribution_pair = {key: [] for key in Redistribution_pairs}
+
+Redistribution_pair_SA1s = Redistribution_SA1_changes_2024.groupby(['old_div', 'new_div'])['SA1_CODE21'].apply(list).reset_index()
+
+recase_map = {'Mcmahon':'McMahon', 'Mcewen':'McEwen','Eden-monaro':'Eden-Monaro',"O'connor": "O'Connor"}
+
+Redistribution_pair_SA1s.iloc[:,:2] = Redistribution_pair_SA1s.iloc[:,:2].replace(recase_map)
+
+
+
+Redistribution_pair_c1_c2_lists = get_c1_c2_sets(Redistribution_pair_SA1s.iloc[:,:2], Elimination_order_dict, Senate_parties_by_div, new_seats_list)
+Redistribution_pair_c1_c2_lists.to_csv("Redistribution_pair_c1_c2_lists2024.csv", index=False)
+
+import pdb;pdb.set_trace()
 
 
 # want to get the c1 and c2 for each redistribution pair (unless simple)
@@ -314,9 +472,11 @@ Redistribution_pair = {key: [] for key in Redistribution_pairs}
 # 2. For all complex/complex independent pairs, figure out c1 and c2
 # 3. Store c1 and c2 in a dictionary - to be applied to Formal Preferences!
 
-for key in Redistribution_pairs:
+
+
+#for key in Redistribution_pairs:
     
-    redistribution_party_type("Deakin","Aston", Elimination_order_dict, expand_dict, VoteCount_dict)
+    #redistribution_party_type("Deakin","Aston", Elimination_order_dict, expand_dict, VoteCount_dict)
 
 
 
