@@ -461,7 +461,7 @@ Redistribution_pair_SA1s.iloc[:,:2] = Redistribution_pair_SA1s.iloc[:,:2].replac
 
 
 Redistribution_pair_c1_c2_lists = get_c1_c2_sets(Redistribution_pair_SA1s.iloc[:,:2], Elimination_order_dict, Senate_parties_by_div, new_seats_list)
-Redistribution_pair_c1_c2_lists.to_csv("Redistribution_pair_c1_c2_lists2024.csv", index=False)
+#Redistribution_pair_c1_c2_lists.to_csv("Redistribution_pair_c1_c2_lists2024.csv", index=False)
 
 import pdb;pdb.set_trace()
 

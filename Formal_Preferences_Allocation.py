@@ -46,264 +46,6 @@ data_year = '2019'
 
 
 
-# old version
-#formal_prefs_full = pd.read_csv("FormalPrefs_Deakin.csv")
-def allocate_Formal_preferences_to_selected_party_list(div, allocation_abvs_list):
-
-    formal_prefs_full = pd.read_csv("FormalPrefs_Deakin.csv")
-    formal_prefs = formal_prefs_full.iloc[:, 6:]
-
-
-
-    formal_prefs.columns = formal_prefs.columns.str.split(':').str[0] # keep only party grouping as key
-    #formal_prefs = formal_prefs.where(formal_prefs.notna(), pd.NA).astype('Int64') # convert type from floats to ints
-    start_of_BTL_index = next(i for i, col in enumerate(formal_prefs.columns) if formal_prefs.columns[:i].tolist().count(col) == 1) # locates first instance of column name count repeated
-
-
-    group_party_names = formal_prefs_full.iloc[:, 6:].columns[:start_of_BTL_index] # include both group and party names
-    party_names_list = group_party_names.str.split(':').str[-1].tolist()
-
-    general_party_df = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", skiprows = 1)
-    general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',] = 'GRN' # handle exceptions, but think GVIC is the only one
-
-
-    party_abvs_list = []
-    for party in party_names_list:
-        #print(party)
-        if party:
-            if party == "Liberal/The Nationals": # handle LIB/NAT Exception - I think best to treat them as one party in the Senate as they always contest together, and then reverse engineer House split if needed
-                party_abvs_list.append('COAL')
-            elif party == " Science, Pirate, Secular, Climate Emergency": # SOPA exception
-                party_abvs_list.append('SOPA')
-            else:
-                party_abvs_list.append(general_party_df.loc[(general_party_df["PartyNm"] == party) | (general_party_df["RegisteredPartyAb"] == party),"PartyAb"].iloc[0])
-        else:
-            party_abvs_list.append('')
-
-    allocation_abvs_list = ['COAL','ALP','GRN']
-    allocation_set = []
-
-    for i, party in enumerate(party_abvs_list):
-        if party in allocation_abvs_list:
-            allocation_set.append(formal_prefs.columns[:start_of_BTL_index][i]) # add corresponding group 'letter' to allocation_set
-
-
-    print(party_abvs_list)
-    print(party_names_list)
-    print(allocation_set)
-
-    import pdb;pdb.set_trace()
-            
-
-
-    #print(start_of_BTL_index)
-    #print(formal_prefs.iloc[:, start_of_BTL_index])
-
-
-    first_prefs_set = formal_prefs.columns.unique().tolist()
-
-    allocation_set = ["D","H","I","K","L","N","P","U","W"]
-
-
-
-
-
-    def find_earliest_preference_id(preferences):
-        
-        # Former method - too long calculating duplicates!
-        # Find the candidate with the lowest preference number in each row of df preferences 
-        #votes = preferences.idxmin(axis=1, skipna=True)
-        #votes[preferences.isna().all(axis=1)] = np.nan
-        # is_earliest_non_unique = preferences.apply(lambda row: row[row == row.min()].count() > 1, axis=1)
-        # series of either None if earliest preferences is unique, or list of non-unique candidates
-        #non_unique_min_cands = preferences.apply(lambda row: list(row[row == row.min()].index) if row[row == row.min()].count() > 1 else None, axis=1)
-
-        #votes[non_unique_min_cands.notnull()] = np.nan # set non-unique cands to nan for now
-        #print(votes[non_unique_min_cands.notnull()])
-
-
-        if 1 == "allocation":
-            # alternative that counts all cols if duplicated, returns vote candidate(s) as list
-            min_values = preferences.min(axis=1)
-            mask = preferences.eq(min_values, axis=0)
-            earliest_cands = mask.apply(lambda row: row.index[row].tolist(), axis=1) # creates list of 1 or more candidates
-
-            non_unique_min_cands = earliest_cands.apply(lambda x: x if len(x)>=2 else np.nan)
-
-            # set non-decided values to nan
-            earliest_cands[earliest_cands.apply(len)==0] = np.nan
-            earliest_cands[non_unique_min_cands.notnull()] = np.nan
-
-        # alternative to alternative: get indices where there may be duplication
-
-        votes = preferences.idxmin(axis=1, skipna=True) # min in row
-        votes[preferences.isna().all(axis=1)] = np.nan # no prefs in row
-
-        min_values = preferences.min(axis=1)
-        mask = preferences.eq(min_values, axis=0)
-        multiple_min_mask = mask.sum(axis=1) > 1 # series with True when there are multiple minimum preferences - set as nan and deal with later
-
-        votes[multiple_min_mask] = np.nan
-
-        return votes, multiple_min_mask   # Return NaN in votes if no preference for the candidate set
-
-
-    #formal_prefs_combined = pd.concat([formal_prefs.iloc[:,:start_of_BTL_index], combine_BTL_preferences(formal_prefs, start_of_BTL_index)], axis=1)
-    #print(formal_prefs_combined)
-
-
-
-    allocation_set = ["D","H","I","K","L","N","P","U","W"]
-
-    def allocate_votes(df, allocation_set, allocation_type): 
-        ### allocates vote following algorithm: First, ATL decides. If ATL not decisive, record any duplicates, try BTL. 
-
-
-        start_of_BTL_index = next(i for i, col in enumerate(df.columns) if df.columns[:i].tolist().count(col) == 1) # locates first instance of column name count repeated
-        ATL = df.iloc[:,:start_of_BTL_index]
-        BTL = df.iloc[:,start_of_BTL_index:]
-        allocated_votes = pd.DataFrame(index=df.index, columns=['Vote'])
-
-
-        # ATL preferences
-        allocation_set_UG = [col for col in allocation_set if col != 'UG'] # remove UG from ATL preferences if exists - only useful for First_Preferences
-        ATL_preferences = ATL[allocation_set_UG]     # Filter the row to only include the candidates of interest
-        allocated_votes.loc[:,'Vote'], ATL_non_unique_min = find_earliest_preference_id(ATL_preferences)
-
-        # If no vote is allocated using ATL ('Vote' is nan), use BTL
-        BTL_allocations, BTL_non_unique_min = find_earliest_preference_id(BTL[allocation_set]) # selects lowest preference of combined BTL groups
-        allocated_votes.loc[:,'Vote'] = allocated_votes.loc[:,'Vote'].fillna(BTL_allocations) 
-
-        ## BTL_non_unique_min should be unnecessary as vote MUST be Formal
-        
-        if allocation_type == "allocation": # if actually performing allocation, handle duplicates by adding index to list
-            ATL_duplicates_series = allocated_votes.loc[:,'Vote'].isna() & ATL_non_unique_min
-            BTL_duplicates_series = allocated_votes.loc[:,'Vote'].isna() & ~ATL_duplicates_series & BTL_non_unique_min # duplicate but not in ATL
-
-            # collect indices 
-            duplicates = ATL_duplicates_series+BTL_duplicates_series
-            duplicate_indices = duplicates.loc[duplicates].index # return indices where duplicates == True
-
-            #import pdb;pdb.set_trace()
-            
-            # ATL is duplicate, but BTL not decisive - is this even formal (maybe, if duplicate is 13th on BTL). Set vote to ATL_non_unique_min
-            #ATL_duplicates_series = allocated_votes.loc[:,'Vote'].isna() & ATL_non_unique_min.notnull() # not yet allocated, but duplicate ATL
-            #allocated_votes.loc[:,'Vote'] = allocated_votes.loc[:,'Vote'].fillna(ATL_non_unique_min[ATL_duplicates_series])
-
-            # Only BTL duplicates, set vote to BTL_non_unique_min_cands
-            #BTL_duplicates_series = allocated_votes.loc[:,'Vote'].isna() & BTL_non_unique_min.notnull() # not yet allocated, but duplicate BTL
-            #allocated_votes.loc[:,'Vote'] = allocated_votes.loc[:,'Vote'].fillna(BTL_non_unique_min[BTL_duplicates_series])
-        else:
-            duplicate_indices = [] # no duplicated 1st prefs
-
-        return allocated_votes, duplicate_indices # duplicate_indices are index object! 
-
-    def allocate_votes_duplicates(df, allocation_set):
-        
-        start_of_BTL_index = next(i for i, col in enumerate(df.columns) if df.columns[:i].tolist().count(col) == 1) # locates first instance of column name count repeated
-        ATL_dup = df.iloc[:,:start_of_BTL_index]
-        BTL_dup = df.iloc[:,start_of_BTL_index:]
-
-        # ATL preferences
-        ATL_dup_preferences = ATL_dup[allocation_set]     # Filter the row to only include the candidates of interest
-        duplicate_votes_series = ATL_dup_preferences.apply(lambda row: list(row[row == row.min()].index), axis = 1)
-
-        # If no vote is allocated using ATL ('Vote' is nan), use BTL
-        BTL_dup_preferences = BTL_dup[allocation_set].apply(lambda row: list(row[row == row.min()].index), axis = 1) # selects lowest preferences of combined BTL groups
-        
-        #empty_mask = duplicate_votes_series.apply(lambda x: len(x) == 0)  #Find empty lists, replace them with BTL_dup_preferences (effectively using a mask)
-        #duplicate_votes_series.loc[empty_mask] = BTL_dup_preferences[empty_mask].values
-        duplicate_votes_series.loc[duplicate_votes_series.apply(lambda x: len(x) == 0)] = BTL_dup_preferences
-
-        return duplicate_votes_series
-
-
-    def allocate_formal_preferences_to_allocation_set(formal_prefs, allocation_set):
-
-        # still yet to figure out how to go between candidates and groups in allocation set!!!!!!!!!!!!!!!!!!!!!!!!!
-
-
-        Final_allocated_votes = pd.DataFrame(index=formal_prefs.index, columns=allocation_set, data = 0) # df of allocated votes for each candidate
-
-        # fix BTL into single group
-        start_of_BTL_index = next(i for i, col in enumerate(formal_prefs.columns) if formal_prefs.columns[:i].tolist().count(col) == 1) # locates first instance of column name count repeated
-        ATL = formal_prefs.iloc[:,:start_of_BTL_index]
-        BTL = formal_prefs.iloc[:,start_of_BTL_index:]
-        #BTL_voted = BTL.loc[BTL.sum(axis=1) > 0].groupby(BTL.columns, axis=1).min() # try only for potential BTL votes, but seems quick enough as is
-        BTL = BTL.groupby(BTL.columns, axis=1).min()
-
-        formal_prefs_by_group = pd.concat([ATL, BTL], axis=1)
-
-
-        # allocate first preferences using formal_prefs
-        first_pref_allocated_votes, redundant = allocate_votes(formal_prefs_by_group, first_prefs_set, "First_Preferences")
-        formal_prefs_allocated_first_prefs = pd.concat([formal_prefs_by_group, first_pref_allocated_votes], axis=1) # add allocated first_pref vote to formal_prefs_by_group df
-        Final_allocated_votes["First_Preferences"] = first_pref_allocated_votes
-
-
-        # building groups based on first preference vote, either allocate vote directly to allocation_set if one of them, else allocate by group among later preferences
-
-        for party, formal_subsection in formal_prefs_allocated_first_prefs.groupby("Vote"):
-            
-            if party in allocation_set:
-                Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party, party] = 1 # put in a 1 into the party column while preserving index
-
-            else:
-                allocated_votes_subsection, duplicate_indices_subsection = allocate_votes(formal_subsection, allocation_set, "allocation")
-                Subsection_final_votes = Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party] # just working with this subsection
-
-                # Add allocation preferences where clear
-                mask = pd.get_dummies(allocated_votes_subsection.loc[allocated_votes_subsection["Vote"].notna(), "Vote"])
-                mask = mask.reindex(Subsection_final_votes.index, fill_value=0)     # Align the mask with the indices of Subsection_final_votes
-                Subsection_final_votes.loc[:, mask.columns] = mask         # Update Subsection_final_votes with the mask
-
-                # Add clear allocation preferences
-                #Final_allocated_votes.loc[(Final_allocated_votes["First_Preferences"] == party) & (allocated_votes_subsection["Vote"].notna()), allocated_votes_subsection["Vote"]] = 1 # add decided votes - ------- make sure only if not na
-
-                # Add duplicate preferences 
-                duplicate_for_party_df = formal_subsection[formal_subsection.index.isin(duplicate_indices_subsection)].copy()
-
-                # iteratively add duplicate votes proportionate to # of cnadidates duplicated
-                duplicate_for_party_df["Vote"] = allocate_votes_duplicates(duplicate_for_party_df, allocation_set) # get series of candidates for each duplicate votes
-                for row in duplicate_for_party_df.index:
-                    duplicate_vote_list = duplicate_for_party_df.loc[duplicate_for_party_df.index == row,"Vote"].iloc[0] # iloc makes it a list
-                    for vote in duplicate_vote_list:
-                        Subsection_final_votes.loc[Subsection_final_votes.index==row, vote] = 1/len(duplicate_vote_list)
-                
-
-
-                Subsection_final_votes = Subsection_final_votes.drop(columns=['First_Preferences'])
-                Party_preferences_proportions = Subsection_final_votes.sum() / np.sum(Subsection_final_votes.sum()) # row of proportions
-                mask = allocated_votes_subsection["Vote"].isna() & ~allocated_votes_subsection.index.isin(duplicate_indices_subsection)
-                Subsection_final_votes.loc[mask] = [Party_preferences_proportions.values] * mask.sum()
-                #Subsection_final_votes.loc[allocated_votes_subsection["Vote"].isna() & ~allocated_votes_subsection.index.isin(duplicate_indices_subsection), ] = Party_preferences_proportions # if nan but not duplicate
-
-
-
-                Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party,Final_allocated_votes.columns[:-1]] = Subsection_final_votes # fill out full table
-
-
-        return Final_allocated_votes.drop(columns = "First_Preferences")
-
-
-
-    Deakin_senate_df = allocate_formal_preferences_to_allocation_set(formal_prefs, allocation_set) # done!
-
-    print(time.time() - start, "seconds")
-    import pdb;pdb.set_trace()
-
-    return Deakin_senate_df
-
-
-
-
-
-
-
-
-
-
-
 def abbreviate_party_names(party_names_list, general_party_df):
     # handle exceptions to party names
     party_abvs_list = []
@@ -384,8 +126,6 @@ def get_Senate_party_abvs_dict():
 #get_Senate_party_abvs_dict()
 
 
-import polars as pl
-
 
 Formal_prefs_dict = {}
 states = ['NSW']
@@ -394,15 +134,69 @@ for state in states: # currently only 2016 onwards
     print(state)
     filename = f"{data_year}FormalPrefs{state}.csv"
 
-    df = pl.read_csv(filename, schema_overrides={"int_column": pl.Int32, "float_column": pl.Float32}, n_rows = 4_695_325)
-    df = df.rename({"Division": "div_nm"})
-    print("done", time.time() - start)
-    import pdb;pdb.set_trace()
-    curr_Formal_prefs = df.to_pandas()
-    print("done", time.time() - start)
+    if (state == 'NSW') & (data_year == '2019'):
+
+        df_columns = pd.read_csv(filename, index_col=None, nrows=1).columns
+        # fix malformed file using readlines:
+        expected_columns = len(df_columns)  # You can adjust this number to match your actual expected columns
+        batch_size = 1_000_000  # Process 1 million rows at a time
+        dataframes = []  # Store DataFrames in a lis
+
+        # Read the CSV file line by line
+        with open(filename, 'r') as file:
+            
+            batch = []
+            row_count = 0  # Keep track of rows read
+
+            for i, line in enumerate(file, start = -1):
+                if i == -1:
+                    continue  # Skip the first row
+
+                row = line.strip().split(',') # Split the line by commas
+
+                # Fix malformed rows by padding or truncating
+                if len(row) < expected_columns:
+                    row.extend([np.nan] * (expected_columns - len(row)))
+                elif len(row) > expected_columns:
+                    import pdb;pdb.set_trace()
+
+                    print("AHHHHHHHHHHHH")
+                    row = row[:expected_columns]
+                
+                batch.append(row)
+                row_count += 1
+
+                # Process and store each batch
+                if row_count % batch_size == 0:
+                    print(f"Processing batch {len(dataframes) + 1}, rows read: {row_count}")  # Debugging
+                    df_batch = pd.DataFrame(batch, columns=df_columns)
+                    dataframes.append(df_batch)
+                    batch = []  # Reset batch, clears memory
+                    print("done", time.time() - start)
+
+            # Process any remaining rows
+            if batch:
+                print(f"Processing final batch, rows read: {row_count}")  # Debugging
+                df_batch = pd.DataFrame(batch, columns=df_columns)
+                dataframes.append(df_batch)
+                print("done", time.time() - start)
+
+        # Combine all batches into a final DataFrame
+        if dataframes:
+            curr_Formal_prefs = pd.concat(dataframes, ignore_index=True)
+            print("Final DataFrame shape:", curr_Formal_prefs.shape)
+        else:
+            print("No data was read from the file.")
+        #curr_Formal_prefs = pd.concat(dataframes, ignore_index=True)
+
+    else:
+        curr_Formal_prefs = pd.read_csv(filename, index_col=None)
+
+    
+    curr_Formal_prefs.rename(columns={"Division": "div_nm"}, inplace=True)
     import pdb;pdb.set_trace()
 
-    #curr_Formal_prefs = pd.read_csv(filename, index_col=None).rename(columns={"Division": "div_nm"})
+    print("done", time.time() - start)
 
     # Not enough memory --> downcast floats to lower order for numeric columns
     state_div_Formal_prefs_dict = {div: group.reset_index(drop=True).apply(
@@ -438,8 +232,10 @@ def find_earliest_preference_id(preferences):
     # get indices where there may be duplication, store in multiple_min_mask
     # input: df with unique alphabetical column names and integer or nan values
 
-    votes = preferences.idxmin(axis=1, skipna=True) # min in row
-    votes[preferences.isna().all(axis=1)] = np.nan # no prefs in row
+    #votes = preferences.idxmin(axis=1, skipna=True)
+    #votes[preferences.isna().all(axis=1)] = np.nan 
+    votes = preferences.fillna(float("inf")).idxmin(axis=1) # min in row, avoids warning
+    votes = votes.where(preferences.notna().any(axis=1), other=pd.NA) # no prefs in row
 
     min_values = preferences.min(axis=1)
     mask = preferences.eq(min_values, axis=0)
@@ -545,11 +341,11 @@ def allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_
 
 
         first_prefs_set = formal_prefs.columns.unique().tolist() # all cols including 'UG'
-
         # fix BTL into single group and concatenate
         ATL = formal_prefs.iloc[:,:start_of_BTL_index]
         BTL = formal_prefs.iloc[:,start_of_BTL_index:]
-        BTL = BTL.groupby(BTL.columns, axis=1).min()
+        BTL = BTL.apply(pd.to_numeric)
+        BTL = BTL.T.groupby(BTL.columns).min().T
         formal_prefs_by_group = pd.concat([ATL, BTL], axis=1)
 
         # allocate first preferences using formal_prefs
@@ -586,7 +382,7 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
     for party, formal_subsection in formal_prefs_div.iloc[:,2:].groupby("Vote"): # ignore first 2 rows in calculation (div/pp)
         
         if party in allocation_set:
-            Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party, party] = 1 # put in a 1 into the party column while preserving index
+            Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party, party] = 1.0 # put in a 1 into the party column while preserving index
 
         else:
             allocated_votes_subsection, duplicate_indices_subsection = allocate_votes(formal_subsection, allocation_set)
@@ -595,7 +391,7 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
             # Add allocation preferences where clear
             mask = pd.get_dummies(allocated_votes_subsection.loc[allocated_votes_subsection["Vote"].notna(), "Vote"])
             mask = mask.reindex(Subsection_final_votes.index, fill_value=0)     # Align the mask with the indices of Subsection_final_votes
-            Subsection_final_votes.loc[:, mask.columns] = mask         # Update Subsection_final_votes with the mask
+            Subsection_final_votes.loc[:, mask.columns] = mask.astype(float)         # Update Subsection_final_votes with the mask
 
             # Add duplicate preferences 
             duplicate_for_party_df = formal_subsection[formal_subsection.index.isin(duplicate_indices_subsection)].copy()
@@ -603,6 +399,9 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
             # iteratively add duplicate votes proportionate to # of cnadidates duplicated
             duplicate_for_party_df["Vote"] = allocate_votes_duplicates(duplicate_for_party_df, allocation_set) # get series of candidates for each duplicate votes
             
+            Subsection_final_votes.iloc[:, :-1] = Subsection_final_votes.iloc[:, :-1].apply(pd.to_numeric)
+            Subsection_final_votes.iloc[:,:-1] = Subsection_final_votes.iloc[:,:-1].astype(float)
+
             for row in duplicate_for_party_df.index:
                 duplicate_vote_list = duplicate_for_party_df.loc[duplicate_for_party_df.index == row,"Vote"].iloc[0] # iloc makes it a list
                 for vote in duplicate_vote_list:
@@ -613,9 +412,8 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
             Subsection_final_votes = Subsection_final_votes.drop(columns=['First_Preferences'])
             Party_preferences_proportions = Subsection_final_votes.sum() / np.sum(Subsection_final_votes.sum()) # row of proportions
             mask = allocated_votes_subsection["Vote"].isna() & ~allocated_votes_subsection.index.isin(duplicate_indices_subsection)
-            #import pdb;pdb.set_trace()
-            Subsection_final_votes.loc[mask] = pd.DataFrame([Party_preferences_proportions.values] * sum(mask)) # changed from mask.sum()
-
+            Subsection_final_votes.loc[mask] = pd.DataFrame([Party_preferences_proportions.values] * sum(mask), index=Subsection_final_votes.index[mask], columns=Subsection_final_votes.columns) # changed from mask.sum()
+            import pdb;pdb.set_trace()
             Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party,Final_allocated_votes.columns[:-1]] = Subsection_final_votes # fill out full table
 
 
@@ -627,6 +425,7 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
     Final_allocated_votes_aggregated_df = Final_allocated_votes_df.groupby(["div_nm", "Vote Collection Point Name"], as_index=False).sum()
     #Final_allocated_votes_aggregated_df = Final_allocated_votes_df.drop(columns = ["Vote Collection Point Name"]).groupby(["div_nm"], as_index=False).sum()
 
+    # GROUP THE STARTSWITH ABSENT,PREPOLL,POSTAL,PROVISIONAL,EAV,REMOTEMT,SPECIALMT,OTHERMT TOGETHER WITH PP_ID 0, THE REST MERGE WITH PP_IDS
     import pdb;pdb.set_trace()
 
     return Final_allocated_votes_aggregated_df
@@ -656,9 +455,56 @@ def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, app
 
         # allocate to allocation_set and convert to percentages
         Final_allocated_pcts_aggregated_dict[div] = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[div], allocation_set)
-        Final_allocated_pcts_aggregated_dict[div].iloc[:,1:] = Final_allocated_pcts_aggregated_dict[div].iloc[:,1:]/Final_allocated_pcts_aggregated_dict[div].drop(columns=['div_nm']).sum(axis=1).iloc[0]  
+        Final_allocated_pcts_aggregated_dict[div].iloc[:, 2:] = Final_allocated_pcts_aggregated_dict[div].iloc[:, 2:].div(Final_allocated_pcts_aggregated_dict[div].drop(columns=['div_nm','Vote Collection Point Name']).sum(axis=1), axis=0)
 
     return Final_allocated_pcts_aggregated_dict
+
+
+def convert_partyab_to_senate_group_names(allocation_abvs_list, Formal_prefs_dict, Senate_party_abvs_dict, div):
+    ### convert allocation_abvs into Senate Group letters
+    allocation_set = []
+    # Goal is to preserve order of allocation_abvs_list in allocation_set
+    for party in allocation_abvs_list:  # Iterate through allocation_abvs_list directly
+        if party in Senate_party_abvs_dict[div]: 
+            i = Senate_party_abvs_dict[div].index(party) # Find the index of the party in this div and use it to get the corresponding Senate Group name
+            allocation_set.append(Formal_prefs_dict[div].columns[2:len(Senate_party_abvs_dict[div])+2][i])  # Append the corresponding group 'letter'
+    return allocation_set
+    
+
+def allocate_Formal_prefs_Redistribution_change(Formal_prefs_dict, Senate_party_abvs_dict, Redistribution_pair_c1_c2_lists):
+    #### want to produce a df that 
+
+    Final_allocated_pcts_aggregated_dict = {}
+
+    div_pair_keys = list(df.iloc[:, :2].itertuples(index=False, name=None))
+
+    for index, row in Redistribution_pair_c1_c2_lists.iterrows(): # only apply to relevant division pairs
+
+        c1_m_c2_dict = {}
+
+        for idx, (col_name, value) in enumerate(row.iloc[2:].items()):
+            allocation_abvs_list = row[col_name] # list of PartyAb to allocate to
+            div = row[0]
+
+            if idx>1 and value == row.iloc[idx-1]: # c1 or c2 is same as m --> don't need to repeat
+                c1_m_c2_dict[col_name] = df
+            else:
+                allocation_set = convert_partyab_to_senate_group_names(allocation_abvs_list, Formal_prefs_dict, Senate_party_abvs_dict)
+
+                # allocate to allocation_set and convert to percentages - BE CAREFUL TO DO IT PER ROW AND NOT TOTALLY
+                Final_allocated_pcts_aggregated_dict[div] = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[div], allocation_set)
+                df = Final_allocated_pcts_aggregated_dict[div]
+                df.iloc[:, 2:] = df.iloc[:, 2:].div(df.drop(columns=['div_nm','Vote Collection Point Name']).sum(axis=1), axis=0)
+                c1_m_c2_dict[col_name] = df
+
+        # do all the fancy calculations now
+        c1_m_c2_dict['transfer_pcts'] = 1111111111
+
+        # 1. Combine all state division DOPByPP together for each redistribution state
+        # 2. Select wide format percentages corresponding to c1 candidates
+        # 3. c1-> m transition
+
+    return df
 
 
 
@@ -677,34 +523,36 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
     #application_dict['Bass'] = ['JLN','GRN','LP','ON','ALP']
     #application_dict['Franklin'] = ['TLOC','ALP','JLN','LP','GRN']
 
+    Incumbent_advantage = 1
+    Candidate_change_redistribution = 0
 
-    Final_x_House_df = pd.read_csv(f"{data_year}Final_x_for_Incumbency.csv")
-    #Final_x_House_df = Final_x_House_df.loc[Final_x_House_df['div_nm'].isin(list(Formal_prefs_dict.keys())),] # extra for testing!
-    Final_x_House_dict = {name: list(Final_x_House_df.loc[Final_x_House_df['div_nm'] == name, 'PartyAb']) for name in Final_x_House_df['div_nm'].unique()}
-
-
-    application_dict = Final_x_House_dict
-
-    Final_allocated_pcts_aggregated_dict = allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, application_dict)
-
-    import pdb;pdb.set_trace()
+    if Incumbent_advantage:
+        Final_x_House_df = pd.read_csv(f"{data_year}Final_x_for_Incumbency.csv")
+        #Final_x_House_df = Final_x_House_df.loc[Final_x_House_df['div_nm'].isin(list(Formal_prefs_dict.keys())),] # extra for testing!
+        Final_x_House_dict = {name: list(Final_x_House_df.loc[Final_x_House_df['div_nm'] == name, 'PartyAb']) for name in Final_x_House_df['div_nm'].unique()}
 
 
-    Final_allocated_pcts_aggregated_dict = whole_procedure(Formal_prefs_dict,general_party_df)
+        application_dict = Final_x_House_dict
 
-    Senate_votes = pd.concat([df.melt(id_vars=["div_nm"], value_vars=df.columns[1:], var_name="PartyAb", value_name="Senate_Pct") for df in Final_allocated_pcts_aggregated_dict.values()], ignore_index=True).reset_index(drop=True)
-    print(Senate_votes)
-    import pdb;pdb.set_trace()
-    Final_x_HS_df = pd.concat([Final_x_House_df, Senate_votes.drop(columns=['div_nm', 'PartyAb'])], axis=1)[["div_nm","PartyAb","is_incumbent","is_historic_incumbent","House_Pct","Senate_Pct"]]
-    Final_x_HS_df.loc[:,"Senate_Pct"] = (pd.to_numeric(Final_x_HS_df.loc[:, "Senate_Pct"].astype(str), errors="coerce") * 100).round(2) # fixes issues with string values somehow????
+        Final_allocated_pcts_aggregated_dict = allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, application_dict)
+
+        import pdb;pdb.set_trace()
+
+        Senate_votes = pd.concat([df.melt(id_vars=["div_nm"], value_vars=df.columns[1:], var_name="PartyAb", value_name="Senate_Pct") for df in Final_allocated_pcts_aggregated_dict.values()], ignore_index=True).reset_index(drop=True)
+        print(Senate_votes)
+        import pdb;pdb.set_trace()
+        Final_x_HS_df = pd.concat([Final_x_House_df, Senate_votes.drop(columns=['div_nm', 'PartyAb'])], axis=1)[["div_nm","PartyAb","is_incumbent","is_historic_incumbent","House_Pct","Senate_Pct"]]
+        Final_x_HS_df.loc[:,"Senate_Pct"] = (pd.to_numeric(Final_x_HS_df.loc[:, "Senate_Pct"].astype(str), errors="coerce") * 100).round(2) # fixes issues with string values somehow????
 
 
-    Final_x_HS_df.to_csv(f"{data_year}Final_x_HS_df.csv", index=False)
+        #Final_x_HS_df.to_csv(f"{data_year}Final_x_HS_df.csv", index=False)
+    if candidate_change_redistribution:
+        Redistribution_pair_c1_c2_lists = pd.read_csv("Redistribution_pair_c1_c2_lists2024.csv", index_col = None)
 
     return Final_allocated_pcts_aggregated_dict, Final_x_HS_df
 
 
-#Final_allocated_pcts_aggregated_dict, Final_x_HS_df = whole_procedure(Formal_prefs_dict,general_party_df)
+Final_allocated_pcts_aggregated_dict, Final_x_HS_df = whole_procedure(Formal_prefs_dict,general_party_df)
 
 
 
