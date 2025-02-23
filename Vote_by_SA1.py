@@ -18,11 +18,12 @@ start = time.time()
 
 SA1_By_PP_Complete = pd.read_csv("SA1_By_PP_Complete.csv", index_col=None)
 
-
-VIC_SA1s_Redistribution_full = pd.read_csv("Vic-2024-electoral-divisions-SA1-and-SA2.csv", index_col=None)
-#print(VIC_SA1s_Redistribution_full)
-VIC_SA1s_Redistribution_full = VIC_SA1s_Redistribution_full.rename(columns={'SA1_Code_2021': 'SA1_CODE16',"New Electoral Division": 'new_div', "Old Electoral Division": 'old_div', "Actual Enrolment": 'curr_enrol',"Projected Enrolment": 'proj_enrol'})
-VIC_SA1s_Redistribution = VIC_SA1s_Redistribution_full[["SA1_CODE16","new_div","old_div",'curr_enrol','proj_enrol']]
+redistribution_states = ["VIC","NSW","WA","NT"]
+for state in redistribution_states:
+    curr_SA1s_Redistribution_full = pd.read_csv("Redistribution2024VIC-by-SA2-and-SA1.csv", index_col=None)
+    #print(VIC_SA1s_Redistribution_full)
+    curr_SA1s_Redistribution_full = curr_SA1s_Redistribution_full.rename(columns={'SA1_Code_2021': 'SA1_CODE16',"New Electoral Division": 'new_div', "Old Electoral Division": 'old_div', "Actual Enrolment": 'curr_enrol',"Projected Enrolment": 'proj_enrol'})
+    curr_SA1s_Redistribution = curr_SA1s_Redistribution_full[["SA1_CODE16","new_div","old_div",'curr_enrol','proj_enrol']]
 
 #print(VIC_SA1s_Redistribution)
 # artificially remove As/Bs - will need systematic approach! - using rstrip # manually checked to be well behaved!
