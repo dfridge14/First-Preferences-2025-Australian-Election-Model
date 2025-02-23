@@ -6,6 +6,9 @@ import pandas as pd
 
 import numpy as np
 import os,time
+import ast
+
+import gc
 
 
 #if __name__ == '__main__':
@@ -18,7 +21,7 @@ os.chdir('C:\\Dania\\2024\\Australian Election')
 start = time.time()
 
 
-data_year = '2019'
+data_year = '2022'
 
 
 
@@ -125,12 +128,21 @@ def get_Senate_party_abvs_dict():
 
 #get_Senate_party_abvs_dict()
 
+def optimize_dataframe(df):
+    # Convert all remaining numeric columns to smallest possible int type
+    df.iloc[:, 3:] = df.iloc[:, 3:].apply(pd.to_numeric, downcast='integer')
+
+    return df
 
 
 Formal_prefs_dict = {}
-states = ['NSW']
-#states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
+#states = ['NSW']
+states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
 for state in states: # currently only 2016 onwards
+
+    gc.collect()
+
+
     print(state)
     filename = f"{data_year}FormalPrefs{state}.csv"
 
@@ -190,24 +202,30 @@ for state in states: # currently only 2016 onwards
         #curr_Formal_prefs = pd.concat(dataframes, ignore_index=True)
 
     else:
-        curr_Formal_prefs = pd.read_csv(filename, index_col=None)
+        # low memory try
+        columns = pd.read_csv(filename, nrows=1).columns
+        dtype_dict = {col: 'str' for col in columns[:3]}
+        for col in columns[3:]:
+            dtype_dict[col] = 'float32'
+
+        curr_Formal_prefs = pd.read_csv(filename, index_col=None, na_values=["NaN", "nan"], dtype=dtype_dict)
 
     
-    curr_Formal_prefs.rename(columns={"Division": "div_nm"}, inplace=True)
-    import pdb;pdb.set_trace()
-
-    print("done", time.time() - start)
+    curr_Formal_prefs.rename(columns={"Division": "div_nm", "Vote Collection Point Name": "pp_nm"}, inplace=True)
 
     # Not enough memory --> downcast floats to lower order for numeric columns
-    state_div_Formal_prefs_dict = {div: group.reset_index(drop=True).apply(
-        lambda col: pd.to_numeric(col, downcast='float') if pd.api.types.is_numeric_dtype(col) else col
-    ) for div, group in curr_Formal_prefs.groupby("div_nm")} 
+    state_div_Formal_prefs_dict = {
+        div: group.reset_index(drop=True)  # optimize_dataframe(group.reset_index(drop=True)
+        for div, group in curr_Formal_prefs.groupby("div_nm")
+    } 
     for key, group in state_div_Formal_prefs_dict.items():
         Formal_prefs_dict[key] = group # assumes no keys (divs) overlap for different states :)
 
+    curr_Formal_prefs = {}
+
     print("done", time.time() - start)
 
-import pdb;pdb.set_trace()
+#import pdb;pdb.set_trace()
 
 # TO DO:
 # 1. Fix up indexing so each element of dict starts with 0                          DONE
@@ -369,6 +387,8 @@ list4 = []
 
 
 
+First_Prefs_by_PP_Complete = pd.read_csv("2022FirstPrefsByPPComplete.csv", index_col = None)
+Booth_name_pp_id = First_Prefs_by_PP_Complete.iloc[:,:3].drop_duplicates()
 
 
 
@@ -413,7 +433,7 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
             Party_preferences_proportions = Subsection_final_votes.sum() / np.sum(Subsection_final_votes.sum()) # row of proportions
             mask = allocated_votes_subsection["Vote"].isna() & ~allocated_votes_subsection.index.isin(duplicate_indices_subsection)
             Subsection_final_votes.loc[mask] = pd.DataFrame([Party_preferences_proportions.values] * sum(mask), index=Subsection_final_votes.index[mask], columns=Subsection_final_votes.columns) # changed from mask.sum()
-            import pdb;pdb.set_trace()
+
             Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party,Final_allocated_votes.columns[:-1]] = Subsection_final_votes # fill out full table
 
 
@@ -422,11 +442,24 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
 
 
     # This is where to return in the pp_id column 
-    Final_allocated_votes_aggregated_df = Final_allocated_votes_df.groupby(["div_nm", "Vote Collection Point Name"], as_index=False).sum()
-    #Final_allocated_votes_aggregated_df = Final_allocated_votes_df.drop(columns = ["Vote Collection Point Name"]).groupby(["div_nm"], as_index=False).sum()
+    Final_allocated_votes_aggregated_df = Final_allocated_votes_df.groupby(["div_nm", "pp_nm"], as_index=False).sum()
+    #Final_allocated_votes_aggregated_df = Final_allocated_votes_df.drop(columns = ["pp_nm"]).groupby(["div_nm"], as_index=False).sum()
 
     # GROUP THE STARTSWITH ABSENT,PREPOLL,POSTAL,PROVISIONAL,EAV,REMOTEMT,SPECIALMT,OTHERMT TOGETHER WITH PP_ID 0, THE REST MERGE WITH PP_IDS
+    Other_booth_type_prefixes = ['Remote Mobile', 'Other Mobile','Special Hospital','EAV','ABSENT','PROVISIONAL','PRE_POLL','POSTAL']
+    Final_allocated_votes_aggregated_df.loc[:,"pp_nm"] = Final_allocated_votes_aggregated_df.loc[:,"pp_nm"].apply(lambda x: 'Other' if any(x.startswith(prefix) for prefix in Other_booth_type_prefixes) else x)
+    Final_allocated_votes_aggregated_df = Final_allocated_votes_aggregated_df.groupby(["div_nm", "pp_nm"], as_index=False).sum() # group again
+
+    #Booth_name_pp_id_div = Booth_name_pp_id.loc[Booth_name_pp_id["div_nm"] == div, ]
+
+    # switch pp_nm to pp_id
+    Final_allocated_votes_aggregated_df = pd.merge(Final_allocated_votes_aggregated_df, Booth_name_pp_id, on = ['div_nm','pp_nm'], how='left')
+    Final_allocated_votes_aggregated_df.loc[:,'pp_nm'] = Final_allocated_votes_aggregated_df.loc[:,'pp_id']
     import pdb;pdb.set_trace()
+
+    Final_allocated_votes_aggregated_df.drop(columns=['pp_id'], inplace=True)
+    Final_allocated_votes_aggregated_df.rename(columns={"pp_nm":"pp_id"}, inplace=True)
+
 
     return Final_allocated_votes_aggregated_df
 
@@ -455,9 +488,33 @@ def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, app
 
         # allocate to allocation_set and convert to percentages
         Final_allocated_pcts_aggregated_dict[div] = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[div], allocation_set)
-        Final_allocated_pcts_aggregated_dict[div].iloc[:, 2:] = Final_allocated_pcts_aggregated_dict[div].iloc[:, 2:].div(Final_allocated_pcts_aggregated_dict[div].drop(columns=['div_nm','Vote Collection Point Name']).sum(axis=1), axis=0)
+        Final_allocated_pcts_aggregated_dict[div].iloc[:, 2:] = Final_allocated_pcts_aggregated_dict[div].iloc[:, 2:].div(Final_allocated_pcts_aggregated_dict[div].drop(columns=['div_nm','pp_nm']).sum(axis=1), axis=0)
 
     return Final_allocated_pcts_aggregated_dict
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+DOP_By_PP_2022 = pd.read_csv("2022DOP_By_PP_full.csv", index_col=None)
+
+######## TO DO: Bring in Candidate_Pairs into here, adjusted for DOP_By_PP
+### Change order within DOP_By_PP to match rather arbitrary m-c1-c2 ordering (consistency)
+### Apply the function to existing counts, returning final counts!
+
 
 
 def convert_partyab_to_senate_group_names(allocation_abvs_list, Formal_prefs_dict, Senate_party_abvs_dict, div):
@@ -476,29 +533,64 @@ def allocate_Formal_prefs_Redistribution_change(Formal_prefs_dict, Senate_party_
 
     Final_allocated_pcts_aggregated_dict = {}
 
-    div_pair_keys = list(df.iloc[:, :2].itertuples(index=False, name=None))
+    div_pair_keys = list(Redistribution_pair_c1_c2_lists.iloc[:, :2].itertuples(index=False, name=None))
+    import pdb;pdb.set_trace()
+
 
     for index, row in Redistribution_pair_c1_c2_lists.iterrows(): # only apply to relevant division pairs
 
         c1_m_c2_dict = {}
+        import pdb;pdb.set_trace()
 
-        for idx, (col_name, value) in enumerate(row.iloc[2:].items()):
-            allocation_abvs_list = row[col_name] # list of PartyAb to allocate to
-            div = row[0]
+        giver_div = row[0]
 
-            if idx>1 and value == row.iloc[idx-1]: # c1 or c2 is same as m --> don't need to repeat
-                c1_m_c2_dict[col_name] = df
+        for idx, (col_name, value) in enumerate(row.iloc[2:].items()): # iterate over the 3 lists of PartyAb
+            allocation_abvs_list = ast.literal_eval(value) #(= row[col_name]) list of PartyAb to allocate to
+            
+            import pdb;pdb.set_trace()
+            if idx>=1 and value == row.iloc[2:].iloc[idx-1]: # c1 or c2 is same as m --> don't need to repeat
+                c1_m_c2_dict[col_name] = c1_m_c2_dict[row.columns[2+idx-1]] # copies previous column
             else:
-                allocation_set = convert_partyab_to_senate_group_names(allocation_abvs_list, Formal_prefs_dict, Senate_party_abvs_dict)
+                allocation_set = convert_partyab_to_senate_group_names(allocation_abvs_list, Formal_prefs_dict, Senate_party_abvs_dict, giver_div)
 
                 # allocate to allocation_set and convert to percentages - BE CAREFUL TO DO IT PER ROW AND NOT TOTALLY
-                Final_allocated_pcts_aggregated_dict[div] = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[div], allocation_set)
-                df = Final_allocated_pcts_aggregated_dict[div]
-                df.iloc[:, 2:] = df.iloc[:, 2:].div(df.drop(columns=['div_nm','Vote Collection Point Name']).sum(axis=1), axis=0)
+                Final_allocated_pcts_aggregated_dict[giver_div] = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[giver_div], allocation_set)
+                df = Final_allocated_pcts_aggregated_dict[giver_div]
+                import pdb;pdb.set_trace()
+                df.iloc[:, 2:] = df.iloc[:, 2:].div(df.drop(columns=['div_nm','pp_id']).sum(axis=1), axis=0) # percentages
                 c1_m_c2_dict[col_name] = df
 
         # do all the fancy calculations now
-        c1_m_c2_dict['transfer_pcts'] = 1111111111
+        import pdb;pdb.set_trace()
+
+
+        # 1-> 2. Percentage transfer
+
+        # first m candidates the same, remaining c1 - 
+        m = len(ast.literal_eval(row['m_list']))
+        c1 = len(ast.literal_eval(row['c1_list']))
+        c2 = len(ast.literal_eval(row['c2_list']))
+
+        if c1 > m:
+            sum_c1_extras = c1_m_c2_dict['c1_list'].iloc[:,2+m:].sum(axis=1) # sum values in row for extra c1 candidates (first 2 rows are info)
+            c1_m_c2_dict['transfer_percent'] = (c1_m_c2_dict['m_list'].iloc[:,2:] - c1_m_c2_dict['c1_list'].iloc[:,2:2+m])/sum_c1_extras # must be positive
+        else:
+            #zero_df = c1_m_c2_dict['m_list'].iloc[:,2:].loc[:, c1_m_c2_dict['m_list'].iloc[:,2:].columns] = 0
+            #c1_m_c2_dict['transfer_percent'] =zero_df
+            c1_m_c2_dict['transfer_percent'] = np.nan # 
+        import pdb;pdb.set_trace()
+
+        if c2 > m:
+            # separately, save proportion donated by m parties, and proportions of donation total recieved by extra c2 parties
+            c1_m_c2_dict['donation_proportion'] = 1 - (c1_m_c2_dict['c2_list'].iloc[:,2:2+m] / c1_m_c2_dict['m_list'].iloc[:,2:].replace(0, float('nan'))).fillna(0) # avoid division by 0
+            sum_c2_etras = c1_m_c2_dict['c2_list'].iloc[:,2+m:].sum(axis=1)
+            c1_m_c2_dict['receiving_proportion'] = c1_m_c2_dict['c2_list'].iloc[:,2+6:].div(sum_c2_etras, axis=0) # of c2 extra candidates, get proportion donated to each
+            
+            
+        else: 
+            c1_m_c2_dict['donation_proportion'] = 0
+            c1_m_c2_dict['receiving_proportion'] = 0
+            
 
         # 1. Combine all state division DOPByPP together for each redistribution state
         # 2. Select wide format percentages corresponding to c1 candidates
@@ -516,15 +608,15 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
     # make list of senate parties for check if they match house ones
     Senate_parties_by_div =  pd.DataFrame(list(Senate_party_abvs_dict.items()), columns=["div_nm", "PartyAbList"])
     Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) # currently off
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
 
     #application_dict = {}
     #application_dict['Bass'] = ['JLN','GRN','LP','ON','ALP']
     #application_dict['Franklin'] = ['TLOC','ALP','JLN','LP','GRN']
 
-    Incumbent_advantage = 1
-    Candidate_change_redistribution = 0
+    Incumbent_advantage = 0
+    candidate_change_redistribution = 1
 
     if Incumbent_advantage:
         Final_x_House_df = pd.read_csv(f"{data_year}Final_x_for_Incumbency.csv")
@@ -548,6 +640,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
         #Final_x_HS_df.to_csv(f"{data_year}Final_x_HS_df.csv", index=False)
     if candidate_change_redistribution:
         Redistribution_pair_c1_c2_lists = pd.read_csv("Redistribution_pair_c1_c2_lists2024.csv", index_col = None)
+        transformed_votes = allocate_Formal_prefs_Redistribution_change(Formal_prefs_dict, Senate_party_abvs_dict, Redistribution_pair_c1_c2_lists)
 
     return Final_allocated_pcts_aggregated_dict, Final_x_HS_df
 
