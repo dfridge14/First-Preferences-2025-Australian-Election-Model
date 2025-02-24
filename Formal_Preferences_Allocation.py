@@ -1,20 +1,9 @@
 import pandas as pd
-#import modin.pandas as pd
-#import dask
-#dask.config.set({'distributed.dashboard.link': 'http://127.0.0.1:62031/status'})
-#import multiprocessing
-
 import numpy as np
 import os,time
 import ast
 
 import gc
-
-
-#if __name__ == '__main__':
-#    from dask.distributed import Client
-#    client = Client()  # Start Dask Client
-#    print(client)
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
 
@@ -91,11 +80,10 @@ def get_Senate_party_abvs_dict():
         state_Formal_prefs = pd.read_csv(filename, nrows=2)
 
         state_Formal_prefs_dict = {state: group.reset_index(drop=True).apply(
-            lambda col: pd.to_numeric(col, downcast='float', errors='ignore') if pd.api.types.is_numeric_dtype(col) else col
+            lambda col: pd.to_numeric(col, downcast='float') if pd.api.types.is_numeric_dtype(col) else col
         ) for state, group in state_Formal_prefs.groupby("State")} 
         for key, group in state_Formal_prefs_dict.items():
             Formal_prefs_dict[key] = group # assumes no keys (divs) overlap for different states :)
-    import pdb;pdb.set_trace()
 
     # get state-to-div dict
     div_to_state = pd.read_csv(f"{data_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
@@ -121,7 +109,7 @@ def get_Senate_party_abvs_dict():
     
     # write to csv
     Senate_parties_by_div =  pd.DataFrame(list(Senate_party_abvs_dict.items()), columns=["div_nm", "PartyAbList"])
-    Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) 
+    #Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) 
 
     return 1
 

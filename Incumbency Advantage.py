@@ -6,7 +6,7 @@ import ast
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
 
-data_year = "2019"
+data_year = "2022"
 
 
 incumbent_df = pd.read_csv("incumbent_df.csv")
@@ -121,7 +121,8 @@ for div in Div_DOP_dict.keys():
 
 # df with div_nm,PartyAb,House_Pct,Surname,GivenNm,HistoricElected
 Final_x_df = pd.concat(Final_x_div_dict.values(), ignore_index=False)
-Final_x_df = Final_x_df.merge(Candidates_By_Division_df, on = ['div_nm','PartyAb'], how = 'left')
+Final_x_df = Final_x_df.merge(Candidates_By_Division_df, on = ['div_nm','PartyAb'], how = 'left').rename(columns={"HistoricElected": "is_incumbent"}) # use HistoricElected column for incumbency
+Final_x_df.loc[:,"is_incumbent"] = Final_x_df.loc[:,"is_incumbent"].map({'Y': 1, 'N': 0})
 
 # remove middle name!
 Final_x_df.loc[Final_x_df["GivenNm"].apply(lambda x: len(x.split(' ')) > 1),"GivenNm"] = Final_x_df.loc[Final_x_df["GivenNm"].apply(lambda x: len(x.split(' ')) > 1), "GivenNm"].apply(lambda x: x.split(' ')[0]) # only first name
@@ -135,17 +136,18 @@ Final_x_df.loc[(Final_x_df["Surname"]=="ST CLAIR")&(Final_x_df["GivenNm"]=="Stua
 # Tony1 SMITH irrelevant as before 2001!!!
 
 
-# is_incumbent may be equivalent to HistoricElected, but is_historic_incumbent captures all previous
+# is_incumbent is now equivalent to HistoricElected, but is_historic_incumbent captures all previous
 Candidate_Incumbency = Final_x_df.merge(incumbent_df[['Surname', 'GivenNm','Year']], on=['Surname', 'GivenNm'], how='left')
 Candidate_Incumbency['Year'] = Candidate_Incumbency['Year'].apply(lambda entry: ast.literal_eval(entry) if pd.notna(entry) else np.nan)  # make it back into list - somehow a mistake has been made!
-Candidate_Incumbency.loc[:,"is_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: any(year in between_election_year_range for year in years) if years and isinstance(years, list) else np.nan) # true if recent incumbent
-Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: not any(year in between_election_year_range for year in years) and any(year in before_last_election_year_range for year in years) if years and isinstance(years, list) else np.nan)
-
+#Candidate_Incumbency.loc[:,"is_incumbent"] = Candidate_Incumbency.loc[:,"is_incumbent"].map({'Y': 1, 'N': 0}) # convert to 1 or 0
+#Candidate_Incumbency.loc[:,"is_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: any(year in between_election_year_range for year in years) if years and isinstance(years, list) else np.nan) # true if recent incumbent
+Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: not any(year in between_election_year_range for year in years) and any(year in before_last_election_year_range for year in years) if years and isinstance(years, list) else 0)
+Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency.loc[:,"is_historic_incumbent"].astype(int)
 
 
 Final_x_df = Final_x_df.merge(Candidate_Incumbency, on=Final_x_df.columns.tolist(), how='left')
-Final_x_df.loc[:,["is_incumbent","is_historic_incumbent"]].fillna(0) # replace non-historic-elected with 0s
-Final_x_df = Final_x_df.drop(columns = ['Surname', 'GivenNm','HistoricElected','Year'])
+Final_x_df.loc[:,["is_incumbent","is_historic_incumbent"]] = (Final_x_df.loc[:,["is_incumbent","is_historic_incumbent"]].fillna(0).infer_objects(copy=False)) # replace non-historic-elected with 0s
+Final_x_df = Final_x_df.drop(columns = ['Surname', 'GivenNm','Year'])
 
 
 
@@ -181,8 +183,12 @@ div_to_state_dict = {div: div_to_state.loc[div_to_state['div_nm'] == div, 'State
 Final_x_df.loc[((Final_x_df["div_nm"].map(div_to_state_dict) == 'VIC') | (Final_x_df["div_nm"].map(div_to_state_dict) == 'NSW')) & (Final_x_df["PartyAb"].isin(['LP','NP'])),'PartyAb'] = 'COAL'
 
 Final_x_party_not_in_senate = []
-for div in Final_x_df["div_nm"].unique(): #Final_x_div_dict.keys():
 
+import pdb;pdb.set_trace()
+
+
+for div in Final_x_df["div_nm"].unique(): #Final_x_div_dict.keys():
+    print(div)
     for i in range(FINAL_CAND_NO):
         if Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i] not in Senate_parties_by_div.loc[Senate_parties_by_div["div_nm"] == div,"PartyAbList"].iloc[0]:
             Final_x_party_not_in_senate.append(div)
