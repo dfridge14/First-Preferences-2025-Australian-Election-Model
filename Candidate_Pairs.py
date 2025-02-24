@@ -1,5 +1,4 @@
 import pandas as pd
-import geopandas as gpd
 import numpy as np
 import os, time
 import ast
@@ -17,8 +16,6 @@ DOP_By_Division.rename(columns={'DivisionNm': 'div_nm', 'CandidateID': 'cand_id'
 #print(DOP_By_Division)
 
 Div_DOP_dict = {div: group.drop(columns=['div_nm']) for div, group in DOP_By_Division[["div_nm","CountNumber","cand_id", "PartyAb","CalculationType", "CalculationValue"]].groupby("div_nm")}
-
-
 
 def convert_to_wide_format(df, df_type):
     # converts to wide format indexed by pp_id for either First Preferences or SA1 dfs
@@ -53,10 +50,6 @@ def compute_ratio(group):
     transfer_val = group.loc[group["CalculationType"] == "Transfer Count", "CalculationValue"].values[0]
     ratio = transfer_val / count_val if count_val > 0 else 0
     return pd.DataFrame({col: group[col].iloc[0] for col in group.columns[:-2]}, index=[0]).assign(CalculationType="Proportion Transferred", CalculationValue=ratio)
-
-
-
-
 
 def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
     
@@ -201,17 +194,11 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
     
 
     return DOP_table_wide_dict
-        
-
-
-
-
-
 
 #expand_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Expand")
 #reduce_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Reduce")
 Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
-#VoteCount_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "VoteCount")
+VoteCount_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "VoteCount")
 
 
     

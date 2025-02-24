@@ -45,7 +45,7 @@ def abbreviate_party_names(party_names_list, general_party_df):
     for party in party_names_list:
         #print(party)
         if party:
-            if party.lower() == "Liberal/The Nationals".lower() or party.lower() == "Liberal & Nationals".lower(): # handle LIB/NAT Exception - I think best to treat them as one party in the Senate as they always contest together, and then reverse engineer House split if needed
+            if party.lower() == "Liberal/The Nationals".lower() or party.lower() == "Liberal & Nationals".lower() or party.lower() == "Liberal/National".lower(): # handle LIB/NAT Exception - I think best to treat them as one party in the Senate as they always contest together, and then reverse engineer House split if needed
                 party_abvs_list.append('COAL')
             elif party == " Science, Pirate, Secular, Climate Emergency": # SOPA exception
                 party_abvs_list.append('SOPA')
