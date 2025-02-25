@@ -7,6 +7,8 @@ from collections import Counter
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
 
+start = time.time()
+
 SenateCandidates_2016 = pd.read_csv("2016SenateCandidates.csv", index_col = None)
 SenateCandidates_2016 = SenateCandidates_2016.loc[SenateCandidates_2016["nom_ty"] == 'S',["state_ab","ticket","party_ballot_nm"]]
 SenateCandidates_2016.rename(columns={"state_ab": "StateAb", "party_ballot_nm": "party_nm"}, inplace=True)
@@ -145,7 +147,7 @@ import pdb;pdb.set_trace()
 
 
 
-def split_and_convert(series, cols, chunk_size=50000, output_file="processed_data.parquet", return_df=True):
+def split_and_convert(series, cols, chunk_size=500000, output_file="processed_data.parquet", return_df=True):
     """Processes large CSV-like columns in chunks, writes to disk, and optionally returns a final DataFrame."""
     
     max_columns = len(cols)
@@ -163,12 +165,10 @@ def split_and_convert(series, cols, chunk_size=50000, output_file="processed_dat
         # ✅ Convert to Pandas DataFrame (but do not store it in memory)
         chunk_df = pd.DataFrame(chunk_parsed)
 
-        # ✅ Convert to Pandas nullable Int8 (fixes NaN issues)
-        chunk_df = chunk_df.convert_dtypes().astype("Int8")
+        # ✅ Convert to Pandas nullable Int16 (fixes NaN issues)
+        chunk_df = chunk_df.convert_dtypes().astype("Int16")
 
         chunk_df.columns = make_unique(cols) 
-
-        print(chunk_df.columns)
 
         # ✅ Write chunk directly to file (No concatenation)
         chunk_df.to_parquet(output_file, engine="fastparquet", index=False, compression="snappy", append=not first_chunk)
@@ -209,12 +209,7 @@ for state in states:
 
     max_col_no = len(state_group_party_names_dict[state]) # number of candidate/party boxes
     expanded_cols = split_and_convert(curr_formal_prefs_2016.iloc[:,-1],cols = state_group_party_names_dict[state])
-
-
-    #expanded_cols = curr_formal_prefs_2016[last_col].str.rstrip(',').str.split(',', expand=True)
-    #expanded_cols = expanded_cols.replace({'*': 1, '/': 1})
-    import pdb;pdb.set_trace()
-    expanded_cols = expanded_cols.apply(pd.to_numeric, errors='raise').astype('float32')
+    #expanded_cols = expanded_cols.astype('float32')
 
     new_column_names = state_group_party_names_dict[state]
 
@@ -222,6 +217,11 @@ for state in states:
         expanded_cols.columns = new_column_names
 
     curr_formal_prefs_2016 = pd.concat([curr_formal_prefs_2016.drop(columns=[last_col]), expanded_cols], axis=1)
+
+
+    curr_formal_prefs_2016.to_csv(f"2016FormalPrefs{state}Formatted.csv", index = False)
+
+    print("done", time.time() - start)
 
     import pdb;pdb.set_trace()
 

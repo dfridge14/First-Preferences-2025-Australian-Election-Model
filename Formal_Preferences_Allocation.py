@@ -10,7 +10,10 @@ os.chdir('C:\\Dania\\2024\\Australian Election')
 start = time.time()
 
 
-data_year = '2022'
+FP_ID_COLUMNS = [3,4,5] # remove id columns
+START_OF_PREFS = 3 # Prefs begin on the 4th column (after stateab,div_nm,pp_nm)
+
+data_year = '2019'
 
 
 
@@ -124,8 +127,8 @@ def optimize_dataframe(df):
 
 
 Formal_prefs_dict = {}
-#states = ['NSW']
-states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
+states = ['NSW']
+#states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
 for state in states: # currently only 2016 onwards
 
     gc.collect()
@@ -170,6 +173,7 @@ for state in states: # currently only 2016 onwards
                 if row_count % batch_size == 0:
                     print(f"Processing batch {len(dataframes) + 1}, rows read: {row_count}")  # Debugging
                     df_batch = pd.DataFrame(batch, columns=df_columns)
+                    df_batch.drop(columns=df_batch.columns[FP_ID_COLUMNS])
                     dataframes.append(df_batch)
                     batch = []  # Reset batch, clears memory
                     print("done", time.time() - start)
@@ -178,25 +182,32 @@ for state in states: # currently only 2016 onwards
             if batch:
                 print(f"Processing final batch, rows read: {row_count}")  # Debugging
                 df_batch = pd.DataFrame(batch, columns=df_columns)
+                df_batch = df_batch.drop(columns=df_batch.columns[FP_ID_COLUMNS]) # remove id columns
+                df_batch.iloc[:, START_OF_PREFS:] = df_batch.iloc[:, START_OF_PREFS:]#.apply(pd.to_numeric, errors='coerce') #.astype('Int16')
                 dataframes.append(df_batch)
                 print("done", time.time() - start)
 
         # Combine all batches into a final DataFrame
         if dataframes:
             curr_Formal_prefs = pd.concat(dataframes, ignore_index=True)
+            import pdb;pdb.set_trace()
+            for col in curr_Formal_prefs.columns[3:]:
+                curr_Formal_prefs[col] = pd.to_numeric(curr_Formal_prefs[col], errors='raise').astype(np.float32) # convert to float32 when finished
+                print(col)
             print("Final DataFrame shape:", curr_Formal_prefs.shape)
         else:
             print("No data was read from the file.")
         #curr_Formal_prefs = pd.concat(dataframes, ignore_index=True)
 
     else:
-        # low memory try
+        # low memory try - convert to float32 later when using!
         columns = pd.read_csv(filename, nrows=1).columns
         dtype_dict = {col: 'str' for col in columns[:3]}
         for col in columns[3:]:
             dtype_dict[col] = 'float32'
 
         curr_Formal_prefs = pd.read_csv(filename, index_col=None, na_values=["NaN", "nan"], dtype=dtype_dict)
+        curr_Formal_prefs = curr_Formal_prefs.drop(columns=df_batch.columns[FP_ID_COLUMNS]) # remove id columns
 
     
     curr_Formal_prefs.rename(columns={"Division": "div_nm", "Vote Collection Point Name": "pp_nm"}, inplace=True)
@@ -240,7 +251,11 @@ def find_earliest_preference_id(preferences):
 
     #votes = preferences.idxmin(axis=1, skipna=True)
     #votes[preferences.isna().all(axis=1)] = np.nan 
+
+    #votes = preferences.astype("float32") # return to float32!
+    # votes = votes.fillna(float("inf")).idxmin(axis=1) # min in row, avoids warning
     votes = preferences.fillna(float("inf")).idxmin(axis=1) # min in row, avoids warning
+   
     votes = votes.where(preferences.notna().any(axis=1), other=pd.NA) # no prefs in row
 
     min_values = preferences.min(axis=1)
@@ -281,6 +296,8 @@ def allocate_votes(df, allocation_set):
         duplicate_indices = duplicates.loc[duplicates].index # return indices where duplicates == True
     else:
         duplicate_indices = [] # no duplicated 1st prefs
+
+    print("done", time.time() - start)
 
     return allocated_votes, duplicate_indices # duplicate_indices are index object!
 
@@ -335,12 +352,12 @@ def allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_
     for div in Formal_prefs_dict.keys():
         #import pdb;pdb.set_trace()
         formal_prefs_full = Formal_prefs_dict[div]
-        formal_prefs = formal_prefs_full.iloc[:, 6:]
+        formal_prefs = formal_prefs_full.iloc[:, START_OF_PREFS:]
         formal_prefs.columns = formal_prefs.columns.str.split(':').str[0] # keep only party grouping as key
         start_of_BTL_index = next(i for i, col in enumerate(formal_prefs.columns) if formal_prefs.columns[:i].tolist().count(col) == 1) # locates first instance of column name count repeated
 
         # store group party names (from ATL) in Senate_party_names_dict
-        group_party_names = formal_prefs_full.iloc[:, 6:].columns[:start_of_BTL_index] # includes both group and party names
+        group_party_names = formal_prefs_full.iloc[:, START_OF_PREFS:].columns[:start_of_BTL_index] # includes both group and party names
         party_names_list = group_party_names.str.split(':').str[-1].tolist() # records only party names
         party_abvs_list = abbreviate_party_names(party_names_list, general_party_df)
         Senate_party_abvs_dict[div] = party_abvs_list
@@ -359,7 +376,6 @@ def allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_
         formal_prefs_first_prefs = pd.concat([formal_prefs_by_group, first_pref_allocated_votes], axis=1) # add allocated first_pref vote to formal_prefs_by_group df
         Formal_prefs_dict[div] = pd.concat([Formal_prefs_dict[div].iloc[:,1:3], formal_prefs_first_prefs], axis=1)
         #print(Formal_prefs_dict[div])
-        #import pdb;pdb.set_trace()
 
     return Formal_prefs_dict, Senate_party_abvs_dict
 
@@ -593,6 +609,7 @@ def allocate_Formal_prefs_Redistribution_change(Formal_prefs_dict, Senate_party_
 def whole_procedure(Formal_prefs_dict,general_party_df):
     Formal_prefs_dict, Senate_party_abvs_dict = allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_party_df)
 
+    print("done", time.time() - start)
     # make list of senate parties for check if they match house ones
     Senate_parties_by_div =  pd.DataFrame(list(Senate_party_abvs_dict.items()), columns=["div_nm", "PartyAbList"])
     Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) # currently off
