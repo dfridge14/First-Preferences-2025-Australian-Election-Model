@@ -6,15 +6,18 @@ import ast
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
 
+INCUMBENT_ADVANTAGE = 4
+final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
 data_year = '2022'
+FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
+NONINCUMBENT_DISADVANTAGE =  INCUMBENT_ADVANTAGE/(FINAL_CANDIDATE_NO-1)
+
+
 
 start = time.time()
 
 DOP_By_Division = pd.read_csv(f"{data_year}HouseDOPByDivision.csv", skiprows=1)
-
 DOP_By_Division.rename(columns={'DivisionNm': 'div_nm', 'CandidateID': 'cand_id'}, inplace=True)
-#print(DOP_By_Division)
-
 Div_DOP_dict = {div: group.drop(columns=['div_nm']) for div, group in DOP_By_Division[["div_nm","CountNumber","cand_id", "PartyAb","CalculationType", "CalculationValue"]].groupby("div_nm")}
 
 def convert_to_wide_format(df, df_type):
@@ -39,6 +42,17 @@ def convert_to_wide_format(df, df_type):
                                 values='CalculationValue', 
                                 aggfunc='first',
                                 sort = False)  # No duplicates, so we can use 'first'
+        pivot_df = pivot_df.sort_index(ascending=True)
+        pivot_df = pivot_df.reset_index()
+
+    if df_type == "DOP_By_PP":
+
+        pivot_df = df.pivot_table(index=['pp_id','CountNumber'], # double index for info across pp_ids
+                                columns=['PartyAb'], 
+                                values='CalculationValue', 
+                                aggfunc='first',
+                                sort = False)  # No duplicates, so we can use 'first'
+        
         pivot_df = pivot_df.sort_index(ascending=True)
         pivot_df = pivot_df.reset_index()
 
@@ -199,16 +213,17 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
 
 #expand_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Expand")
 #reduce_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Reduce")
-#Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
+Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
 #VoteCount_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "VoteCount")
 
 
 
 def create_DOP_By_PP_csvs(data_year):
     DOP_By_PP_year = pd.read_csv(f"{data_year}DOP_By_PP_full.csv", index_col=None).rename(columns={"DivisionNm": 'div_nm', 'PPId': 'pp_id', 'PPNm': 'pp_nm','CountNum': 'CountNumber',"CandidateId":"cand_id"})
-    DOP_By_PP_year  = DOP_By_PP_year[["div_nm","pp_id","pp_nm","CountNumber","cand_id", "PartyAb","CalculationType", "CalculationValue"]]
+    DOP_By_PP_year  = DOP_By_PP_year[["div_nm","pp_id","pp_nm","CountNumber","BallotPosition","cand_id", "PartyAb","CalculationType", "CalculationValue"]]
 
     DOP_By_PP_year = DOP_By_PP_year.loc[~(DOP_By_PP_year['CalculationType'] == 'Transfer Percent'),]
+    DOP_By_PP_year.loc[:,'PartyAb'] = DOP_By_PP_year.loc[:,'PartyAb'].fillna('IND') # fix Steve Khouw issue
 
     # convert relevant pp_nms to pp_id 0
 
@@ -219,7 +234,7 @@ def create_DOP_By_PP_csvs(data_year):
     Zero_ids.loc[:,'pp_id'] = 0
     Zero_ids.loc[:,'pp_nm'] = 'Other'
 
-    grouped_zero_ids = Zero_ids.groupby(["div_nm","pp_id","pp_nm","CountNumber","cand_id", "PartyAb","CalculationType"], as_index=False).agg("sum") # sum accurate for counts, fatal for %
+    grouped_zero_ids = Zero_ids.groupby(["div_nm","pp_id","pp_nm","CountNumber","BallotPosition","cand_id", "PartyAb","CalculationType"], as_index=False).agg("sum") # sum accurate for counts, fatal for %
     # fix Percent values
 
     df_counts = grouped_zero_ids.loc[grouped_zero_ids["CalculationType"]=='Preference Count',].copy()
@@ -242,19 +257,26 @@ def create_DOP_By_PP_csvs(data_year):
 
     DOP_By_PP_year_formatted = DOP_By_PP_year.loc[~(DOP_By_PP_year.loc[:,"pp_nm"].astype(str).str.startswith(tuple(Other_booth_type_prefixes))),]
     DOP_By_PP_year_formatted = pd.concat([DOP_By_PP_year_formatted, grouped_zero_ids], ignore_index=True)
+    DOP_By_PP_year_formatted.sort_values(by=["div_nm", "pp_id", "CountNumber", "BallotPosition"], inplace=True)
+    
+
     #DOP_By_PP_year_formatted = DOP_By_PP_year_formatted.sort_values(["div_nm", "pp_id"], kind="stable") # sort: group all div_nm and pp_nm together
 
     # calculate proportions using pivot into df for Expanding!
     pivot_df = DOP_By_PP_year_formatted.pivot(index=[col for col in DOP_By_PP_year_formatted.columns if col not in ["CalculationType", "CalculationValue"]], 
                      columns="CalculationType", values="CalculationValue")
     pivot_df["Proportion Transferred"] = pivot_df["Transfer Count"] / pivot_df["Preference Count"]     # Compute ratio directly using vectorized operations
-    pivot_df["Proportion Transferred"] = pivot_df["Proportion Transferred"].replace([-np.inf, np.inf], np.nan).fillna(0)
+    pivot_df["Proportion Transferred"] = pivot_df["Proportion Transferred"].fillna(0)
+    pivot_df["Proportion Transferred"] = pivot_df["Proportion Transferred"].replace([-np.inf], -1) # -1 corresponds to candidate donating their votes
+
 
     pivot_df = pivot_df.drop(["Preference Count",'Preference Percent','Transfer Count'], axis=1)
+    pivot_df.rename(columns = {"Proportion Transferred":'CalculationValue'}, inplace=True)
     DOP_By_PP_Expand = pivot_df.reset_index()
     DOP_By_PP_Expand.columns.name = None # reset columns index name from 'CalculationType'
+    DOP_By_PP_Expand = DOP_By_PP_Expand.drop("BallotPosition", axis = 1)
 
-    DOP_By_PP_Pref_Percent = DOP_By_PP_year_formatted.loc[DOP_By_PP_year_formatted["CalculationType"]=="Preference Percent",].drop("CalculationType", axis=1)
+    DOP_By_PP_Pref_Percent = DOP_By_PP_year_formatted.loc[DOP_By_PP_year_formatted["CalculationType"]=="Preference Percent",].drop(["CalculationType","BallotPosition"], axis=1)
     import pdb;pdb.set_trace()
 
     DOP_By_PP_Pref_Percent.to_csv(f"{data_year}DOP_By_PP_Pref_Percent.csv", index=False)
@@ -263,23 +285,15 @@ def create_DOP_By_PP_csvs(data_year):
     return 1
 
 #create_DOP_By_PP_csvs(data_year) # create csv file!
-
+# else, read the existing csv file
 DOP_By_PP_Expand = pd.read_csv("2022DOP_By_PP_Expand.csv", index_col=None)
 DOP_By_PP_Pref_Percent = pd.read_csv("2022DOP_By_PP_Pref_Percent.csv", index_col=None)
 
-import pdb;pdb.set_trace()
 
 def convert_long_to_wide_format(DOP_table_long):
-
-
-    DOP_table_long.loc[:,'PartyAb'] = DOP_table_long['PartyAb'].fillna('IND') # fill in empty PartyAb column with IND - in 2022, only Steve Khouw
-    DOP_table_long.loc[DOP_table_long['PartyAb'] == 'Non Affiliated','PartyAb'] = 'IND' # or Non Affiliated in DOP By PP docs
-    
+    ### creates dict for div_nm as key and wide DOP table for each pp_id as value
 
     DOP_By_PP_dict = {div: group for div, group in DOP_table_long.groupby('div_nm')}
-
-    import pdb;pdb.set_trace()
-
 
     for div, group in DOP_By_PP_dict.items():
 
@@ -295,17 +309,12 @@ def convert_long_to_wide_format(DOP_table_long):
         num_pref_counts = (group_sample_zero.iloc[-1,3] + 1) # num of final count + original FP count
 
         num_rows = len(group['pp_id'].unique()) * num_pref_counts
-        import pdb;pdb.set_trace()
 
         group.loc[:,'PartyAb'] = pd.concat([adjusted_party_names] * (num_rows), ignore_index=True).values
-
         group.loc[group["PartyAb"] == "GVIC","PartyAb"] = 'GRN' # change any GVIC into GRN ------ manual fix!
 
-        DOP_table_wide = convert_to_wide_format(group, "DOP")
-
+        DOP_table_wide = convert_to_wide_format(group, "DOP_By_PP")
         DOP_By_PP_dict[div] = DOP_table_wide
-
-    import pdb;pdb.set_trace()
 
     return DOP_By_PP_dict
 
@@ -315,9 +324,57 @@ DOP_By_PP_Expand_wide_dict = convert_long_to_wide_format(DOP_By_PP_Expand)
 
 print(time.time() - start, "seconds")
 
+Incumbency_by_div = pd.read_csv(f"{data_year}Incumbents.csv", index_col = None)
+
+def independent_to_c1(div1, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, c1,Incumbency_by_div, FINAL_CANDIDATE_NO):
+    ### adjusts votes of c1 candidate for incumbency advantage
+
+    # 1. get top 5 cands
+    # 2. reverse incumb.advantage
+    # 3. expand to full vote
+
+    wide_df1 = DOP_By_PP_Pref_Percent_wide_dict[div1]
+    wide_df_expand = DOP_By_PP_Expand_wide_dict[div1] # same div here!
+
+    # Reduce to Final 5
+    Final_Count_Number = wide_df1.iloc[-1,1] # last index of CountNumber (2nd column)
+    reduced_votes_by_PP = wide_df1.loc[wide_df1['CountNumber'] == Final_Count_Number - (FINAL_CANDIDATE_NO-2),] # when 5 candidates remaining
+    reduced_votes_by_PP = reduced_votes_by_PP.drop(columns=[reduced_votes_by_PP.columns[1]]) # remove CountNumber col!
+    reduced_votes_by_PP.iloc[:, 1:] = reduced_votes_by_PP.iloc[:, 1:].where(reduced_votes_by_PP.iloc[:, 1:] > 0)
+    reduced_votes_by_PP = reduced_votes_by_PP.sort_index()
+
+    top_5_columns = reduced_votes_by_PP.columns[~reduced_votes_by_PP.iloc[0].isna()].tolist()[1:]
+
+    # Reverse incumbency advantage: e.g. -4 to inc, +1 to each non-inc 
+    Incumbent_in_div = Incumbency_by_div.loc[Incumbency_by_div['div_nm']==div1,'PartyAb'].tolist()
+
+    for party in Incumbent_in_div:
+        reduced_votes_by_PP[top_5_columns] += NONINCUMBENT_DISADVANTAGE
+        reduced_votes_by_PP[party] -= (INCUMBENT_ADVANTAGE + NONINCUMBENT_DISADVANTAGE)
+
+
+    # expand to c1
+    expanded_votes = reduced_votes_by_PP
+
+    start_range = 1 + (Final_Count_Number + 2) - c1 # 1 + total num of candidates - c1
+    end_range = 1 + Final_Count_Number - (FINAL_CANDIDATE_NO-2)
+
+    for i in reversed(range(start_range, end_range)): #(i.e. from count 4 to count 1, where the difference 4-1=c1-m)
+        expand_div = wide_df_expand.loc[wide_df_expand['CountNumber'] == i,].drop('CountNumber', axis = 1)
+    
+        to_expand_party = expand_div.columns[(expand_div.iloc[0] == -1)].tolist()[0] # party to expand to will have -1 as value
+
+        lost_votes = expanded_votes.set_index("pp_id").multiply(expand_div.set_index("pp_id")).reset_index()
+
+        expanded_votes = expanded_votes.set_index("pp_id").subtract(lost_votes.set_index("pp_id")).reset_index()
+        expanded_votes[to_expand_party] = lost_votes.iloc[:,1:].sum(axis=1).values
+        #import pdb;pdb.set_trace()
+
+    return expanded_votes
+
+expanded_votes = independent_to_c1("Goldstein",DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, 7, Incumbency_by_div, FINAL_CANDIDATE_NO)
 import pdb;pdb.set_trace()
 
-    
 
 def find_c1_c2(elimination_list, common_set):
     ### finds length of subsection of list upon which all elements of common_set are seen
@@ -525,29 +582,78 @@ def simple_redistribution(div1,div2,DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_P
     wide_df1 = DOP_By_PP_Pref_Percent_wide_dict[div1]
     wide_df2 = DOP_By_PP_Expand_wide_dict[div2]
 
+    import pdb;pdb.set_trace()
+
     reduced_votes_by_PP = wide_df1.loc[wide_df1['CountNumber'] == c1-m,1:] # c1-m matches the count number!
-    reduced_votes_by_PP = reduced_votes_by_PP[reduced_votes_by_PP>0].sort_index() # sort non-eliminated parties alphabetically
-    redistributed_votes = reduced_votes_by_PP
+    reduced_votes_by_PP = reduced_votes_by_PP.drop(columns=[reduced_votes_by_PP.columns[1]]) # remove CountNumber col!
+    reduced_votes_by_PP.iloc[:, 1:] = reduced_votes_by_PP.iloc[:, 1:].where(reduced_votes_by_PP.iloc[:, 1:] > 0)
+    expanded_votes = reduced_votes_by_PP.sort_index()
     
     for i in reversed(range(c2-m)):
-        #         expand_dict[div2].iloc[:c2-m,] s1.sort_index().dot(s2.sort_index())
-        expand_div2 = wide_df2.loc[wide_df2['CountNumber'] == i,1:]
-        common_div2 = expand_div2[expand_div2>0].sort_index()
+        expand_div2 = wide_df2.loc[wide_df2['CountNumber'] == i,].drop('CountNumber', axis = 1)
 
-        lost_votes = round(common_div2*redistributed_votes).astype(int) # alphabetically-sorted 
-        redistributed_votes = reduced_votes_by_PP - lost_votes
+        to_expand_party = expand_div2.columns[(expand_div2.iloc[0] == -1)].tolist()[0] # party to expand to will have -1 as value
 
-        #### NEEDS TO BE CORRECTED FOR MULTIPLE ROWS!
-        to_expand_party = pd.Series([sum(lost_votes)], index=expand_div2[expand_div2==0].index) # expand_div2 has 0 entry for the party that is being expanded to
-        redistributed_votes = pd.concat([redistributed_votes, to_expand_party]).sort_index()
+        lost_votes = expanded_votes.set_index("pp_id").multiply(expand_div2.set_index("pp_id")).reset_index()
+
+        expanded_votes = expanded_votes.set_index("pp_id").subtract(lost_votes.set_index("pp_id")).reset_index()
+        expanded_votes[to_expand_party] = lost_votes.iloc[:,1:].sum(axis=1).values
+
+
+    redistributed_votes = expanded_votes
+
     return redistributed_votes
 
 
+def reduce_candidates_to_set_size(div, DOP_By_PP_Pref_Percent_wide_dict, reduced_c_size):
+    wide_df1 = DOP_By_PP_Pref_Percent_wide_dict[div]
+
+    import pdb;pdb.set_trace()
+
+    Final_Count_Number = wide_df1.iloc[-1,1] # last index of CountNumber (2nd column)
+    reduced_votes_by_PP = wide_df1.loc[wide_df1['CountNumber'] == (Final_Count_Number+2)-reduced_c_size,1:] # the correct count number!
+    reduced_votes_by_PP = reduced_votes_by_PP.drop(columns=[reduced_votes_by_PP.columns[1]]) # remove CountNumber col!
+    reduced_votes_by_PP.iloc[:, 1:] = reduced_votes_by_PP.iloc[:, 1:].where(reduced_votes_by_PP.iloc[:, 1:] > 0) # convert other cols to nan
+    reduced_votes_by_PP = reduced_votes_by_PP.sort_index() # maybe redundant
+
+    return reduced_votes_by_PP
+
+def expand_candidates_to_set_size(div, reduced_votes_by_PP, DOP_By_PP_Expand_wide_dict, c_size, expanded_c_size):
+    
+    wide_df_expand = DOP_By_PP_Expand_wide_dict[div]
+
+    expanded_votes = reduced_votes_by_PP
+
+    Final_Count_Number = wide_df_expand.iloc[-1,1]
+    start_range = 1 + (Final_Count_Number + 2) - expanded_c_size # 1 + total num of candidates - c1
+    end_range = 1 + (Final_Count_Number+2) - c_size
+
+    for i in reversed(range(start_range, end_range)): #(i.e. from count 4 to count 1, where the difference 4-1=c1-m)
+        expand_div = wide_df_expand.loc[wide_df_expand['CountNumber'] == i,].drop('CountNumber', axis = 1)
+    
+        to_expand_party = expand_div.columns[(expand_div.iloc[0] == -1)].tolist()[0] # party to expand to will have -1 as value
+
+        lost_votes = expanded_votes.set_index("pp_id").multiply(expand_div.set_index("pp_id")).reset_index()
+
+        expanded_votes = expanded_votes.set_index("pp_id").subtract(lost_votes.set_index("pp_id")).reset_index()
+        expanded_votes[to_expand_party] = lost_votes.iloc[:,1:].sum(axis=1).values
+        #import pdb;pdb.set_trace()
+
+    return expanded_votes
+
+    return
+
 def complex_redistribution(div1,div2,expand_dict, VoteCount_dict,m,c1,c2,set1,set2):
 
-    reduced_votes = VoteCount_dict[div1].iloc[len(set1)-c1,1:]
-    reduced_votes = reduced_votes[reduced_votes>0].sort_index()
-    redistributed_votes = reduced_votes
+    wide_df1 = DOP_By_PP_Pref_Percent_wide_dict[div1]
+    wide_df2 = DOP_By_PP_Expand_wide_dict[div2]
+
+    import pdb;pdb.set_trace()
+
+    reduced_votes_by_PP = wide_df1.loc[wide_df1['CountNumber'] == c1-m,1:] # c1-m matches the count number!
+    reduced_votes_by_PP = reduced_votes_by_PP.drop(columns=[reduced_votes_by_PP.columns[1]]) # remove CountNumber col!
+    reduced_votes_by_PP.iloc[:, 1:] = reduced_votes_by_PP.iloc[:, 1:].where(reduced_votes_by_PP.iloc[:, 1:] > 0)
+    reduced_votes_by_PP = reduced_votes_by_PP.sort_index() # maybe redundant
 
     # Use FP to get senate versions of A) reduced_votes = c1 B) common votes = m C) expanded votes = c2
     # calculate the % shifts in both A>B,B>C
@@ -564,18 +670,7 @@ def complex_redistribution(div1,div2,expand_dict, VoteCount_dict,m,c1,c2,set1,se
 
     return redistributed_votes
 
-def independent_redistribution(div1,div2,DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict,m,c1,c2):
-    # 1. get top 5 cands
-    # 2. reverse incumb.advantage
-    # 3. expand to full vote
 
-    wide_df1 = DOP_By_PP_Pref_Percent_wide_dict[div1]
-    #wide_df2 = DOP_By_PP_Expand_wide_dict[div2]
-
-    reduced_votes_by_PP = wide_df1.loc[wide_df1['CountNumber'] == c1-m,1:] # when 5 candidates remaining
-    reduced_votes_by_PP = reduced_votes_by_PP[reduced_votes_by_PP>0].sort_index()
-
-    return 1
 
 def complex_independent_redistribution():
 

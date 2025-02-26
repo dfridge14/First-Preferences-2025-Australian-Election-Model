@@ -6,7 +6,7 @@ import ast
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
 
-data_year = "2022"
+data_year = "2019"
 
 
 incumbent_df = pd.read_csv("incumbent_df.csv")
@@ -145,7 +145,19 @@ Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency['Year
 Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency.loc[:,"is_historic_incumbent"].astype(int)
 
 
-Incumbents_by_div = Candidate_Incumbency.loc[Candidate_Incumbency['is_incumbent'] == 1,['div_nm','PartyAb']]
+
+
+def create_Incumbents_by_div(Candidate_Incumbency, data_year):
+    ### creates df of incumbent party by division
+    Incumbents_by_div = Candidate_Incumbency.loc[Candidate_Incumbency['is_incumbent'] == 1,['div_nm','PartyAb']]
+    import pdb;pdb.set_trace()
+
+    Incumbents_by_div.to_csv(f"{data_year}Incumbents.csv", index=False)
+
+    return 1
+
+#create_Incumbents_by_div(Candidate_Incumbency, data_year)
+
 
 
 Final_x_df = Final_x_df.merge(Candidate_Incumbency, on=Final_x_df.columns.tolist(), how='left')
@@ -185,24 +197,34 @@ div_to_state_dict = {div: div_to_state.loc[div_to_state['div_nm'] == div, 'State
 # change parties in NSW/VIC due to Coalition on senate ticket
 Final_x_df.loc[((Final_x_df["div_nm"].map(div_to_state_dict) == 'VIC') | (Final_x_df["div_nm"].map(div_to_state_dict) == 'NSW')) & (Final_x_df["PartyAb"].isin(['LP','NP'])),'PartyAb'] = 'COAL'
 
-Final_x_party_not_in_senate = []
 
-import pdb;pdb.set_trace()
+
+Final_x_party_not_in_senate = []
 
 
 for div in Final_x_df["div_nm"].unique(): #Final_x_div_dict.keys():
-    print(div)
+    #print(div)
     for i in range(FINAL_CAND_NO):
         if Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i] not in Senate_parties_by_div.loc[Senate_parties_by_div["div_nm"] == div,"PartyAbList"].iloc[0]:
+            print(Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i])
             Final_x_party_not_in_senate.append(div)
 
+print(Final_x_party_not_in_senate)
 import pdb;pdb.set_trace()
 
-
-print(Final_x_party_not_in_senate)
-
-
 Final_x_df_for_Incumbency = Final_x_df.loc[~Final_x_df["div_nm"].isin(Final_x_party_not_in_senate),]
+
+# combine any VIC/NSW coalition candidates in top x
+Final_x_party_has_2_COALs = []
+for div, group in Final_x_df_for_Incumbency[['div_nm','PartyAb']].groupby('div_nm'):
+    if group.iloc[:,1].tolist().count("COAL") == 2:
+        Final_x_party_has_2_COALs.append(div)
+print(Final_x_party_has_2_COALs)
+
+
+Final_x_df_for_Incumbency = Final_x_df_for_Incumbency.loc[~Final_x_df["div_nm"].isin(Final_x_party_has_2_COALs),]
+
+
 Final_x_df_for_Incumbency.to_csv(f"{data_year}Final_x_for_Incumbency.csv", index=False)
 
 

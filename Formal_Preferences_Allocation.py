@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 import os,time
 import ast
+from collections import Counter
+import io
+
 
 import gc
 
@@ -54,7 +57,13 @@ def abbreviate_party_names(party_names_list, general_party_df):
                 party_abvs_list.append('SOPA')
             elif party == "Labor/Country Labor":
                 party_abvs_list.append('ALP')
+            elif party == "Science Party/Australian Cyclists Party":
+                party_abvs_list.append('FTCY')
+            elif party == 'Australian Sex Party/Marijuana (HEMP) Party':
+                party_abvs_list.append('SXHM')
             else:
+                if general_party_df.loc[(general_party_df["PartyNm"] == party) | (general_party_df["RegisteredPartyAb"] == party),"PartyAb"].empty:
+                    import pdb;pdb.set_trace()
                 party_abvs_list.append(general_party_df.loc[(general_party_df["PartyNm"] == party) | (general_party_df["RegisteredPartyAb"] == party),"PartyAb"].iloc[0])
         else:
             party_abvs_list.append('')
@@ -69,7 +78,7 @@ general_party_df = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", skiprows =
 general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',"PartyAb"] = 'GRN' # handle exceptions, but think GVIC is the only one
 
 
-def get_Senate_party_abvs_dict():
+def get_Senate_party_abvs_dict(data_year):
     # quickly extracts abvs from the senate without needing to read all of Formal Prefs
 
 
@@ -81,6 +90,7 @@ def get_Senate_party_abvs_dict():
         filename = f"{data_year}FormalPrefs{state}.csv"
 
         state_Formal_prefs = pd.read_csv(filename, nrows=2)
+        state_Formal_prefs = state_Formal_prefs.drop(columns=state_Formal_prefs.columns[FP_ID_COLUMNS])
 
         state_Formal_prefs_dict = {state: group.reset_index(drop=True).apply(
             lambda col: pd.to_numeric(col, downcast='float') if pd.api.types.is_numeric_dtype(col) else col
@@ -92,32 +102,225 @@ def get_Senate_party_abvs_dict():
     div_to_state = pd.read_csv(f"{data_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
     div_to_state_dict = {div: div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
 
-
-
     Senate_party_abvs_dict = {}
     for div in div_to_state_dict.keys():
         #import pdb;pdb.set_trace()
         state = div_to_state_dict[div] # gets StateAb
         formal_prefs_full = Formal_prefs_dict[state]
-        formal_prefs = formal_prefs_full.iloc[:, 6:]
+        formal_prefs = formal_prefs_full.iloc[:, START_OF_PREFS:]
         formal_prefs.columns = formal_prefs.columns.str.split(':').str[0] # keep only party grouping as key
         start_of_BTL_index = next(i for i, col in enumerate(formal_prefs.columns) if formal_prefs.columns[:i].tolist().count(col) == 1) # locates first instance of column name count repeated
 
         # store group party names (from ATL) in Senate_party_names_dict
-        group_party_names = formal_prefs_full.iloc[:, 6:].columns[:start_of_BTL_index] # includes both group and party names
+        group_party_names = formal_prefs_full.iloc[:, START_OF_PREFS:].columns[:start_of_BTL_index] # includes both group and party names
         party_names_list = group_party_names.str.split(':').str[-1].tolist() # records only party names
-        print(div)
         party_abvs_list = abbreviate_party_names(party_names_list, general_party_df)
         Senate_party_abvs_dict[div] = party_abvs_list
     
     # write to csv
     Senate_parties_by_div =  pd.DataFrame(list(Senate_party_abvs_dict.items()), columns=["div_nm", "PartyAbList"])
-    #Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) 
+    Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) 
 
-    return 1
+    return Senate_party_abvs_dict
 
 
-#get_Senate_party_abvs_dict()
+Senate_party_abvs_dict = get_Senate_party_abvs_dict(data_year)
+
+
+def make_unique(names):
+    """ Append suffixes to duplicate column names to make them unique. """
+    counts = Counter()
+    unique_names = []
+    
+    for name in names:
+        if counts[name] > 0:
+            new_name = f"{name}_dup{counts[name]}"  # Add suffix
+        else:
+            new_name = name
+        counts[name] += 1
+        unique_names.append(new_name)
+
+    return unique_names
+
+
+
+
+def split_and_convert_2016(series, cols, chunk_size=500000, output_file="processed_data.parquet", return_df=True):
+    """Processes large CSV-like columns in chunks, writes to disk, and optionally returns a final DataFrame."""
+    
+    max_columns = len(cols)
+
+    def parse_row(s):
+        """Splits a row and converts elements to integers, handling empty values."""
+        items = s.rstrip(',').split(',')
+        return [int(i) if i.isdigit() else np.nan for i in items[:max_columns]] + [np.nan] * (max_columns - len(items))
+
+    first_chunk = True
+    for chunk_start in range(0, len(series), chunk_size):
+        chunk = series.iloc[chunk_start : chunk_start + chunk_size]  # Select batch
+        chunk_parsed = np.array([parse_row(row) for row in chunk], dtype=np.float32)  # Process batch
+        
+        # ✅ Convert to Pandas DataFrame (but do not store it in memory)
+        chunk_df = pd.DataFrame(chunk_parsed)
+
+        # ✅ Convert to Pandas nullable Int16 (fixes NaN issues)
+        chunk_df = chunk_df.convert_dtypes().astype("Int16")
+
+        chunk_df.columns = make_unique(cols) 
+
+        # ✅ Write chunk directly to file (No concatenation)
+        chunk_df.to_parquet(output_file, engine="fastparquet", index=False, compression="snappy", append=not first_chunk)
+        first_chunk = False  # Append mode for next chunks
+
+        # ✅ Explicitly delete unused objects to free memory
+        del chunk, chunk_parsed, chunk_df
+        gc.collect()  # Force garbage collection
+
+        print(f"Processed and saved chunk {chunk_start // chunk_size + 1}")
+
+    print("Processing complete. Data saved to", output_file)
+
+    # ✅ Optionally return DataFrame (but loads everything into memory)
+    if return_df:
+        print("Loading final DataFrame into memory...")
+        return pd.read_parquet(output_file, engine="fastparquet")
+    
+
+def get_2016_Formal_Prefs(state):
+    ### reads in the unusual 2016 Formal Prefs csv file, filling in the header column with senate groupings, and expanding the csv string into a df
+
+    #1. LOAD DATA & CLEAN
+    SenateCandidates_2016 = pd.read_csv("2016SenateCandidates.csv", index_col = None)
+    SenateCandidates_2016 = SenateCandidates_2016.loc[SenateCandidates_2016["nom_ty"] == 'S',["state_ab","ticket","party_ballot_nm"]]
+    SenateCandidates_2016.rename(columns={"state_ab": "StateAb", "party_ballot_nm": "party_nm"}, inplace=True)
+
+    StateSenateCandidates_2016 = SenateCandidates_2016.loc[SenateCandidates_2016['StateAb'] == state,:]
+    StateSenateCandidates_2016.loc[:,'party_nm'] = StateSenateCandidates_2016.loc[:,'party_nm'].fillna('') # for ungrouped
+
+    # 2. COALITION(S) inspect if there are coalitions and give them PartyAb
+    nonUG = StateSenateCandidates_2016.loc[~(StateSenateCandidates_2016['ticket']=='UG'),]
+    coalition_df = nonUG[nonUG.groupby('ticket')['party_nm'].transform('nunique')>1].iloc[:,1:].drop_duplicates(ignore_index=True).groupby("ticket", as_index=False)['party_nm'].agg("/".join)
+
+
+    if not coalition_df.empty:
+        coalition_group_dict = coalition_df.set_index("ticket")["party_nm"].to_dict() #coalition_party_names = nonUG[nonUG.groupby('ticket')['party_nm'].transform('nunique')>1]['party_nm'].unique()
+        # map dictionary
+        StateSenateCandidates_2016.loc[:,"party_nm"] = StateSenateCandidates_2016["ticket"].map(coalition_group_dict).where(StateSenateCandidates_2016["ticket"].isin(coalition_group_dict), StateSenateCandidates_2016["party_nm"])
+
+    party_names_list = StateSenateCandidates_2016.loc[StateSenateCandidates_2016['ticket']!='UG','party_nm'].drop_duplicates(ignore_index=True).tolist()
+
+    # 3. convert to PartyAb and format for Formal Preferences
+    party_abvs = abbreviate_party_names(party_names_list, general_party_df)
+
+    party_names_abvs_dict = dict(zip(party_names_list,party_abvs))
+    StateSenateCandidates_2016 = StateSenateCandidates_2016.copy() # avoid warning ..?
+    StateSenateCandidates_2016.loc[:,'party_nm'] = StateSenateCandidates_2016.loc[:,'party_nm'].replace(party_names_abvs_dict)
+    StateSenateCandidates_2016.loc[StateSenateCandidates_2016['ticket'] == 'UG','party_nm'] = ''
+
+    # format string column names
+    group_party_names = StateSenateCandidates_2016['ticket'].astype(str) + ':' + StateSenateCandidates_2016['party_nm'].astype(str)
+    unique_groups = group_party_names[~group_party_names.str.startswith('UG')].drop_duplicates(ignore_index=True)
+    group_party_names = unique_groups.tolist() + group_party_names.tolist()
+
+
+
+
+    # 4. PROCESS Formal_Prefs_file and add columns
+    curr_formal_prefs_2016 = pd.read_csv(f"2016FormalPrefs{state}.csv", index_col = None, usecols=['ElectorateNm', 'VoteCollectionPointNm','Preferences'], dtype={-1: str}).rename(columns = {'ElectorateNm': 'div_nm', 'VoteCollectionPointNm': 'pp_nm'})
+    curr_formal_prefs_2016 = curr_formal_prefs_2016.iloc[1:,] # eliminate ---- row
+
+    last_col = curr_formal_prefs_2016.columns[-1]
+    # replace any non-int or empty values with 1 (* or /)
+    curr_formal_prefs_2016.iloc[:,-1] = curr_formal_prefs_2016.iloc[:,-1].apply(lambda x: ','.join(['1' if not val.isdigit() and val != '' else val for val in x.split(',')]))
+
+    max_col_no = len(group_party_names) # number of candidate/party boxes - group_party_names is, as above, the intended header for the df
+    expanded_cols = split_and_convert_2016(curr_formal_prefs_2016.iloc[:,-1],cols = group_party_names)     #expanded_cols = expanded_cols.astype('float32')
+
+    new_column_names = group_party_names
+
+    if len(new_column_names) == expanded_cols.shape[1]:
+        expanded_cols.columns = new_column_names
+
+    curr_formal_prefs_2016 = pd.concat([curr_formal_prefs_2016.drop(columns=[last_col]), expanded_cols], axis=1)
+
+
+    return curr_formal_prefs_2016
+
+def get_2019_NSW_Formal_Prefs(filename, state):
+    df_columns = pd.read_csv(filename, index_col=None, nrows=1).columns
+    # fix malformed file using readlines:
+    expected_columns = len(df_columns)  # You can adjust this number to match your actual expected columns
+    batch_size = 1_000_000  # Process 1 million rows at a time
+    dataframes = []  # Store DataFrames in a lis
+
+    # Read the CSV file line by line
+    with open(filename, 'r') as file:
+        
+        buffer = io.StringIO()  # Create an in-memory file buffer
+
+        batch = []
+        row_count = 0  # Keep track of rows read
+
+        for i, line in enumerate(file, start = -1):
+            if i == -1:
+                continue  # Skip the first row
+
+            row = line.strip().split(',') # Split the line by commas
+
+            # Fix malformed rows by padding or truncating
+            if len(row) < expected_columns:
+                row.extend([np.nan] * (expected_columns - len(row)))
+            elif len(row) > expected_columns:
+                import pdb;pdb.set_trace()
+
+                print("AHHHHHHHHHHHH")
+                row = row[:expected_columns]
+            
+            buffer.write(",".join(map(str, row)) + "\n")
+            row_count += 1
+
+            # Process and store each batch
+            if row_count % batch_size == 0:
+                print(f"Processing batch {len(dataframes) + 1}, rows read: {row_count}")  # Debugging
+                buffer.seek(0)  # Move to start of buffer
+                df_batch = pd.read_csv(buffer, names=df_columns)
+                df_batch.drop(columns=df_batch.columns[FP_ID_COLUMNS], inplace=True)
+                dataframes.append(df_batch)
+
+                buffer = io.StringIO()  # Reset buffer
+                del df_batch
+                gc.collect() # free memory
+                batch = []  # free memory
+                print("done", time.time() - start)
+
+        # Process any remaining rows
+        if buffer.tell() > 0:
+            buffer.seek(0)
+            df_batch = pd.read_csv(buffer, names=df_columns)
+            print(f"Processing final batch, rows read: {row_count}")  # Debugging
+
+
+            df_batch.drop(columns=df_batch.columns[FP_ID_COLUMNS], inplace=True) # remove id columns
+            #df_batch.iloc[:, START_OF_PREFS:] = df_batch.iloc[:, START_OF_PREFS:]#.apply(pd.to_numeric, errors='coerce') #.astype('Int16')
+            dataframes.append(df_batch)
+
+            del df_batch
+            gc.collect() # free memory # free memory
+            print("done", time.time() - start)
+
+    # Combine all batches into a final DataFrame
+    if dataframes:
+        curr_Formal_prefs = pd.concat(dataframes, ignore_index=True)
+        for col in curr_Formal_prefs.columns[3:]:
+            curr_Formal_prefs[col] = curr_Formal_prefs[col].astype(np.float32) # convert to float32 when finished
+            #print(col)
+        dataframes = [] # free memory
+        print("Final DataFrame shape:", curr_Formal_prefs.shape)
+    else:
+        print("No data was read from the file.")
+
+    return curr_Formal_prefs
+
 
 def optimize_dataframe(df):
     # Convert all remaining numeric columns to smallest possible int type
@@ -127,77 +330,19 @@ def optimize_dataframe(df):
 
 
 Formal_prefs_dict = {}
-states = ['NSW']
-#states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
+#states = ['VIC']
+states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
 for state in states: # currently only 2016 onwards
 
     gc.collect()
-
-
     print(state)
     filename = f"{data_year}FormalPrefs{state}.csv"
 
+    if data_year == '2016':
+        curr_Formal_prefs = get_2016_Formal_Prefs(state)
+
     if (state == 'NSW') & (data_year == '2019'):
-
-        df_columns = pd.read_csv(filename, index_col=None, nrows=1).columns
-        # fix malformed file using readlines:
-        expected_columns = len(df_columns)  # You can adjust this number to match your actual expected columns
-        batch_size = 1_000_000  # Process 1 million rows at a time
-        dataframes = []  # Store DataFrames in a lis
-
-        # Read the CSV file line by line
-        with open(filename, 'r') as file:
-            
-            batch = []
-            row_count = 0  # Keep track of rows read
-
-            for i, line in enumerate(file, start = -1):
-                if i == -1:
-                    continue  # Skip the first row
-
-                row = line.strip().split(',') # Split the line by commas
-
-                # Fix malformed rows by padding or truncating
-                if len(row) < expected_columns:
-                    row.extend([np.nan] * (expected_columns - len(row)))
-                elif len(row) > expected_columns:
-                    import pdb;pdb.set_trace()
-
-                    print("AHHHHHHHHHHHH")
-                    row = row[:expected_columns]
-                
-                batch.append(row)
-                row_count += 1
-
-                # Process and store each batch
-                if row_count % batch_size == 0:
-                    print(f"Processing batch {len(dataframes) + 1}, rows read: {row_count}")  # Debugging
-                    df_batch = pd.DataFrame(batch, columns=df_columns)
-                    df_batch.drop(columns=df_batch.columns[FP_ID_COLUMNS])
-                    dataframes.append(df_batch)
-                    batch = []  # Reset batch, clears memory
-                    print("done", time.time() - start)
-
-            # Process any remaining rows
-            if batch:
-                print(f"Processing final batch, rows read: {row_count}")  # Debugging
-                df_batch = pd.DataFrame(batch, columns=df_columns)
-                df_batch = df_batch.drop(columns=df_batch.columns[FP_ID_COLUMNS]) # remove id columns
-                df_batch.iloc[:, START_OF_PREFS:] = df_batch.iloc[:, START_OF_PREFS:]#.apply(pd.to_numeric, errors='coerce') #.astype('Int16')
-                dataframes.append(df_batch)
-                print("done", time.time() - start)
-
-        # Combine all batches into a final DataFrame
-        if dataframes:
-            curr_Formal_prefs = pd.concat(dataframes, ignore_index=True)
-            import pdb;pdb.set_trace()
-            for col in curr_Formal_prefs.columns[3:]:
-                curr_Formal_prefs[col] = pd.to_numeric(curr_Formal_prefs[col], errors='raise').astype(np.float32) # convert to float32 when finished
-                print(col)
-            print("Final DataFrame shape:", curr_Formal_prefs.shape)
-        else:
-            print("No data was read from the file.")
-        #curr_Formal_prefs = pd.concat(dataframes, ignore_index=True)
+        curr_Formal_prefs = get_2019_NSW_Formal_Prefs(filename, state) # deal with malformed csv file
 
     else:
         # low memory try - convert to float32 later when using!
@@ -207,20 +352,15 @@ for state in states: # currently only 2016 onwards
             dtype_dict[col] = 'float32'
 
         curr_Formal_prefs = pd.read_csv(filename, index_col=None, na_values=["NaN", "nan"], dtype=dtype_dict)
-        curr_Formal_prefs = curr_Formal_prefs.drop(columns=df_batch.columns[FP_ID_COLUMNS]) # remove id columns
+        curr_Formal_prefs = curr_Formal_prefs.drop(columns=curr_Formal_prefs.columns[FP_ID_COLUMNS]) # remove id columns
 
     
     curr_Formal_prefs.rename(columns={"Division": "div_nm", "Vote Collection Point Name": "pp_nm"}, inplace=True)
 
-    # Not enough memory --> downcast floats to lower order for numeric columns
-    state_div_Formal_prefs_dict = {
-        div: group.reset_index(drop=True)  # optimize_dataframe(group.reset_index(drop=True)
-        for div, group in curr_Formal_prefs.groupby("div_nm")
-    } 
-    for key, group in state_div_Formal_prefs_dict.items():
-        Formal_prefs_dict[key] = group # assumes no keys (divs) overlap for different states :)
+    for div, group in curr_Formal_prefs.groupby("div_nm"):
+        Formal_prefs_dict[div] = group.reset_index(drop=True)  # optimize_dataframe(group.reset_index(drop=True)
 
-    curr_Formal_prefs = {}
+    del curr_Formal_prefs
 
     print("done", time.time() - start)
 
@@ -297,7 +437,7 @@ def allocate_votes(df, allocation_set):
     else:
         duplicate_indices = [] # no duplicated 1st prefs
 
-    print("done", time.time() - start)
+    #print("done", time.time() - start)
 
     return allocated_votes, duplicate_indices # duplicate_indices are index object!
 
@@ -320,30 +460,7 @@ def allocate_votes_duplicates(df, allocation_set):
 
         return duplicate_votes_series
 
-
-def abbreviate_party_names(party_names_list, general_party_df):
-    # handle exceptions to party names
-    party_abvs_list = []
-
-    for party in party_names_list:
-        #print(party)
-        if party:
-            if party == "Liberal/The Nationals" or party == "Liberal & Nationals": # handle LIB/NAT Exception - I think best to treat them as one party in the Senate as they always contest together, and then reverse engineer House split if needed
-                party_abvs_list.append('COAL')
-            elif party == " Science, Pirate, Secular, Climate Emergency": # SOPA exception
-                party_abvs_list.append('SOPA')
-            else:
-                party_abvs_list.append(general_party_df.loc[(general_party_df["PartyNm"] == party) | (general_party_df["RegisteredPartyAb"] == party),"PartyAb"].iloc[0])
-        else:
-            party_abvs_list.append('')
-
-
-        #import pdb;pdb.set_trace()
-
-    return party_abvs_list
-
-
-def allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_party_df):
+def allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_party_df, Senate_party_abvs_dict):
 
     # produce df or dictionary of dfs with concatenated ATL&uniqueBTL and the First Preference vote in the last column
 
@@ -356,11 +473,6 @@ def allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_
         formal_prefs.columns = formal_prefs.columns.str.split(':').str[0] # keep only party grouping as key
         start_of_BTL_index = next(i for i, col in enumerate(formal_prefs.columns) if formal_prefs.columns[:i].tolist().count(col) == 1) # locates first instance of column name count repeated
 
-        # store group party names (from ATL) in Senate_party_names_dict
-        group_party_names = formal_prefs_full.iloc[:, START_OF_PREFS:].columns[:start_of_BTL_index] # includes both group and party names
-        party_names_list = group_party_names.str.split(':').str[-1].tolist() # records only party names
-        party_abvs_list = abbreviate_party_names(party_names_list, general_party_df)
-        Senate_party_abvs_dict[div] = party_abvs_list
 
 
         first_prefs_set = formal_prefs.columns.unique().tolist() # all cols including 'UG'
@@ -377,9 +489,7 @@ def allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_
         Formal_prefs_dict[div] = pd.concat([Formal_prefs_dict[div].iloc[:,1:3], formal_prefs_first_prefs], axis=1)
         #print(Formal_prefs_dict[div])
 
-    return Formal_prefs_dict, Senate_party_abvs_dict
-
-
+    return Formal_prefs_dict
 
 
 
@@ -390,15 +500,26 @@ list4 = []
 
 
 
+# get correpondence between Booth name and pp_id for given year
+Polling_Places_df = pd.read_csv(f"{data_year}GeneralPollingPlaces.csv", index_col = None, skiprows = 1)
+Polling_Places_df = Polling_Places_df.iloc[:,2:6].rename(columns={'DivisionNm': 'div_nm','PollingPlaceID': 'pp_id','PollingPlaceNm':'pp_nm'})
+Polling_Places_df = Polling_Places_df.loc[Polling_Places_df['PollingPlaceTypeID'].isin([1,5]),].drop('PollingPlaceTypeID', axis=1)
 
-First_Prefs_by_PP_Complete = pd.read_csv("2022FirstPrefsByPPComplete.csv", index_col = None)
-Booth_name_pp_id = First_Prefs_by_PP_Complete.iloc[:,:3].drop_duplicates()
+for div in Polling_Places_df['div_nm'].unique().tolist():
+    Other_row = pd.DataFrame({"div_nm": [div],"pp_id":[0],"pp_nm":["Other"]})
+    Polling_Places_df = pd.concat([Polling_Places_df,Other_row], ignore_index=True)
+
+Booth_name_pp_id = Polling_Places_df
+
+
+# First_Prefs_by_PP_Complete = pd.read_csv(f"{data_year}FirstPrefsByPPComplete.csv", index_col = None)
+# Booth_name_pp_id = First_Prefs_by_PP_Complete.iloc[:,:3].drop_duplicates()
 
 
 
 def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_set):
 
-    Final_allocated_votes = pd.DataFrame(index=formal_prefs_div.index, columns=allocation_set, data = 0) # df of allocated votes for each candidate, should preserve order of df
+    Final_allocated_votes = pd.DataFrame(index=formal_prefs_div.index, columns=allocation_set, data = 0.0) # df of allocated votes for each candidate, should preserve order of df
     Final_allocated_votes["First_Preferences"] = formal_prefs_div["Vote"]
 
     # building groups based on first preference vote, either allocate vote directly to allocation_set if one of them, else allocate by group among later preferences
@@ -423,8 +544,7 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
             # iteratively add duplicate votes proportionate to # of cnadidates duplicated
             duplicate_for_party_df["Vote"] = allocate_votes_duplicates(duplicate_for_party_df, allocation_set) # get series of candidates for each duplicate votes
             
-            Subsection_final_votes.iloc[:, :-1] = Subsection_final_votes.iloc[:, :-1].apply(pd.to_numeric)
-            Subsection_final_votes.iloc[:,:-1] = Subsection_final_votes.iloc[:,:-1].astype(float)
+            Subsection_final_votes = Subsection_final_votes.astype({col: "float64" for col in Subsection_final_votes.columns[:-1]})
 
             for row in duplicate_for_party_df.index:
                 duplicate_vote_list = duplicate_for_party_df.loc[duplicate_for_party_df.index == row,"Vote"].iloc[0] # iloc makes it a list
@@ -438,8 +558,19 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
             mask = allocated_votes_subsection["Vote"].isna() & ~allocated_votes_subsection.index.isin(duplicate_indices_subsection)
             Subsection_final_votes.loc[mask] = pd.DataFrame([Party_preferences_proportions.values] * sum(mask), index=Subsection_final_votes.index[mask], columns=Subsection_final_votes.columns) # changed from mask.sum()
 
-            Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party,Final_allocated_votes.columns[:-1]] = Subsection_final_votes # fill out full table
+            #Final_allocated_votes.iloc[:, :-1] = Final_allocated_votes.iloc[:, :-1].astype(float)
+            if Final_allocated_votes.columns.duplicated().any():
+                import pdb;pdb.set_trace()
+                print("Warning: Duplicate column names found!")
+                Final_allocated_votes = Final_allocated_votes.loc[:, ~Final_allocated_votes.columns.duplicated()]  # Drop duplicates
 
+            # Select numeric columns correctly
+            numeric_columns = Final_allocated_votes.select_dtypes(include=['number']).columns  
+
+            # Convert the selected numeric columns to float (ensuring proper data types)
+            Final_allocated_votes[numeric_columns] = Final_allocated_votes[numeric_columns].astype(float)
+
+            Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party,Final_allocated_votes.columns[:-1]] = Subsection_final_votes.values # fill out full table
 
 
     Final_allocated_votes_df = pd.concat([formal_prefs_div.iloc[:,:2], Final_allocated_votes], axis=1).drop(columns = "First_Preferences") # return 1st 3 cols & remove last
@@ -451,6 +582,7 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
 
     # GROUP THE STARTSWITH ABSENT,PREPOLL,POSTAL,PROVISIONAL,EAV,REMOTEMT,SPECIALMT,OTHERMT TOGETHER WITH PP_ID 0, THE REST MERGE WITH PP_IDS
     Other_booth_type_prefixes = ['Remote Mobile', 'Other Mobile','Special Hospital','EAV','ABSENT','PROVISIONAL','PRE_POLL','POSTAL']
+
     Final_allocated_votes_aggregated_df.loc[:,"pp_nm"] = Final_allocated_votes_aggregated_df.loc[:,"pp_nm"].apply(lambda x: 'Other' if any(x.startswith(prefix) for prefix in Other_booth_type_prefixes) else x)
     Final_allocated_votes_aggregated_df = Final_allocated_votes_aggregated_df.groupby(["div_nm", "pp_nm"], as_index=False).sum() # group again
 
@@ -459,17 +591,15 @@ def allocate_formal_preferences_to_allocation_set(formal_prefs_div, allocation_s
     # switch pp_nm to pp_id
     Final_allocated_votes_aggregated_df = pd.merge(Final_allocated_votes_aggregated_df, Booth_name_pp_id, on = ['div_nm','pp_nm'], how='left')
     Final_allocated_votes_aggregated_df.loc[:,'pp_nm'] = Final_allocated_votes_aggregated_df.loc[:,'pp_id']
-    import pdb;pdb.set_trace()
 
     Final_allocated_votes_aggregated_df.drop(columns=['pp_id'], inplace=True)
     Final_allocated_votes_aggregated_df.rename(columns={"pp_nm":"pp_id"}, inplace=True)
-
 
     return Final_allocated_votes_aggregated_df
 
 
 
-def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, application_dict):
+def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, application_dict, by_div = 1):
     #### application_dict is one of 1,2,3 (incumbency_advantage),4
 
     Final_allocated_pcts_aggregated_dict = {}
@@ -482,8 +612,8 @@ def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, app
         allocation_set = []
         # Goal is to preserve order of allocation_abvs_list in allocation_set
         for party in allocation_abvs_list:  # Iterate through allocation_abvs_list directly
+
             if party in Senate_party_abvs_dict[div]: 
-            
                 i = Senate_party_abvs_dict[div].index(party) # Find the index of the party in this div and use it to get the corresponding Senate Group name
                 allocation_set.append(Formal_prefs_dict[div].columns[2:len(Senate_party_abvs_dict[div])+2][i])  # Append the corresponding group 'letter'
         #for i, party in enumerate(Senate_party_abvs_dict[div]):
@@ -492,7 +622,7 @@ def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, app
 
         # allocate to allocation_set and convert to percentages
         Final_allocated_pcts_aggregated_dict[div] = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[div], allocation_set)
-        Final_allocated_pcts_aggregated_dict[div].iloc[:, 2:] = Final_allocated_pcts_aggregated_dict[div].iloc[:, 2:].div(Final_allocated_pcts_aggregated_dict[div].drop(columns=['div_nm','pp_nm']).sum(axis=1), axis=0)
+        Final_allocated_pcts_aggregated_dict[div].iloc[:, 2:] = Final_allocated_pcts_aggregated_dict[div].iloc[:, 2:].div(Final_allocated_pcts_aggregated_dict[div].drop(columns=['div_nm','pp_id']).sum(axis=1), axis=0)
 
     return Final_allocated_pcts_aggregated_dict
 
@@ -532,7 +662,7 @@ def convert_partyab_to_senate_group_names(allocation_abvs_list, Formal_prefs_dic
     return allocation_set
     
 
-def allocate_Formal_prefs_Redistribution_change(Formal_prefs_dict, Senate_party_abvs_dict, Redistribution_pair_c1_c2_lists):
+def allocate_Formal_prefs_Redistribution_change(Formal_prefs_dict, Senate_party_abvs_dict, Redistribution_pair_c1_c2_lists, DOP_By_PP_Pref_Percent_wide_dict, DOP_By_PP_Expand_wide_dict):
     #### want to produce a df that 
 
     Final_allocated_pcts_aggregated_dict = {}
@@ -543,10 +673,23 @@ def allocate_Formal_prefs_Redistribution_change(Formal_prefs_dict, Senate_party_
 
     for index, row in Redistribution_pair_c1_c2_lists.iterrows(): # only apply to relevant division pairs
 
+        mlist = ast.literal_eval(row['m_list'])
+        c1list = len(ast.literal_eval(row['c1_list']))
+        c2list = len(ast.literal_eval(row['c2_list']))
+        m,c1,c2 = len(mlist),len(c1list),len(c2list)
+
         c1_m_c2_dict = {}
+
         import pdb;pdb.set_trace()
 
         giver_div = row[0]
+
+        # determine full c1 set to start with - redistribution_votes
+        wide_df = DOP_By_PP_Pref_Percent_wide_dict[giver_div]
+        Final_Count_Number = wide_df.iloc[-1,1]
+        redistribution_votes = wide_df.loc[wide_df['CountNumber'] ==  (Final_Count_Number+2) - c1,1:].drop('CountNumber', axis = 1)
+
+
 
         for idx, (col_name, value) in enumerate(row.iloc[2:].items()): # iterate over the 3 lists of PartyAb
             allocation_abvs_list = ast.literal_eval(value) #(= row[col_name]) list of PartyAb to allocate to
@@ -562,22 +705,17 @@ def allocate_Formal_prefs_Redistribution_change(Formal_prefs_dict, Senate_party_
                 df = Final_allocated_pcts_aggregated_dict[giver_div]
                 import pdb;pdb.set_trace()
                 df.iloc[:, 2:] = df.iloc[:, 2:].div(df.drop(columns=['div_nm','pp_id']).sum(axis=1), axis=0) # percentages
-                c1_m_c2_dict[col_name] = df
+                c1_m_c2_dict[col_name] = df.iloc[:,1:].set_index("pp_id")
 
         # do all the fancy calculations now
         import pdb;pdb.set_trace()
-
-
         # 1-> 2. Percentage transfer
 
         # first m candidates the same, remaining c1 - 
-        m = len(ast.literal_eval(row['m_list']))
-        c1 = len(ast.literal_eval(row['c1_list']))
-        c2 = len(ast.literal_eval(row['c2_list']))
 
         if c1 > m:
-            sum_c1_extras = c1_m_c2_dict['c1_list'].iloc[:,2+m:].sum(axis=1) # sum values in row for extra c1 candidates (first 2 rows are info)
-            c1_m_c2_dict['transfer_percent'] = (c1_m_c2_dict['m_list'].iloc[:,2:] - c1_m_c2_dict['c1_list'].iloc[:,2:2+m])/sum_c1_extras # must be positive
+            sum_c1_extras = c1_m_c2_dict['c1_list'].iloc[:,m:].sum(axis=1) # sum values in row for extra c1 candidates (first 2 rows are info) - PPID USED AS INDEX NOW SO ALL NUMERIC
+            c1_m_c2_dict['transfer_percent'] = (c1_m_c2_dict['m_list'] - c1_m_c2_dict['c1_list'].iloc[:,:m])/sum_c1_extras # must be positive
         else:
             #zero_df = c1_m_c2_dict['m_list'].iloc[:,2:].loc[:, c1_m_c2_dict['m_list'].iloc[:,2:].columns] = 0
             #c1_m_c2_dict['transfer_percent'] =zero_df
@@ -586,14 +724,26 @@ def allocate_Formal_prefs_Redistribution_change(Formal_prefs_dict, Senate_party_
 
         if c2 > m:
             # separately, save proportion donated by m parties, and proportions of donation total recieved by extra c2 parties
-            c1_m_c2_dict['donation_proportion'] = 1 - (c1_m_c2_dict['c2_list'].iloc[:,2:2+m] / c1_m_c2_dict['m_list'].iloc[:,2:].replace(0, float('nan'))).fillna(0) # avoid division by 0
-            sum_c2_etras = c1_m_c2_dict['c2_list'].iloc[:,2+m:].sum(axis=1)
-            c1_m_c2_dict['receiving_proportion'] = c1_m_c2_dict['c2_list'].iloc[:,2+6:].div(sum_c2_etras, axis=0) # of c2 extra candidates, get proportion donated to each
-            
-            
+            c1_m_c2_dict['donation_proportion'] = 1 - (c1_m_c2_dict['c2_list'].iloc[:,:m] / c1_m_c2_dict['m_list'].replace(0, float('nan'))).fillna(0) # avoid division by 0
+            sum_c2_etras = c1_m_c2_dict['c2_list'].iloc[:,m:].sum(axis=1)
+            c1_m_c2_dict['receiving_proportion'] = c1_m_c2_dict['c2_list'].iloc[:,m:].div(sum_c2_etras, axis=0) # of c2 extra candidates, get proportion donated to each
         else: 
             c1_m_c2_dict['donation_proportion'] = 0
             c1_m_c2_dict['receiving_proportion'] = 0
+
+        # align together redistribution_votes, c1_m_c2_dict['transfer_percent'], c1_m_c2_dict['donation_proportion'],  c1_m_c2_dict['receiving_proportion']
+
+        # sort rows by pp_id, apply to columns
+        extra_c1_parties = list(set(c1) - set(m))
+        total_percentages_to_transfer = redistribution_votes[extra_c1_parties].sum(axis=1)
+        transfers_by_PP = c1_m_c2_dict['transfer_percent'].mul(total_percentages_to_transfer, axis=0) 
+        
+        redistribution_votes = redistribution_votes[mlist] + transfers_by_PP # add new transferred values to original redistribution votes
+
+        total_donation_percentages = redistribution_votes.multiply(c1_m_c2_dict['donation_proportion']).sum(axis=1) # WILL COLUMNS PARTYABS ALIGN???
+        receiving_percentages = c1_m_c2_dict['receiving_proportion'].mul(total_donation_percentages, axis=0)
+        redistribution_votes = redistribution_votes.multiply(1 - c1_m_c2_dict['donation_proportion']) # proportions remaining for the m parties
+        redistribution_votes = pd.concat([redistribution_votes, receiving_percentages], axis = 1)
             
 
         # 1. Combine all state division DOPByPP together for each redistribution state
@@ -606,8 +756,8 @@ def allocate_Formal_prefs_Redistribution_change(Formal_prefs_dict, Senate_party_
 
 
 
-def whole_procedure(Formal_prefs_dict,general_party_df):
-    Formal_prefs_dict, Senate_party_abvs_dict = allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_party_df)
+def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict):
+    Formal_prefs_dict = allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_party_df, Senate_party_abvs_dict)
 
     print("done", time.time() - start)
     # make list of senate parties for check if they match house ones
@@ -615,13 +765,8 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
     Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) # currently off
     #import pdb;pdb.set_trace()
 
-
-    #application_dict = {}
-    #application_dict['Bass'] = ['JLN','GRN','LP','ON','ALP']
-    #application_dict['Franklin'] = ['TLOC','ALP','JLN','LP','GRN']
-
-    Incumbent_advantage = 0
-    candidate_change_redistribution = 1
+    Incumbent_advantage = 1
+    candidate_change_redistribution = 0
 
     if Incumbent_advantage:
         Final_x_House_df = pd.read_csv(f"{data_year}Final_x_for_Incumbency.csv")
@@ -635,7 +780,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
 
         import pdb;pdb.set_trace()
 
-        Senate_votes = pd.concat([df.melt(id_vars=["div_nm"], value_vars=df.columns[1:], var_name="PartyAb", value_name="Senate_Pct") for df in Final_allocated_pcts_aggregated_dict.values()], ignore_index=True).reset_index(drop=True)
+        Senate_votes = pd.concat([df.melt(id_vars=["div_nm",'pp_id'], value_vars=df.columns[2:], var_name="PartyAb", value_name="Senate_Pct") for df in Final_allocated_pcts_aggregated_dict.values()], ignore_index=True).reset_index(drop=True)
         print(Senate_votes)
         import pdb;pdb.set_trace()
         Final_x_HS_df = pd.concat([Final_x_House_df, Senate_votes.drop(columns=['div_nm', 'PartyAb'])], axis=1)[["div_nm","PartyAb","is_incumbent","is_historic_incumbent","House_Pct","Senate_Pct"]]
@@ -650,7 +795,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df):
     return Final_allocated_pcts_aggregated_dict, Final_x_HS_df
 
 
-Final_allocated_pcts_aggregated_dict, Final_x_HS_df = whole_procedure(Formal_prefs_dict,general_party_df)
+Final_allocated_pcts_aggregated_dict, Final_x_HS_df = whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict)
 
 
 
