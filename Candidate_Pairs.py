@@ -267,6 +267,7 @@ def create_DOP_By_PP_csvs(data_year):
 DOP_By_PP_Expand = pd.read_csv("2022DOP_By_PP_Expand.csv", index_col=None)
 DOP_By_PP_Pref_Percent = pd.read_csv("2022DOP_By_PP_Pref_Percent.csv", index_col=None)
 
+import pdb;pdb.set_trace()
 
 def convert_long_to_wide_format(DOP_table_long):
 
@@ -563,7 +564,16 @@ def complex_redistribution(div1,div2,expand_dict, VoteCount_dict,m,c1,c2,set1,se
 
     return redistributed_votes
 
-def independent_redistribution():
+def independent_redistribution(div1,div2,DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict,m,c1,c2):
+    # 1. get top 5 cands
+    # 2. reverse incumb.advantage
+    # 3. expand to full vote
+
+    wide_df1 = DOP_By_PP_Pref_Percent_wide_dict[div1]
+    #wide_df2 = DOP_By_PP_Expand_wide_dict[div2]
+
+    reduced_votes_by_PP = wide_df1.loc[wide_df1['CountNumber'] == c1-m,1:] # when 5 candidates remaining
+    reduced_votes_by_PP = reduced_votes_by_PP[reduced_votes_by_PP>0].sort_index()
 
     return 1
 

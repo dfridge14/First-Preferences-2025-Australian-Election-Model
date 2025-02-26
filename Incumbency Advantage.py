@@ -199,7 +199,6 @@ import pdb;pdb.set_trace()
 print(Final_x_party_not_in_senate)
 
 
-
 Final_x_df_for_Incumbency = Final_x_df.loc[~Final_x_df["div_nm"].isin(Final_x_party_not_in_senate),]
 Final_x_df_for_Incumbency.to_csv(f"{data_year}Final_x_for_Incumbency.csv", index=False)
 
