@@ -145,6 +145,9 @@ Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency['Year
 Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency.loc[:,"is_historic_incumbent"].astype(int)
 
 
+Incumbents_by_div = Candidate_Incumbency.loc[Candidate_Incumbency['is_incumbent'] == 1,['div_nm','PartyAb']]
+
+
 Final_x_df = Final_x_df.merge(Candidate_Incumbency, on=Final_x_df.columns.tolist(), how='left')
 Final_x_df.loc[:,["is_incumbent","is_historic_incumbent"]] = (Final_x_df.loc[:,["is_incumbent","is_historic_incumbent"]].fillna(0).infer_objects(copy=False)) # replace non-historic-elected with 0s
 Final_x_df = Final_x_df.drop(columns = ['Surname', 'GivenNm','Year'])
