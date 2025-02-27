@@ -6,15 +6,17 @@ import ast
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
 
-data_year = "2019"
+data_year = "2016"
 
 
 incumbent_df = pd.read_csv("incumbent_df.csv")
 
 election_years = ['1993','1996','1998','2001','2004','2007','2010','2013','2016','2019','2022']
 
-final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
+final_cand_no_dict = {"2022":5, "2019": 4, "2016": 3,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
 FINAL_CAND_NO = final_cand_no_dict[data_year]
+
+INTERESTED_NO_CANDS = 5
 
 
 # Next task - add 2 columns to Top 5 DOP in each electorate: was elected last year (or byelection???) 
@@ -102,18 +104,21 @@ for div in Div_DOP_dict.keys():
     DOP_table_vote_pcts_long = DOP_table_vote_pcts_long[["CountNumber","PartyAb","CalculationValue"]] # only values needed
     DOP_table_vote_percents_wide = convert_to_wide_format(DOP_table_vote_pcts_long, "DOP")
 
+    # ignore divs that have fewer than INTERESTED_NO_CANDS candidates
 
-    final_count_no =  num_pref_counts - 1 - (FINAL_CAND_NO - 2) # final CountNumber - (desired_candidate_no - # of remaining parties in final count)
-    Final_x = DOP_table_vote_percents_wide.iloc[final_count_no,1:].reset_index() #.rename(columns={1: 'House_Pct'})
-    Final_x.columns = ['PartyAb','House_Pct']
+    if DOP_table_vote_percents_wide.iloc[-1,0] >= INTERESTED_NO_CANDS - 2: # 0 is column index of CountNumber
 
-    Final_x = Final_x.loc[Final_x['House_Pct'] > 0,] # only 5 remaining parties
-    Final_x.loc[:,"div_nm"] = div
-    
-    Final_x_div_dict[div] = Final_x[["div_nm","PartyAb",'House_Pct']]
+        final_count_no =  num_pref_counts - 1 - (INTERESTED_NO_CANDS - 2) # final CountNumber - (desired_candidate_no - # of remaining parties in final count)
+        Final_x = DOP_table_vote_percents_wide.iloc[final_count_no,1:].reset_index() #.rename(columns={1: 'House_Pct'})
+        Final_x.columns = ['PartyAb','House_Pct']
 
-    if "IND" in Final_x['PartyAb'].values:
-        print(div)
+        Final_x = Final_x.loc[Final_x['House_Pct'] > 0,] # only 5 remaining parties
+        Final_x.loc[:,"div_nm"] = div
+        
+        Final_x_div_dict[div] = Final_x[["div_nm","PartyAb",'House_Pct']]
+
+        if "IND" in Final_x['PartyAb'].values:
+            print(div)
 
 
 
@@ -166,16 +171,6 @@ Final_x_df = Final_x_df.drop(columns = ['Surname', 'GivenNm','Year'])
 
 
 
-
-#indeps_Final_x_divs = []
-#for div in Final_x_div_dict.keys():
-#    for i in range(FINAL_CAND_NO):
-#        if "IND" in Final_x_div_dict[div]["PartyAb"].values[i]:
-#            indeps_Final_x_divs.append(div)
-#indeps_Final_x_divs.append('Solomon')
-#indeps_Final_x_divs.append('Lingiari')
-#indeps_Final_x_divs.append('Fenner')
-
 # remove those with final 5 that are not in senate - extend to any party whose not in the senate
 
 
@@ -204,8 +199,10 @@ Final_x_party_not_in_senate = []
 
 for div in Final_x_df["div_nm"].unique(): #Final_x_div_dict.keys():
     #print(div)
-    for i in range(FINAL_CAND_NO):
+    for i in range(INTERESTED_NO_CANDS):
+
         if Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i] not in Senate_parties_by_div.loc[Senate_parties_by_div["div_nm"] == div,"PartyAbList"].iloc[0]:
+            print(div)
             print(Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i])
             Final_x_party_not_in_senate.append(div)
 
@@ -225,7 +222,7 @@ print(Final_x_party_has_2_COALs)
 Final_x_df_for_Incumbency = Final_x_df_for_Incumbency.loc[~Final_x_df["div_nm"].isin(Final_x_party_has_2_COALs),]
 
 
-Final_x_df_for_Incumbency.to_csv(f"{data_year}Final_x_for_Incumbency.csv", index=False)
+Final_x_df_for_Incumbency.to_csv(f"{data_year}Final_{INTERESTED_NO_CANDS}_for_Incumbency.csv", index=False)
 
 
 

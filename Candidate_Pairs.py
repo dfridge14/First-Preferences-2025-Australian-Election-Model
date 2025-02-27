@@ -121,6 +121,7 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
             num_pref_counts = (DOP_table_long.iloc[-1,0] + 1) # num of final count + original FP count
 
             DOP_table_long.loc[:,'PartyAb'] = pd.concat([adjusted_party_names] * num_pref_counts, ignore_index=True)
+            DOP_table_long.loc[DOP_table_long["PartyAb"] == "GVIC","PartyAb"] = 'GRN' # change any GVIC into GRN ------ manual fix!
 
 
             DOP_table_long = DOP_table_long.drop(columns=['Count'])
@@ -328,10 +329,7 @@ Incumbency_by_div = pd.read_csv(f"{data_year}Incumbents.csv", index_col = None)
 
 def independent_to_c1(div1, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, c1,Incumbency_by_div, FINAL_CANDIDATE_NO):
     ### adjusts votes of c1 candidate for incumbency advantage
-
-    # 1. get top 5 cands
-    # 2. reverse incumb.advantage
-    # 3. expand to full vote
+    # 1. get top 5 cands, 2. reverse incumb.advantage, 3. expand to full vote
 
     wide_df1 = DOP_By_PP_Pref_Percent_wide_dict[div1]
     wide_df_expand = DOP_By_PP_Expand_wide_dict[div1] # same div here!
@@ -536,6 +534,8 @@ def get_c1_c2_sets(Redistribution_pairs_df, Elimination_order_dict, Senate_parti
             redistribution_party_type = "simple"
             print("simple", div1,div2)
             simplerd += 1
+
+            
         else:
             redistribution_party_type = "non-simple"
             print("not simple", div1,div2)
@@ -605,6 +605,10 @@ def simple_redistribution(div1,div2,DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_P
     return redistributed_votes
 
 
+
+
+
+
 def reduce_candidates_to_set_size(div, DOP_By_PP_Pref_Percent_wide_dict, reduced_c_size):
     wide_df1 = DOP_By_PP_Pref_Percent_wide_dict[div]
 
@@ -617,6 +621,9 @@ def reduce_candidates_to_set_size(div, DOP_By_PP_Pref_Percent_wide_dict, reduced
     reduced_votes_by_PP = reduced_votes_by_PP.sort_index() # maybe redundant
 
     return reduced_votes_by_PP
+
+
+
 
 def expand_candidates_to_set_size(div, reduced_votes_by_PP, DOP_By_PP_Expand_wide_dict, c_size, expanded_c_size):
     
@@ -641,40 +648,25 @@ def expand_candidates_to_set_size(div, reduced_votes_by_PP, DOP_By_PP_Expand_wid
 
     return expanded_votes
 
-    return
+def complex_redistribution(div1,div2,DOP_By_PP_Pref_Percent_wide_dict, DOP_By_PP_Expand_wide_dict,m,c1,c2,set1,set2):
 
-def complex_redistribution(div1,div2,expand_dict, VoteCount_dict,m,c1,c2,set1,set2):
-
-    wide_df1 = DOP_By_PP_Pref_Percent_wide_dict[div1]
-    wide_df2 = DOP_By_PP_Expand_wide_dict[div2]
-
-    import pdb;pdb.set_trace()
-
-    reduced_votes_by_PP = wide_df1.loc[wide_df1['CountNumber'] == c1-m,1:] # c1-m matches the count number!
-    reduced_votes_by_PP = reduced_votes_by_PP.drop(columns=[reduced_votes_by_PP.columns[1]]) # remove CountNumber col!
-    reduced_votes_by_PP.iloc[:, 1:] = reduced_votes_by_PP.iloc[:, 1:].where(reduced_votes_by_PP.iloc[:, 1:] > 0)
-    reduced_votes_by_PP = reduced_votes_by_PP.sort_index() # maybe redundant
+    
+    reduced_votes_by_PP = reduce_candidates_to_set_size(div1, DOP_By_PP_Pref_Percent_wide_dict, c1) # want to reduce div1 to c1 candidates
+    
+    # apply First Preferences allocation
 
     # Use FP to get senate versions of A) reduced_votes = c1 B) common votes = m C) expanded votes = c2
     # calculate the % shifts in both A>B,B>C
     # apply to reduced_votes --> c2
 
-    for i in reversed(range(len(set2)-c2)):
-        expand_div2 = expand_dict[div2].iloc[i,1:]
-        common_div2 = expand_div2[expand_div2>0].sort_index()
+    
+    redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes_by_PP, DOP_By_PP_Expand_wide_dict, c2, expanded_c_size)
 
-        lost_votes = round(common_div2*redistributed_votes).astype(int) # alphabetically-sorted 
-        redistributed_votes = reduced_votes - lost_votes
-        to_expand_party = pd.Series([sum(lost_votes)], index=expand_div2[expand_div2==0].index) # expand_div2 has 0 entry for the party that is being expanded to
-        redistributed_votes = pd.concat([redistributed_votes, to_expand_party]).sort_index()
+
+
 
     return redistributed_votes
 
-
-
-def complex_independent_redistribution():
-
-    return 1
 
 
 # reduce dict (key='div_nm') contains transfer percents to each remaining party for each elimination, directly from DOP Transfer Percentage (in wide format)
@@ -683,7 +675,6 @@ reduce_dict = {}
 expand_dict = {}
 
 SA1_By_PP_Votes_2022 = pd.read_csv("2022SA1_By_PP_Votes.csv", index_col=None)
-
 SA1s_with_votes = set(SA1_By_PP_Votes_2022.iloc[:,1])
 
 new_seats_list = ['Bullwinkel']
@@ -701,10 +692,13 @@ recase_map = {'Mcmahon':'McMahon', 'Mcewen':'McEwen','Eden-monaro':'Eden-Monaro'
 
 Redistribution_pair_SA1s.iloc[:,:2] = Redistribution_pair_SA1s.iloc[:,:2].replace(recase_map)
 
+Redistribution_pairs = Redistribution_pair_SA1s.iloc[:,:2]
+Redistribution_pairs.to_csv("RedistributionPairs2024.csv", index = False)
 
 
-Redistribution_pair_c1_c2_lists = get_c1_c2_sets(Redistribution_pair_SA1s.iloc[:,:2], Elimination_order_dict, Senate_parties_by_div, new_seats_list)
-#Redistribution_pair_c1_c2_lists.to_csv("Redistribution_pair_c1_c2_lists2024.csv", index=False)
+
+Redistribution_pair_c1_c2_lists = get_c1_c2_sets(Redistribution_pairs, Elimination_order_dict, Senate_parties_by_div, new_seats_list)
+Redistribution_pair_c1_c2_lists.to_csv("Redistribution_pair_c1_c2_lists2024.csv", index=False)
 
 import pdb;pdb.set_trace()
 
