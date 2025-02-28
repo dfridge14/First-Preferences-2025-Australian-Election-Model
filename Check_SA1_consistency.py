@@ -27,6 +27,8 @@ SA1_By_PP_SA1_CODE16 = pd.read_csv("SA1_By_PP_Complete.csv", index_col=None)
 
 def perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_2016_2021, SA1_By_PP_SA1_CODE16):
 
+    ### inputs SA1_Correspondence_2016_2021: a df of proportions of each 2016 SA1 that were transferred to 2021 SA1s, and SA1_By_PP_SA1_CODE16, the Votes_By_PP_Complete file from the previous election
+
     SA1_Correspondence_2016_2021_redistribution = SA1_Correspondence_2016_2021.loc[SA1_Correspondence_2016_2021["SA1_CODE16"].str.startswith(("1","2","5","7")),] # NSW,VIC,WA,NT
     SA1_Correspondence_2016_2021_redistribution_changed = SA1_Correspondence_2016_2021_redistribution.loc[(SA1_Correspondence_2016_2021_redistribution["RATIO_FROM_TO"]<1-MIN_OBSERVABLE_RATIO) & (SA1_Correspondence_2016_2021_redistribution["RATIO_FROM_TO"]>MIN_OBSERVABLE_RATIO),]
 

@@ -132,7 +132,7 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
             Final_2_Parties = DOP_table_wide.iloc[-1,1:][DOP_table_wide.iloc[-1,] > 0].index.tolist()
             Elim_order_list = Elim_order_list_part + Final_2_Parties
 
-            # give INDs distinct names based on division and convert LP and NP into COAL in Victoria
+            # give INDs distinct names based on division and convert LP and NP into COAL in Victoria/NSW
             for i, party in enumerate(Elim_order_list):
                 if party.startswith('IND'):
                     Elim_order_list[i] = party + div # e.g. IND1Goldstein

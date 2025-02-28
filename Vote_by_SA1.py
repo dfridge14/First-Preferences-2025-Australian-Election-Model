@@ -1,9 +1,7 @@
 import pandas as pd
-import geopandas as gpd
 import numpy as np
 import os, time
-import matplotlib
-from matplotlib import pyplot as plt
+import glob
 
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
@@ -16,7 +14,6 @@ div_nm = "Melbourne"
 start = time.time()
 
 
-SA1_By_PP_Complete = pd.read_csv("SA1_By_PP_Complete.csv", index_col=None)
 
 redistribution_states = ["VIC","NSW","WA","NT"]
 for state in redistribution_states:
@@ -28,10 +25,10 @@ for state in redistribution_states:
 #print(VIC_SA1s_Redistribution)
 # artificially remove As/Bs - will need systematic approach! - using rstrip # manually checked to be well behaved!
 
-# collect all redistributions - VIC,NSW,WA,NT
 
 # will need to create dictionary of SA1s
-redistribution_SA1s = {div: group for div, group in VIC_SA1s_Redistribution.groupby("old_div")}
+Redistribution_SA1_changes2024 = pd.read_csv("Redistribution_SA1_changes2024.csv", index_col = None)
+redistribution_SA1s_dict = {div: group for div, group in Redistribution_SA1_changes2024.groupby("old_div")}
 
 #Aston_redistribution = VIC_SA1s_Redistribution.loc[(VIC_SA1s_Redistribution["new_div"] == "Aston") & (VIC_SA1s_Redistribution["old_div"] != "Aston") & (VIC_SA1s_Redistribution["curr_enrol"] + VIC_SA1s_Redistribution["proj_enrol"]>0),]
 #Aston_redistribution.loc[:, "SA1_CODE16"] = Aston_redistribution["SA1_CODE16"].str.rstrip('A')
@@ -45,10 +42,29 @@ redistribution_SA1s = {div: group for div, group in VIC_SA1s_Redistribution.grou
 
 # preliminary dictionary imports and massaging
 First_Prefs_by_PP_Complete = pd.read_csv(f'{data_year}FirstPrefsByPPComplete.csv', index_col=None)
+SA1_By_PP_Complete = pd.read_csv("SA1_By_PP_Complete.csv", index_col=None)
+
 
 # Dictionaries of all division first_prefs and SA1s
 Div_First_Prefs_PP_dict = {div: group for div, group in First_Prefs_by_PP_Complete.groupby("div_nm")}
 Div_SA1_By_PP_dict = {div: group for div, group in SA1_By_PP_Complete.groupby("div_nm")}
+
+
+def load_FPBPPRed_dict():
+    df_dict_reloaded = {}
+    output_folder = "feather Redistribution pairs 2024"
+    for filepath in glob.glob(f"{output_folder}/*.feather"):
+        # Extract keys from filename
+        parts = filepath.split("_")
+        key = (parts[1], int(parts[2].split(".")[0]))  # Convert second part to int
+
+        # Read the file back
+        df_dict_reloaded[key] = pd.read_feather(filepath)
+    
+    return df_dict_reloaded
+
+# obtain all relevant redistribution pairs
+Redistributed_First_Prefs_by_PP_Complete_dict = load_FPBPPRed_dict()
 
 
 def unique_SA1s_dict(Div_SA1_By_PP_dict):
@@ -184,14 +200,29 @@ def rectify_div_SA1_votes(div_nm):
     return 1
 
 def rectify_redistribution_SA1_votes(Div_SA1_By_PP_dict_wide, redistribution_divs):
+    
+    rectify_div_SA1_votes = {}
 
     for div in redistribution_divs:
-        rectify_div_SA1_votes[div]
+        rectify_div_SA1_votes[div] = rectify_div_SA1_votes(div_nm)
 
-    return 1
+    return rectify_div_SA1_votes
 
 
 rectify_div_SA1_votes(div_nm)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 start = time.time()

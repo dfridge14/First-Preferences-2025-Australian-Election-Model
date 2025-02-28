@@ -202,7 +202,6 @@ for div in Final_x_df["div_nm"].unique(): #Final_x_div_dict.keys():
     for i in range(INTERESTED_NO_CANDS):
 
         if Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i] not in Senate_parties_by_div.loc[Senate_parties_by_div["div_nm"] == div,"PartyAbList"].iloc[0]:
-            print(div)
             print(Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i])
             Final_x_party_not_in_senate.append(div)
 
