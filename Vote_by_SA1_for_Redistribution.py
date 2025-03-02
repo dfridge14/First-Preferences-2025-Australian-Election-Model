@@ -99,7 +99,7 @@ Div_SA1_By_PP_dict_wide = convert_dict_to_wide_format(Div_SA1_By_PP_dict, "SA1s"
 
 
 
-def rectify_div_SA1_votes(div_nm):
+def rectify_div_SA1_votes(div_nm, Div_SA1_By_PP_dict_wide):
     ### updates Div_SA1_By_PP_dict_wide by matching # votes in SA1sByPP to the true numbers of House votes in each PP, using sampling without 
     ### replacement to make up the difference
 
