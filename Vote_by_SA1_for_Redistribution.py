@@ -10,6 +10,8 @@ data_year = "2022"
 
 div_nm = "Melbourne"
 
+# TO DO: BOOTH TYPE AND CENTROIDS - USE SOME VERSION OF PPREPOSITORY
+
 
 start = time.time()
 
@@ -17,10 +19,17 @@ start = time.time()
 # will need to create dictionary of SA1s
 Redistribution_SA1_changes2024 = pd.read_csv("Redistribution_SA1_changes2024.csv", index_col = None)
 redistribution_SA1s_dict = {div: group for div, group in Redistribution_SA1_changes2024.groupby("old_div")}
+new_divs_set = set(Redistribution_SA1_changes2024[['new_div']].unique())
+old_divs_set = set(Redistribution_SA1_changes2024[['old_div']].unique())
+redistribution_divs = list(new_divs_set & old_divs_set)
 
 
 # preliminary dictionary imports and massaging
 First_Prefs_by_PP_Complete = pd.read_csv(f'{data_year}FirstPrefsByPPComplete.csv', index_col=None)
+
+#Polling_Places_Repository = pd.read_csv(f'PollingPlaces{data_year}Repository.csv', index_col=None)
+
+PP_coords = First_Prefs_by_PP_Complete[['div_nm','pp_id','Booth_type','Lat','Long']].drop_duplicates(drop=True)
 SA1_By_PP_Complete = pd.read_csv("SA1_By_PP_Complete.csv", index_col=None)
 
 
@@ -43,15 +52,15 @@ def load_FPBPPRed_dict():
     return df_dict_reloaded
 
 # obtain all relevant redistribution pairs
-Div_First_Prefs_Red_PP_dict = load_FPBPPRed_dict()
+Red_Div_First_Prefs_PP_dict_wide = load_FPBPPRed_dict()
 
 
 def unique_SA1s_dict(Div_SA1_By_PP_dict):
     # generates dict of list of unique SA1s for each division
     unique_SA1s_dict = {}
 
-    for division in Div_SA1_By_PP_dict:
-        unique_SA1s_dict[division] = Div_SA1_By_PP_dict[division]["SA1_CODE16"].unique()
+    for div in Div_SA1_By_PP_dict.keys():
+        unique_SA1s_dict[div] = Div_SA1_By_PP_dict[div]["SA1_CODE16"].unique()
 
     return unique_SA1s_dict
 
@@ -99,7 +108,7 @@ Div_SA1_By_PP_dict_wide = convert_dict_to_wide_format(Div_SA1_By_PP_dict, "SA1s"
 
 
 
-def rectify_div_SA1_votes(div_nm, Div_SA1_By_PP_dict_wide):
+def rectify_div_SA1_votes(div_nm, Div_SA1_By_PP_dict_wide, Red_Div_First_Prefs_PP_dict_wide):
     ### updates Div_SA1_By_PP_dict_wide by matching # votes in SA1sByPP to the true numbers of House votes in each PP, using sampling without 
     ### replacement to make up the difference
 
@@ -176,19 +185,19 @@ def rectify_div_SA1_votes(div_nm, Div_SA1_By_PP_dict_wide):
     Div_SA1_By_PP_dict_wide[div_nm] = all.drop(columns=['n','K','vote_difference','Sampled','New_K'])
     #Sampled_Deakin = all[["pp_id","Sampled"]]
 
-    return 1
+    return Div_SA1_By_PP_dict_wide[div_nm]
 
-def rectify_redistribution_SA1_votes(Div_SA1_By_PP_dict_wide, redistribution_divs):
+def rectify_redistribution_SA1_votes(Div_SA1_By_PP_dict_wide, Red_Div_First_Prefs_PP_dict_wide, redistribution_divs):
     
     rectify_div_SA1_votes = {}
 
     for div in redistribution_divs:
-        rectify_div_SA1_votes[div] = rectify_div_SA1_votes(div_nm)
+        rectify_div_SA1_votes[div] = rectify_div_SA1_votes(div_nm, Div_SA1_By_PP_dict_wide, Div_First_Prefs_PP_dict_wide)
 
     return rectify_div_SA1_votes
 
 
-rectify_div_SA1_votes(div_nm)
+Div_SA1_By_PP_dict_wide = rectify_redistribution_SA1_votes(Div_SA1_By_PP_dict_wide, Red_Div_First_Prefs_PP_dict_wide, redistribution_divs)
 
 
 
@@ -316,14 +325,14 @@ def haversine(PP_Lat, PP_Long, SA1_Lat, SA1_Long): # written by chatgpt
 def distance_formula(PP_Lat, PP_Long, SA1_Lat, SA1_Long):
     return haversine(PP_Lat, PP_Long, SA1_Lat, SA1_Long)
 
-def distances_SA1_PP_array(div_nm, Booth_type):
+def distances_SA1_PP_array(div_nm, Booth_type, PP_coords):
     ### computes distances array of pp_id * SA1 for the given division. Sorts pp_id numerically, but SA1s already sorted in SA1_by_PP_Complete!
     ### uses haversine formula for computations
 
 
-    PP_centroids_curr_div_2022 = Div_First_Prefs_PP_dict[div_nm][["pp_id","Lat","Long","Booth_type"]].drop_duplicates().sort_values(by='pp_id').reset_index(drop=True)
+    #PP_centroids_curr_div_2022 = Div_First_Prefs_PP_dict[div_nm][["pp_id","Lat","Long","Booth_type"]].drop_duplicates().sort_values(by='pp_id').reset_index(drop=True)
 
-    PP_coords = PP_centroids_curr_div_2022.loc[PP_centroids_curr_div_2022["Booth_type"] == Booth_type,["pp_id","Lat","Long"]].sort_values(by='pp_id')
+    PP_coords = PP_coords.loc[(PP_coords['div_nm']==div_nm) & (PP_coords["Booth_type"] == Booth_type),["pp_id","Lat","Long"]].sort_values(by='pp_id')
     pp_ids_used = set(PP_coords["pp_id"])
 
     SA1_coords = pd.merge(Div_SA1_By_PP_dict[div_nm][["SA1_CODE16"]].drop_duplicates().reset_index(drop=True).sort_values(by='SA1_CODE16').reset_index(drop=True), SA1_centroids_2016, on="SA1_CODE16", how="left") # adds lat/long to SA1s in div
@@ -379,7 +388,7 @@ def candidate_totals_rebalancing(SA1_vote_array, Booth_type_actual_vote_totals):
 
 
 
-def candidate_prior_simulation_weighted(div_nm, mean, weight_Others):
+def candidate_prior_simulation_weighted(div_nm, mean, weight_Others,PP_coords):
     ### generates array of simulated votes per candidate per SA1 using the doubly-multivariate hypergeometric distribution with given K and n vectors
 
     num_candidates = Div_First_Prefs_PP_dict_wide[div_nm].shape[1] - 1 # includes informal
@@ -393,7 +402,7 @@ def candidate_prior_simulation_weighted(div_nm, mean, weight_Others):
         Booth_type_result_array = np.zeros((num_SA1s,num_candidates))
     
         # get distances bw division PPs and SA1s
-        distances_PB_array, distances_PB_pp_ids = distances_SA1_PP_array(div_nm, Booth_type)
+        distances_PB_array, distances_PB_pp_ids = distances_SA1_PP_array(div_nm, Booth_type, PP_coords)
         # make them into weights
         weights_PB = weights_SA1_PP_array(distances_PB_array, distances_PB_pp_ids, div_nm, "inverse")
 
@@ -476,10 +485,10 @@ def candidate_prior_simulation_weighted(div_nm, mean, weight_Others):
     return np.round(result_array,6)
 
 
-def SA1_candidate_prior_df_output(div_nm,mean):
+def SA1_candidate_prior_df_output(div_nm,mean, PP_coords):
     ### gets array of SA1 vote using weighted algorithm, working with the mean if mean == 1 else using MMHg
 
-    array = candidate_prior_simulation_weighted(div_nm, mean,weight_Others=1)
+    array = candidate_prior_simulation_weighted(div_nm, mean,weight_Others=1, PP_coords)
 
     SA1s = Div_SA1_By_PP_dict_wide[div_nm].columns[1:].tolist()
     candidates = Div_First_Prefs_PP_dict_wide[div_nm].columns[1:].tolist()
@@ -492,7 +501,7 @@ def SA1_candidate_prior_df_output(div_nm,mean):
     return SA1_candidate_prior_df
 
 print("Getting df of output!!!")
-Vote_by_SA1_df = SA1_candidate_prior_df_output(div_nm,1)
+Vote_by_SA1_df = SA1_candidate_prior_df_output(div_nm,1,PP_coords_dict)
 
 # print overall vote counts to check
 print(round(Vote_by_SA1_df.sum()).astype(int))
