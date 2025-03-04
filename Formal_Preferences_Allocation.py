@@ -716,7 +716,7 @@ def optimize_dataframe(df):
 
 
 Formal_prefs_dict = {}
-states = ['VIC']
+states = ['NSW','VIC','WA']
 #states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
 for state in states: # currently only 2016 onwards
 
@@ -1344,7 +1344,7 @@ def adjust_c1_c2_for_incumbency_adv(div, expand_wide_dict, pref_percent_wide_dic
     #import pdb;pdb.set_trace()
 
     if not is_inc: # for expand: only need to return up to this point! i.e. don't perform incumbency adjustment
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
         return reduced_votes_by_PP[remaining_columns]
     
     top_5_columns = remaining_columns
@@ -1620,8 +1620,19 @@ def transform_to_raw_votes(redistributed_votes, giver_div):
 
     grouped_FORMAL = FORMAL_df.groupby('pp_id', as_index=False).agg({'votes': 'sum'}).set_index('pp_id').sort_index()
 
+    # correct for any issues with 0-0 house-senate votes! PERHAPS BETTER TO REMOVE ALTOGETHER???
+    grouped_FORMAL = grouped_FORMAL.reindex(redistributed_votes.index, fill_value=0) # ensure no issue when there are 0 votes in House & Senate (excluded from Formal Prefs & First_Prefs_By_PP_div)
+    INFORMAL_df = INFORMAL_df.reindex(redistributed_votes.index, fill_value=0)
+
+    mask = redistributed_votes.sum(axis=1) == 0
+    redistributed_votes.loc[mask] = redistributed_votes.loc[mask].fillna(0)
+
     # scale redistributed_votes by grouped_FORMAL
     redistributed_votes_raw = (redistributed_votes / 100).mul(grouped_FORMAL['votes'], axis=0) 
+
+    if redistributed_votes_raw.isna().any().any():
+        import pdb;pdb.set_trace()
+
 
     # adjust to get integer values for votes
     redistributed_votes_rounded = redistributed_votes_raw.round().astype(int)
@@ -1769,14 +1780,23 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
 
 
         # temporary - just to do VIC redists:
-        if div_to_state_dict[div1]!= 'VIC':
-            continue
+        #if div_to_state_dict[div1]!= 'VIC':
+        #    continue
+        #if wait and ((div1 not in ['Gorton']) and (div2 not in ['Hawke'])):
+        #    continue
+        #else:
+        #    wait = 0
 
         
-        if wait and ((div1 not in ['Gorton']) and (div2 not in ['Hawke'])):
-            continue
+        # get elimination orders from last election, adjusting if this is new seat. This will always have c2 = m, so no issue that new seats are not a key in all the dicts
+        if div2 in new_seats_list:
+            print("new seat", div1,div2)
+            Elimination_order_dict[div2] = ['LP','ALP','GRN','UAPP','ON'] ################################### TO DO: generalise to all common parties accounting for COAL or NP or LP for specific election
+            list_div2 = Elimination_order_dict[div2]
+            list_div1 = Elimination_order_dict[div1].copy()
         else:
-            wait = 0
+            list_div1, list_div2 = Elimination_order_dict[div1].copy(), Elimination_order_dict[div2].copy() # get elimination orders
+
 
         # separate out COALNP and COALLP where there are 2: ElimOrder, Expand, PrefPercent (x2)
         Coalition_double_divs = []
@@ -1788,20 +1808,8 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
             Coalition_double_divs.append(div2)
         
         #import pdb;pdb.set_trace()
-        
-
-
-        # get elimination orders from last election, adjusting if this is new seat. This will always have c2 = m, so no issue that new seats are not a key in all the dicts
-        if div2 in new_seats_list:
-            print("new seat", div1,div2)
-            list_div2 = ['LP','ALP','GRN','UAPP','ON'] ################################### TO DO: generalise to all common parties accounting for COAL or NP or LP for specific election
-            list_div1 = Elimination_order_dict[div1].copy()
-        else:
-            list_div1, list_div2 = Elimination_order_dict[div1].copy(), Elimination_order_dict[div2].copy() # get elimination orders
 
         set1,set2 = set(list_div1), set(list_div2)
-
-
         common = set1 & set2
         m = len(common)
 
@@ -1887,6 +1895,9 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
                 if (not Coalition_double_divs) or both_separate_COAL_simple: # if latter, m will already be updated above with m = len(LPNP_common)
                     # SIMPLE REDISTRIBUTION WITH INDEPENDENTS/NON-SENATE
 
+                    #import pdb;pdb.set_trace()
+
+
                     if non_senate_parties_div1: # Must reduce c1 further to m
                         reduced_votes = independent_redistribution_reduce(div1, Formal_prefs_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, c1,Incumbency_by_div, div_to_state_dict, FINAL_CANDIDATE_NO, list_div1_FP)
                     else:
@@ -1895,8 +1906,10 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
                     if non_senate_parties_div2: # Now, expand from m to c2, or directly to full
                         reduced_votes = independent_redistribution_expand(div2, Formal_prefs_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2,Incumbency_by_div, div_to_state_dict, FINAL_CANDIDATE_NO, list_div2_FP, votes_to_expand = reduced_votes)
 
-                    redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full') # expand from c2 to full (irrelevant whether there has been an independent update)
-                
+                    if not (div2 in new_seats_list):
+                        redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full') # expand from c2 to full (irrelevant whether there has been an independent update)
+                    else:
+                        redistributed_votes = reduced_votes
                 
                 else:
                     # determine which of the other 3 Coalition_double_div options it is
@@ -1920,9 +1933,11 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
 
                     if non_senate_parties_div2: # Now, expand from m to c2, or directly to full
                         reduced_votes = independent_redistribution_expand(div2, Formal_prefs_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2,Incumbency_by_div, div_to_state_dict, FINAL_CANDIDATE_NO, list_div2_FP, votes_to_expand = reduced_votes, Coalition_double_divs = Coalition_double_divs, combine_double_divs = 1 - first_COAL_simple)
-
-                    redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', Coalition_double_divs = Coalition_double_divs, combine_double_divs = 1 - first_COAL_simple) # expand from c2 to full (irrelevant whether there has been an independent update)
-
+                    
+                    if not (div2 in new_seats_list):
+                        redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', Coalition_double_divs = Coalition_double_divs, combine_double_divs = 1 - first_COAL_simple) # expand from c2 to full (irrelevant whether there has been an independent update)
+                    else:
+                        redistributed_votes = reduced_votes
                     #elif first_COAL_simple: # CAN THIS EVER BE USEFUL, AS WE ARE ALREADY RESTRICTED TO C1- AND C2-? No, but in this case other COAL is in c1/c2-extras. Need to take care when expanding/reducing
                     # first COAL in elimination order appears as COAL, second as COALNP/LP
                     #c1, c2 = len(list_div1_first_COAL), len(list_div2_first_COAL)
@@ -1986,8 +2001,12 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
                 # expand from c2 onwards
                 if non_senate_parties_div2:
                     c2_redistributed_votes = independent_redistribution_expand(div2, Formal_prefs_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2,Incumbency_by_div, div_to_state_dict, FINAL_CANDIDATE_NO, list_div2_FP, votes_to_expand = c2_redistributed_votes, Coalition_double_divs = Coalition_double_divs)
+                
+                if not (div2 in new_seats_list):
+                    redistributed_votes = expand_candidates_to_set_size(div2, c2_redistributed_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', Coalition_double_divs = Coalition_double_divs) # expand from c2 to full (irrelevant whether there has been an independent update)
+                else:
+                    redistributed_votes = c2_redistributed_votes
 
-                redistributed_votes = expand_candidates_to_set_size(div2, c2_redistributed_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', Coalition_double_divs = Coalition_double_divs) # expand from c2 to full (irrelevant whether there has been an independent update)
 
                 print("complex or independent complex",div1,div2) 
                 complexrd += 1   
@@ -1996,11 +2015,12 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
         First_Prefs_By_PP_Complete_Redistributed_dict[(div1,div2)] = First_Prefs_By_PP_Complete_Redistributed.reset_index() # bring back pp_id
 
         print(First_Prefs_By_PP_Complete_Redistributed)
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
 
          
 
     print(simplerd, simpleindrd, complexrd)
+    print(time.time() - start, 'seconds')
     import pdb;pdb.set_trace()
 
     output_folder = "feather Redistribution pairs 2024"
@@ -2008,6 +2028,9 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
     for key, sub_df in First_Prefs_By_PP_Complete_Redistributed_dict.items():
         filename = f"{output_folder}/2024FPBPPRed_{key[0]}_{key[1]}.feather"
         sub_df.reset_index(drop=True).to_feather(filename)
+
+
+    import pdb;pdb.set_trace()
 
     
 
@@ -2119,10 +2142,9 @@ def amend_Formal_prefs_dict(Formal_prefs_dict):
     borrower = 'Blackville'
 
     lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs[:,'pp_nm'] = borrower
-    Formal_prefs_dict['New England'] = pd.concat([FP_div,lender_FPs],axis=0)
+    lender_FPs.loc[:,'pp_nm'] = borrower
+    Formal_prefs_dict['New England'] = pd.concat([FP_div,lender_FPs], ignore_index=True)
 
-    import pdb;pdb.set_trace()
 
     # 2. O'Connor: Manjimup East from Manjimup PPVC
     FP_div = Formal_prefs_dict["O'Connor"]
@@ -2130,9 +2152,9 @@ def amend_Formal_prefs_dict(Formal_prefs_dict):
     borrower = 'Manjimup East'
 
     lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs[:,'pp_nm'] = borrower
-    Formal_prefs_dict["O'Connor"] = pd.concat([FP_div,lender_FPs],axis=0)
-    import pdb;pdb.set_trace()
+    lender_FPs.loc[:,'pp_nm'] = borrower
+    Formal_prefs_dict["O'Connor"] = pd.concat([FP_div,lender_FPs], ignore_index=True)
+
     #3. Holt!
    
     FP_div = Formal_prefs_dict['Holt']
@@ -2141,29 +2163,31 @@ def amend_Formal_prefs_dict(Formal_prefs_dict):
 
     borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['div_nm'] == 'Holt' ) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
     for borrower_pp in borrower_list:
-        to_add_FP = lender_FPs
-        to_add_FP[:,'pp_nm'] = borrower_pp
-        Formal_prefs_dict['Holt'] = pd.concat([Formal_prefs_dict['Holt'],lender_FPs],axis=0)
-    import pdb;pdb.set_trace()
+        to_add_FP = lender_FPs.copy()
+        to_add_FP.loc[:,'pp_nm'] = borrower_pp
+        Formal_prefs_dict['Holt'] = pd.concat([Formal_prefs_dict['Holt'],to_add_FP], ignore_index=True)
+
     # 4. Sydney (Sydney) --> remove from Syndey and add to to Sydney GRAYNDLER
     FP_div = Formal_prefs_dict['Sydney']
     lender = 'Sydney (Sydney)'
     borrower = 'Sydney GRAYNDLER PPVC'
 
     lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs[:,'pp_nm'] = borrower
+    lender_FPs.loc[:,'pp_nm'] = borrower
+    lender_FPs.loc[:,'div_nm'] = 'Grayndler'
     Formal_prefs_dict['Sydney'] = Formal_prefs_dict['Sydney'].loc[Formal_prefs_dict['Sydney']['pp_nm'] != 'Sydney (Sydney)',]
-    Formal_prefs_dict["Grayndler"] = pd.concat([Formal_prefs_dict["Grayndler"],lender_FPs],axis=0)
-    import pdb;pdb.set_trace()
+    Formal_prefs_dict["Grayndler"] = pd.concat([Formal_prefs_dict["Grayndler"],lender_FPs], ignore_index=True)
+
     # 5. Epping ----- PPVC (add Scullin's to McEwen)
     FP_div = Formal_prefs_dict['Scullin']
     lender = 'Epping SCULLIN PPVC'
     borrower = 'Epping MCEWEN PPVC'
 
     lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs[:,'pp_nm'] = borrower
-    Formal_prefs_dict["McEwen"] = pd.concat([Formal_prefs_dict["McEwen"],lender_FPs],axis=0)
-    import pdb;pdb.set_trace()  
+    lender_FPs.loc[:,'pp_nm'] = borrower
+    lender_FPs.loc[:,'div_nm'] = 'McEwen'
+    Formal_prefs_dict["McEwen"] = pd.concat([Formal_prefs_dict["McEwen"],lender_FPs], ignore_index=True)
+
     # 6. MELBOURNE ones - all take from Melbourne MELBOURNE!
     FP_div = Formal_prefs_dict['Melbourne']
     lender = 'Melbourne MELBOURNE PPVC'
@@ -2171,22 +2195,24 @@ def amend_Formal_prefs_dict(Formal_prefs_dict):
 
     borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['div_nm'] == 'Melbourne' ) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
     for borrower_pp in borrower_list:
-        to_add_FP = lender_FPs
-        to_add_FP[:,'pp_nm'] = borrower_pp
-        Formal_prefs_dict['Melbourne'] = pd.concat([Formal_prefs_dict['Melbourne'],lender_FPs],axis=0)
-    import pdb;pdb.set_trace()
+        to_add_FP = lender_FPs.copy()
+        to_add_FP.loc[:,'pp_nm'] = borrower_pp
+        Formal_prefs_dict['Melbourne'] = pd.concat([Formal_prefs_dict['Melbourne'],to_add_FP], ignore_index=True)
+
     # 7. Haymarkets (including BEROWRA!) - take from GRAYNDLER! not neat
     FP_div = Formal_prefs_dict['Grayndler']
     lender = 'Haymarket GRAYNDLER PPVC'
     lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
 
     borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Haymarket')) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
-    for borrower_pp in borrower_list:
-        to_add_FP = lender_FPs
-        to_add_FP[:,'pp_nm'] = borrower_pp
-        borrower_div = borrower_pp.split(' ')[-2].capitalize() 
-        Formal_prefs_dict[borrower_div] = pd.concat([Formal_prefs_dict[borrower_div],lender_FPs],axis=0)
-    import pdb;pdb.set_trace()
+    div_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Haymarket')) & (h_s_discrepancies['senate_votes']==0),'div_nm'].tolist()
+    for i, borrower_pp in enumerate(borrower_list):
+        to_add_FP = lender_FPs.copy()
+        to_add_FP.loc[:,'pp_nm'] = borrower_pp
+        to_add_FP.loc[:,'div_nm'] = div_list[i]
+        borrower_div = div_list[i] #borrower_pp.split(' ')[-2].capitalize() 
+        Formal_prefs_dict[borrower_div] = pd.concat([Formal_prefs_dict[borrower_div],to_add_FP], ignore_index=True)
+
     # 8. # Mill park - all 3 take from scullin!
     FP_div = Formal_prefs_dict['Scullin']
     lender = 'Mill Park SCULLIN PPVC'
@@ -2194,38 +2220,43 @@ def amend_Formal_prefs_dict(Formal_prefs_dict):
     MCEWEN_LIMIT = 30
 
     borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Mill Park')) & (h_s_discrepancies['senate_votes']<MCEWEN_LIMIT),'pp_nm'].tolist()
-    for borrower_pp in borrower_list:
-        to_add_FP = lender_FPs
-        to_add_FP[:,'pp_nm'] = borrower_pp
-        borrower_div = borrower_pp.split(' ')[-2].capitalize() 
-        Formal_prefs_dict[borrower_div] = pd.concat([Formal_prefs_dict[borrower_div],lender_FPs],axis=0)
-    import pdb;pdb.set_trace()
+    div_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Mill Park')) & (h_s_discrepancies['senate_votes']<MCEWEN_LIMIT),'div_nm'].tolist()
+    for i, borrower_pp in enumerate(borrower_list):
+        to_add_FP = lender_FPs.copy()
+        to_add_FP.loc[:,'pp_nm'] = borrower_pp
+        borrower_div = div_list[i] if div_list[i] != 'Mcewen' else 'McEwen'
+        to_add_FP.loc[:,'div_nm'] = borrower_div
+
+        Formal_prefs_dict[borrower_div] = pd.concat([Formal_prefs_dict[borrower_div],to_add_FP], ignore_index=True)
+
     # 9. Newtown - take from GRAYNDLER!
     FP_div = Formal_prefs_dict['Grayndler']
     lender = 'Newtown GRAYNDLER PPVC'
     borrower = 'Newtown SYDNEY PPVC'
 
     lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs[:,'pp_nm'] = borrower
-    Formal_prefs_dict["Sydney"] = pd.concat([Formal_prefs_dict["Sydney"],lender_FPs],axis=0)
-    import pdb;pdb.set_trace()
+    lender_FPs.loc[:,'pp_nm'] = borrower
+    lender_FPs.loc[:,'div_nm'] = 'Sydney'
+    Formal_prefs_dict["Sydney"] = pd.concat([Formal_prefs_dict["Sydney"],lender_FPs], ignore_index=True)
+
     # 10. The Ponds MITCHELL - take form Greenway, but mystery unsolved!
     FP_div = Formal_prefs_dict['Greenway']
     lender = 'The Ponds GREENWAY PPVC'
     borrower = 'The Ponds MITCHELL PPVC'
 
     lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs[:,'pp_nm'] = borrower
-    Formal_prefs_dict["Mitchell"] = pd.concat([Formal_prefs_dict["Mitchell"],lender_FPs],axis=0)
-    import pdb;pdb.set_trace()
+    lender_FPs.loc[:,'pp_nm'] = borrower
+    lender_FPs.loc[:,'pp_nm'] = 'Mitchell'
+    Formal_prefs_dict["Mitchell"] = pd.concat([Formal_prefs_dict["Mitchell"],lender_FPs], ignore_index=True)
+
     # 11. Waverley KINGSFORD SMITH - combine with Randwick KINGSFORD SMITH PPVC - mystery half solved!
     FP_div = Formal_prefs_dict["Kingsford Smith"]
     lender = 'Randwick KINGSFORD SMITH PPVC'
     borrower = 'Waverley KINGSFORD SMITH PPVC'
 
     lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs[:,'pp_nm'] = borrower
-    Formal_prefs_dict["Kingsford Smith"] = pd.concat([FP_div,lender_FPs],axis=0)
+    lender_FPs.loc[:,'pp_nm'] = borrower
+    Formal_prefs_dict["Kingsford Smith"] = pd.concat([FP_div,lender_FPs], ignore_index=True)
     
     import pdb;pdb.set_trace()
     return Formal_prefs_dict
