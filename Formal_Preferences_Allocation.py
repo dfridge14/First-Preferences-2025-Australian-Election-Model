@@ -5,6 +5,7 @@ import ast
 from collections import Counter
 import io
 import os
+import glob
 
 
 import gc
@@ -26,6 +27,10 @@ sys.excepthook = exception_handler
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
 
+
+
+
+
 start = time.time()
 
 
@@ -42,8 +47,6 @@ INCUMBENT_ADVANTAGE = incumbent_advantage_dict[FINAL_CANDIDATE_NO]
 NONINCUMBENT_DISADVANTAGE =  INCUMBENT_ADVANTAGE/(FINAL_CANDIDATE_NO-1)
 
 data_year = '2022'
-
-
 
 # Game plan:
 # Four different places where FormalPrefs will be necessary:
@@ -2014,6 +2017,224 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
 
 
 
+
+def check_house_senate_discrepancies():
+
+    directory = f"C:/Dania/2024/Australian Election/SenateVotesByPP{data_year}"
+    csv_files = sorted(glob.glob(f"{directory}/*.csv"))
+    senate_votes_full = pd.concat((pd.read_csv(f, skiprows=1)[['DivisionNm','PollingPlaceNm','OrdinaryVotes']].groupby(['DivisionNm','PollingPlaceNm'], as_index=False) \
+                                                            .agg({'OrdinaryVotes': 'sum'}) for f in csv_files), ignore_index=True) \
+                                                            .rename(columns={'DivisionNm':'div_nm','PollingPlaceNm':'pp_nm','OrdinaryVotes':'senate_votes'})
+    #senate_votes_full_aston = senate_votes_full.loc[senate_votes_full['div_nm']=='Aston','senate_votes'].sum()
+    #add_Other_category
+    os.chdir('C:\\Dania\\2024\\Australian Election')
+    division_senate_Others = pd.read_csv(f"{data_year}SenateVotesCountedByDivision.csv", skiprows=1).iloc[:,[1,5,6,7,8]].rename(columns={'DivisionNm':'div_nm'})
+    division_senate_Others.loc[:,'senate_votes'] = division_senate_Others.iloc[:, 1:].sum(axis=1)
+    division_senate_Others_sum = division_senate_Others.iloc[:,[0,-1]]
+    division_senate_Others_sum = division_senate_Others_sum.copy()
+    division_senate_Others_sum.loc[:,'pp_nm'] = 'Other'
+    division_senate_Others_sum = division_senate_Others_sum[['div_nm','pp_nm','senate_votes']]
+
+    senate_votes_full = pd.concat([senate_votes_full,division_senate_Others_sum],axis=0)
+
+
+    First_Prefs_By_PP = pd.read_csv("FirstPrefsByPollingPlace2022.csv", skiprows=1,index_col = None)[['pp_nm','div_nm','PartyAb','votes']] 
+    house_votes = First_Prefs_By_PP.groupby(['div_nm','pp_nm'], as_index=False).agg({"votes":"sum"}).rename(columns={'votes':'house_votes'})
+    division_house_Others = pd.read_csv(f"{data_year}HouseVotesCountedByDivision.csv", skiprows=1).iloc[:,[1,5,6,7,8]].rename(columns={'DivisionNm':'div_nm'})
+
+    division_house_Others.loc[:,'house_votes'] = division_house_Others.iloc[:, 1:].sum(axis=1)
+    division_house_Others_sum = division_house_Others.iloc[:,[0,-1]]
+    division_house_Others_sum = division_house_Others_sum.copy()
+    division_house_Others_sum.loc[:,'pp_nm'] = 'Other'
+    division_house_Others_sum = division_house_Others_sum[['div_nm','pp_nm','house_votes']]
+
+
+    house_votes_full = pd.concat([house_votes,division_house_Others_sum],axis=0)
+
+    Other_booth_type_prefixes = ['Remote Mobile', 'Other Mobile','Special Hospital', 'EAV']
+
+    #import pdb;pdb.set_trace()
+
+
+    # combine Others together
+    house_votes_full.loc[:,"pp_nm"] = house_votes_full.loc[:,"pp_nm"].apply(lambda x: 'Other' if any(x.startswith(prefix) for prefix in Other_booth_type_prefixes) else x)
+    senate_votes_full.loc[:,"pp_nm"] = senate_votes_full.loc[:,"pp_nm"].apply(lambda x: 'Other' if any(x.startswith(prefix) for prefix in Other_booth_type_prefixes) else x)
+
+    house_votes_full = house_votes_full.groupby(["div_nm", "pp_nm"], as_index=False).agg({'house_votes':'sum'})
+    senate_votes_full = senate_votes_full.groupby(["div_nm", "pp_nm"], as_index=False).agg({'senate_votes':'sum'})
+
+
+
+
+
+    formal_senate_full_house_comparison = pd.DataFrame(house_votes_full).merge(pd.DataFrame(senate_votes_full), on = ['div_nm','pp_nm'], how='left')  
+    formal_senate_full_house_comparison.loc[:,'house-sen'] = (formal_senate_full_house_comparison.loc[:,'house_votes'] - formal_senate_full_house_comparison.loc[:,'senate_votes']).values          
+
+
+    formal_senate_full_house_comparison.loc[:,'house/sen'] = (formal_senate_full_house_comparison.loc[:,'house_votes'] / formal_senate_full_house_comparison.loc[:,'senate_votes']).values
+
+    #print(formal_senate_full_house_comparison.loc[(formal_senate_full_house_comparison["house/sen"] < 1) & (formal_senate_full_house_comparison['div_nm']<500),])
+
+    #print(formal_senate_full_house_comparison.loc[(formal_senate_full_house_comparison["house/sen"] > 1.2) & (formal_senate_full_house_comparison['div_nm']<500),])
+
+
+
+    # needs attention if less than 200 votes and difference is stark!
+    formal_senate_full_house_comparison.loc[~(formal_senate_full_house_comparison['pp_nm'].str.endswith('PPVC')) & ~(formal_senate_full_house_comparison['pp_nm'].str.endswith('Other')) & (np.abs(formal_senate_full_house_comparison['house-sen'])>100),]       
+
+    # to fix: Duggan? Don't worry about it (maxnamara), HOLT, Manjimup East (O'Connor), Sydney
+    # PPVCs: McEwen Epping, Footscray MELBOURNE, Haymarket MITCHELL/NORTH SYDNEY/PARRAMATTA/(also BEROWRA PPVC),  Mill Park COOPER/JAGAJAGA/MCEWEN,Newtown SYDNEY,Northcote MELBOURNE,South Yarra MELBOURNE, Sydney GRAYNDLER, The Ponds MITCHELL,  Waverley KINGSFORD SMITH
+
+    # Manjimup East (O'Connor) --> Manjimup PPVC combine/use
+
+    # epping - add Scullin's to Mcewen
+    # MELBOURNE ones - all take from Melbourne MELBOURNE!
+    # Haymarkets (including BEROWRA!) - take from GRAYNDLER! not neat
+    # Mill park - all 3 take from scullin!
+    # Newtown - take from GRAYNDLER!
+    # Sydney GRAYNDLER - take from Sydney(Sydney) - solves many problems - This is a fun one! Power of deduction!!!
+    # The Ponds MITCHELL - take form Greenway, but mystery unsolved!
+    # Waverley KINGSFORD SMITH - combine with Randwick KINGSFORD SMITH PPVC - mystery half solved!
+    # New England: take Blackville's from Ben Venue!
+
+    # HOLT: Take all that are 0 from Cranbourne East!!!
+
+    # inspect where house or senates are flat out 0: 
+    zero_house_df = formal_senate_full_house_comparison.loc[(formal_senate_full_house_comparison['house_votes'] == 0 ) ,] 
+    zero_senate_df = formal_senate_full_house_comparison.loc[(formal_senate_full_house_comparison['senate_votes'] == 0 ) ,]   
+
+    # so far uncovered smaller issues - difference less than 100, but may be high proportion of votes!
+    formal_senate_full_house_comparison.loc[(np.abs(formal_senate_full_house_comparison['house-sen'])<100) & (formal_senate_full_house_comparison['house/sen']>1.5),] 
+    # (only concerning one in adelaide)
+    return formal_senate_full_house_comparison
+
+
+def amend_Formal_prefs_dict(Formal_prefs_dict):
+
+    h_s_discrepancies = check_house_senate_discrepancies()
+
+    # 1. New England: take Blackville's from Ben Venue!
+    FP_div = Formal_prefs_dict['New England']
+    lender = 'Ben Venue'
+    borrower = 'Blackville'
+
+    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+    lender_FPs[:,'pp_nm'] = borrower
+    Formal_prefs_dict['New England'] = pd.concat([FP_div,lender_FPs],axis=0)
+
+    import pdb;pdb.set_trace()
+
+    # 2. O'Connor: Manjimup East from Manjimup PPVC
+    FP_div = Formal_prefs_dict["O'Connor"]
+    lender = 'Manjimup PPVC'
+    borrower = 'Manjimup East'
+
+    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+    lender_FPs[:,'pp_nm'] = borrower
+    Formal_prefs_dict["O'Connor"] = pd.concat([FP_div,lender_FPs],axis=0)
+    import pdb;pdb.set_trace()
+    #3. Holt!
+   
+    FP_div = Formal_prefs_dict['Holt']
+    lender = 'Cranbourne East'
+    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+
+    borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['div_nm'] == 'Holt' ) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
+    for borrower_pp in borrower_list:
+        to_add_FP = lender_FPs
+        to_add_FP[:,'pp_nm'] = borrower_pp
+        Formal_prefs_dict['Holt'] = pd.concat([Formal_prefs_dict['Holt'],lender_FPs],axis=0)
+    import pdb;pdb.set_trace()
+    # 4. Sydney (Sydney) --> remove from Syndey and add to to Sydney GRAYNDLER
+    FP_div = Formal_prefs_dict['Sydney']
+    lender = 'Sydney (Sydney)'
+    borrower = 'Sydney GRAYNDLER PPVC'
+
+    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+    lender_FPs[:,'pp_nm'] = borrower
+    Formal_prefs_dict['Sydney'] = Formal_prefs_dict['Sydney'].loc[Formal_prefs_dict['Sydney']['pp_nm'] != 'Sydney (Sydney)',]
+    Formal_prefs_dict["Grayndler"] = pd.concat([Formal_prefs_dict["Grayndler"],lender_FPs],axis=0)
+    import pdb;pdb.set_trace()
+    # 5. Epping ----- PPVC (add Scullin's to McEwen)
+    FP_div = Formal_prefs_dict['Scullin']
+    lender = 'Epping SCULLIN PPVC'
+    borrower = 'Epping MCEWEN PPVC'
+
+    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+    lender_FPs[:,'pp_nm'] = borrower
+    Formal_prefs_dict["McEwen"] = pd.concat([Formal_prefs_dict["McEwen"],lender_FPs],axis=0)
+    import pdb;pdb.set_trace()  
+    # 6. MELBOURNE ones - all take from Melbourne MELBOURNE!
+    FP_div = Formal_prefs_dict['Melbourne']
+    lender = 'Melbourne MELBOURNE PPVC'
+    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+
+    borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['div_nm'] == 'Melbourne' ) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
+    for borrower_pp in borrower_list:
+        to_add_FP = lender_FPs
+        to_add_FP[:,'pp_nm'] = borrower_pp
+        Formal_prefs_dict['Melbourne'] = pd.concat([Formal_prefs_dict['Melbourne'],lender_FPs],axis=0)
+    import pdb;pdb.set_trace()
+    # 7. Haymarkets (including BEROWRA!) - take from GRAYNDLER! not neat
+    FP_div = Formal_prefs_dict['Grayndler']
+    lender = 'Haymarket GRAYNDLER PPVC'
+    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+
+    borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Haymarket')) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
+    for borrower_pp in borrower_list:
+        to_add_FP = lender_FPs
+        to_add_FP[:,'pp_nm'] = borrower_pp
+        borrower_div = borrower_pp.split(' ')[-2].capitalize() 
+        Formal_prefs_dict[borrower_div] = pd.concat([Formal_prefs_dict[borrower_div],lender_FPs],axis=0)
+    import pdb;pdb.set_trace()
+    # 8. # Mill park - all 3 take from scullin!
+    FP_div = Formal_prefs_dict['Scullin']
+    lender = 'Mill Park SCULLIN PPVC'
+    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+    MCEWEN_LIMIT = 30
+
+    borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Mill Park')) & (h_s_discrepancies['senate_votes']<MCEWEN_LIMIT),'pp_nm'].tolist()
+    for borrower_pp in borrower_list:
+        to_add_FP = lender_FPs
+        to_add_FP[:,'pp_nm'] = borrower_pp
+        borrower_div = borrower_pp.split(' ')[-2].capitalize() 
+        Formal_prefs_dict[borrower_div] = pd.concat([Formal_prefs_dict[borrower_div],lender_FPs],axis=0)
+    import pdb;pdb.set_trace()
+    # 9. Newtown - take from GRAYNDLER!
+    FP_div = Formal_prefs_dict['Grayndler']
+    lender = 'Newtown GRAYNDLER PPVC'
+    borrower = 'Newtown SYDNEY PPVC'
+
+    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+    lender_FPs[:,'pp_nm'] = borrower
+    Formal_prefs_dict["Sydney"] = pd.concat([Formal_prefs_dict["Sydney"],lender_FPs],axis=0)
+    import pdb;pdb.set_trace()
+    # 10. The Ponds MITCHELL - take form Greenway, but mystery unsolved!
+    FP_div = Formal_prefs_dict['Greenway']
+    lender = 'The Ponds GREENWAY PPVC'
+    borrower = 'The Ponds MITCHELL PPVC'
+
+    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+    lender_FPs[:,'pp_nm'] = borrower
+    Formal_prefs_dict["Mitchell"] = pd.concat([Formal_prefs_dict["Mitchell"],lender_FPs],axis=0)
+    import pdb;pdb.set_trace()
+    # 11. Waverley KINGSFORD SMITH - combine with Randwick KINGSFORD SMITH PPVC - mystery half solved!
+    FP_div = Formal_prefs_dict["Kingsford Smith"]
+    lender = 'Randwick KINGSFORD SMITH PPVC'
+    borrower = 'Waverley KINGSFORD SMITH PPVC'
+
+    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+    lender_FPs[:,'pp_nm'] = borrower
+    Formal_prefs_dict["Kingsford Smith"] = pd.concat([FP_div,lender_FPs],axis=0)
+    
+    import pdb;pdb.set_trace()
+    return Formal_prefs_dict
+
+
+
+
+
+
 def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, x=5):
     Formal_prefs_dict = allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_party_df, Senate_party_abvs_dict)
 
@@ -2053,6 +2274,8 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
         new_seats_list = ['Bullwinkel']
 
+        Formal_prefs_dict = amend_Formal_prefs_dict(Formal_prefs_dict)
+
         transformed_votes = full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_dict, Senate_parties_by_div, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, Incumbency_by_div, new_seats_list)
 
     return Final_allocated_pcts_aggregated_dict, Final_x_HS_df
@@ -2061,9 +2284,14 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
 
 
-def check_PPVC_discrepancies(Formal_prefs_dict):
+def check_PPVC_discrepancies(Formal_prefs_dict, data_year):
 
     First_Prefs_By_PP = pd.read_csv("FirstPrefsByPollingPlace2022.csv", skiprows=1,index_col = None)[['pp_nm','div_nm','PartyAb','votes']] 
+
+    directory = f"C:/Dania/2024/Australian Election/SenateVotesByPP{data_year}"
+    csv_files = sorted(glob.glob(f"{directory}/*.csv"))
+    senate_votes_full = pd.concat((pd.read_csv(f, skiprows=1)[['DivisionNm','PollingPlaceNm','OrdinaryVotes']].groupby(['DivisionNm','PollingPlaceNm']).agg('sum') for f in csv_files), ignore_index=True)
+
 
     for div in Formal_prefs_dict.keys():
         if div == 'Holt':
@@ -2075,7 +2303,7 @@ def check_PPVC_discrepancies(Formal_prefs_dict):
             #print(formal_senate_full_house_comparison.loc[(formal_senate_full_house_comparison["house/sen"] < 1) & (formal_senate_full_house_comparison['div_nm']<500),])
             print(formal_senate_full_house_comparison.loc[(formal_senate_full_house_comparison["house/sen"] > 1.2) & (formal_senate_full_house_comparison['div_nm']<500),])
 
-        import pdb;pdb.set_trace()
+            import pdb;pdb.set_trace()
 
         # In VIC:
         # Cooper: Northcote South
@@ -2095,7 +2323,7 @@ def check_PPVC_discrepancies(Formal_prefs_dict):
 
     return 1
 
-check_PPVC_discrepancies(Formal_prefs_dict)
+#check_PPVC_discrepancies(Formal_prefs_dict, data_year)
 
 
 Final_allocated_pcts_aggregated_dict, Final_x_HS_df = whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, x=5)
