@@ -3,29 +3,41 @@ import numpy as np
 import os, time
 import glob
 
+# automatic error debugging
+import sys
+import pdb
+import traceback
+
+def exception_handler(type, value, tb):
+    traceback.print_exception(type, value, tb)  # Print the error as usual
+    print("\n--- Entering post-mortem debugging ---\n")
+    pdb.pm()  # Start debugger at the error location
+
+sys.excepthook = exception_handler
+
 
 os.chdir('C:\\Dania\\2024\\Australian Election')
 
+census_year = "2021"
 data_year = "2022"
 
 div_nm = "Melbourne"
-
-# TO DO: BOOTH TYPE AND CENTROIDS - USE SOME VERSION OF PPREPOSITORY
-
 
 start = time.time()
 
 
 # will need to create dictionary of SA1s
 Redistribution_SA1_changes2024 = pd.read_csv("Redistribution_SA1_changes2024.csv", index_col = None)
-redistribution_SA1s_dict = {div: group for div, group in Redistribution_SA1_changes2024.groupby(["old_div",'new_div'])}
-SA1s_giver_div_dict = {div: group for div, group in Redistribution_SA1_changes2024.groupby("old_div")}
 
-new_divs_set = set(Redistribution_SA1_changes2024.loc[:,'new_div'])
+redistribution_SA1s_dict = {div: group.iloc[:,0] for div, group in Redistribution_SA1_changes2024.groupby(["old_div",'new_div'])}
+SA1s_giver_div_dict = {div: group.iloc[:,0] for div, group in Redistribution_SA1_changes2024.groupby("old_div")}
+
+# NOTE: Redistribution_SA1_changes2024 MISSES SOME OF THE SA1S THAT HAVE FEWER THAN 10 VOTES!!!
+
 old_divs_set = set(Redistribution_SA1_changes2024.loc[:,'old_div'])
+new_divs_set = set(Redistribution_SA1_changes2024.loc[:,'new_div'])
 
-redistribution_divs = list(new_divs_set & old_divs_set)
-
+redistirbution_divs_set = old_divs_set | new_divs_set
 
 
 def load_FPBPPRed_dict():
@@ -44,35 +56,74 @@ def load_FPBPPRed_dict():
 # obtain all relevant redistribution pairs
 Redist_Div_First_Prefs_By_PP_dict_wide = load_FPBPPRed_dict()
 
-
-
 # preliminary dictionary imports and massaging
 First_Prefs_by_PP_Complete = pd.read_csv(f'{data_year}FirstPrefsByPPComplete.csv', index_col=None)
 
-#Polling_Places_Repository = pd.read_csv(f'PollingPlaces{data_year}Repository.csv', index_col=None)
 
+
+
+# load some data for PPs and SA1s (types, centroids)
 PP_coords = First_Prefs_by_PP_Complete[['div_nm','pp_id','Booth_type','Lat','Long']].drop_duplicates()
 SA1_By_PP_Votes = pd.read_csv("2022SA1_By_PP_Votes.csv", index_col=None) # SA1_By_PP_Complete /
+
+
+
+SA1_centroids = pd.read_csv(f"SA1_centroids_{census_year}.csv")
+if census_year == '2016':
+    SA1_centroids = SA1_centroids.rename(columns={"SA1_7DIG16": "SA1_CODE16"})
+
+ExistingSA1s = SA1_By_PP_Votes.iloc[:,1].drop_duplicates()
+Ghost_SA1s = ExistingSA1s.loc[~(ExistingSA1s.isin(SA1_centroids['SA1_CODE21'].tolist())) & (ExistingSA1s.astype(str).str.startswith(('1', '2', '5', '7'))),].sort_values().tolist()
+
+# remove Ghost Votes rows from SA1_By_PP_Votes
+SA1_By_PP_Votes = SA1_By_PP_Votes.loc[~SA1_By_PP_Votes['SA1_CODE21'].isin(Ghost_SA1s),]
+
+#SA1_centroids = SA1_centroids.loc[SA1_centroids['SA1_CODE21'].isin(Redistribution_SA1_changes2024['SA1_CODE21'].tolist())]
+
+# check to make sure all redistribution sa1s are in SA1_centroids
+# Redistribution_SA1_changes2024.loc[Redistribution_SA1_changes2024['SA1_CODE21'].isin(SA1_centroids['SA1_CODE21'].tolist()),]  
+
+
+
 
 
 # Dictionaries of all division first_prefs and SA1s
 Div_First_Prefs_By_PP_dict = {div: group for div, group in First_Prefs_by_PP_Complete.groupby("div_nm")}
 Div_SA1_By_PP_dict = {div: group for div, group in SA1_By_PP_Votes.groupby("div_nm")}
 
-import pdb;pdb.set_trace()
-
-
 def unique_SA1s_dict(Div_SA1_By_PP_dict):
     # generates dict of list of unique SA1s for each division
     unique_SA1s_dict = {}
 
     for div in Div_SA1_By_PP_dict.keys():
-        unique_SA1s_dict[div] = Div_SA1_By_PP_dict[div]["SA1_CODE16"].unique()
+        unique_SA1s_dict[div] = Div_SA1_By_PP_dict[div]["SA1_CODE21"].unique()
 
     return unique_SA1s_dict
 
 def convert_to_wide_format(df, df_type):
-    # converts to wide format indexed by pp_id for either First Preferences or SA1 dfs
+    # converts to wide format indexed by pp_id for either First Preferences or SA1 dfs. If First Prefs, it first adjusts the Party names in case of multiple independents
+
+    if df_type == "First Preferences":
+        # adjust to order independents!!!
+        cand_set = df.sort_values(by=['pp_id', 'PartyAb'], key=lambda x: x != 0, ascending=[True, False]) #df.loc[df['pp_id']==0,'PartyAb']
+
+
+        target = 'IND'
+        cand_set['Count'] = cand_set.groupby('PartyAb').cumcount() + 1     # Count instances of the target string
+        # Replace duplicates of the target string with increasing strings A1, A2, A3, ...
+        adjusted_party_names = cand_set.loc[cand_set["pp_id"] == 0,].apply(
+            lambda row: f"{row['PartyAb']}{row['Count']}" if row['PartyAb'] == target else row['PartyAb'], axis=1
+        )
+        num_pp_ids = len(set(cand_set['pp_id'])) # num of final count + original FP count
+
+        # now, add to df!
+        df.loc[:,'PartyAb'] = pd.concat([adjusted_party_names] * num_pp_ids, ignore_index=True).values
+        df.loc[df["PartyAb"] == "GVIC","PartyAb"] = 'GRN' # change any GVIC into GRN ------ manual fix!
+
+
+
+
+
     if df_type == "First Preferences":
         pivot_df = df.pivot_table(index=['pp_id'], 
                                 columns=['PartyAb'], 
@@ -99,18 +150,14 @@ def convert_to_wide_format(df, df_type):
     return pivot_df
 
 def convert_dict_to_wide_format(dict, df_type):
-    converted_dict = {}
 
-    for key in dict:
-        converted_dict[key] = convert_to_wide_format(dict[key], df_type)
+    converted_dict = {key: convert_to_wide_format(dict[key], df_type) for key in dict.keys()}
 
     return converted_dict
 
 # get wide formats for First Prefs and SA1s
 Div_First_Prefs_By_PP_dict_wide = convert_dict_to_wide_format(Div_First_Prefs_By_PP_dict, "First Preferences")
 Div_SA1_By_PP_dict_wide = convert_dict_to_wide_format(Div_SA1_By_PP_dict, "SA1s")
-
-import pdb;pdb.set_trace()
 
 
 
@@ -180,6 +227,9 @@ def rectify_div_SA1_votes(div, Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_di
     # Apply decrementing logic
     updated_counts = all.drop(columns=['pp_id','n','K']).apply(decrement_counts, axis=1)
 
+    updated_counts_32 = updated_counts.iloc[:, :-1].astype('int32')
+    updated_counts = pd.concat([updated_counts_32, updated_counts.iloc[:,-1]], axis=1)
+
     # Update the DataFrame with decremented values
     all.loc[:, all.columns[1:-4].tolist()+all.columns[-1:].tolist()] = updated_counts
     all = all.copy() # to evade PerformanceWarning
@@ -194,14 +244,13 @@ def rectify_div_SA1_votes(div, Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_di
     return Div_SA1_By_PP_dict_wide[div]
 
 
-Div_SA1_By_PP_dict_wide = {div: rectify_div_SA1_votes(div, Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide) for div in redistribution_divs}
+Div_SA1_By_PP_dict_wide = {div: rectify_div_SA1_votes(div, Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide) for div in old_divs_set}
 #rectify_redistribution_SA1_votes(Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, redistribution_divs)
 
 
 
 
 
-import pdb;pdb.set_trace()
 
 
 
@@ -210,19 +259,18 @@ import pdb;pdb.set_trace()
 
 
 
-
-start = time.time()
 
 
 ###########################Load 2021 CENTROIDS!!!!!!!!!!!!!!
 
-# load some data for PPs and SA1s (types, centroids)
-PP_Booth_type = pd.read_csv(f"{data_year}PPBoothtype.csv")
 
-SA1_centroids_2016 = pd.read_csv("SA1_centroids_2016.csv")
-SA1_centroids_2016 = SA1_centroids_2016.rename(columns={"SA1_7DIG16": "SA1_CODE16"})
 
 print("Got all dfs: time = ", time.time() - start)
+
+
+
+#import pdb;pdb.set_trace()
+
 
 
 
@@ -326,21 +374,22 @@ def haversine(PP_Lat, PP_Long, SA1_Lat, SA1_Long): # written by chatgpt
 def distance_formula(PP_Lat, PP_Long, SA1_Lat, SA1_Long):
     return haversine(PP_Lat, PP_Long, SA1_Lat, SA1_Long)
 
-def distances_SA1_PP_array(div_nm, Booth_type, PP_coords):
+def distances_SA1_PP_array(div, Booth_type, PP_coords, SA1_centroids, SA1_wide):
     ### computes distances array of pp_id * SA1 for the given division. Sorts pp_id numerically, but SA1s already sorted in SA1_by_PP_Complete!
     ### uses haversine formula for computations
 
-
     #PP_centroids_curr_div_2022 = Div_First_Prefs_PP_dict[div_nm][["pp_id","Lat","Long","Booth_type"]].drop_duplicates().sort_values(by='pp_id').reset_index(drop=True)
 
-    PP_coords = PP_coords.loc[(PP_coords['div_nm']==div_nm) & (PP_coords["Booth_type"] == Booth_type),["pp_id","Lat","Long"]].sort_values(by='pp_id')
-    pp_ids_used = set(PP_coords["pp_id"])
+    PP_coords_div = PP_coords.loc[(PP_coords['div_nm']==div) & (PP_coords["Booth_type"] == Booth_type),["pp_id","Lat","Long"]].sort_values(by='pp_id')
+    pp_ids_used = set(PP_coords_div["pp_id"])
 
-    SA1_coords = pd.merge(Div_SA1_By_PP_dict[div_nm][["SA1_CODE16"]].drop_duplicates().reset_index(drop=True).sort_values(by='SA1_CODE16').reset_index(drop=True), SA1_centroids_2016, on="SA1_CODE16", how="left") # adds lat/long to SA1s in div
+    # get SA1 coords of giver division
+    div_SA1s = pd.DataFrame(SA1_wide.columns[1:], columns=['SA1_CODE21']) 
+    SA1_coords = pd.merge(div_SA1s, SA1_centroids, on="SA1_CODE21", how="left") # adds lat/long to SA1s in div
 
     # Extract latitude and longitude arrays
-    PP_Lat = PP_coords.iloc[:, 1].to_numpy()[:, np.newaxis] 
-    PP_Long = PP_coords.iloc[:, 2].to_numpy()[:, np.newaxis]
+    PP_Lat = PP_coords_div.iloc[:, 1].to_numpy()[:, np.newaxis] 
+    PP_Long = PP_coords_div.iloc[:, 2].to_numpy()[:, np.newaxis]
     SA1_Lat = SA1_coords.iloc[:, 1].to_numpy()  
     SA1_Long = SA1_coords.iloc[:, 2].to_numpy()  
 
@@ -349,13 +398,14 @@ def distances_SA1_PP_array(div_nm, Booth_type, PP_coords):
     return distances, pp_ids_used
 
 
-def weights_SA1_PP_array(distances_SA1_PP_array, pp_ids_set, div_nm, dist_func):
+def weights_SA1_PP_array(distances_SA1_PP_array, pp_ids_set, dist_func, SA1_wide):
     ### dist_func is a string of either inverse or ... TBD
     ### renormalises weights according to size from each SA1
     rec = np.reciprocal(distances_SA1_PP_array)
 
+
     # truncates Div_SA1_By_PP_dict_wide to relevant rows
-    DSBPDW_array = Div_SA1_By_PP_dict_wide[div_nm].loc[Div_SA1_By_PP_dict_wide[div_nm]["pp_id"].isin(pp_ids_set),:].drop(columns=['pp_id']).to_numpy() # removes pp_id col for array conversion
+    DSBPDW_array = SA1_wide.loc[SA1_wide["pp_id"].isin(pp_ids_set),:].drop(columns=['pp_id']).to_numpy() # removes pp_id col for array conversion
     n_i_per_SA1 = np.sum(DSBPDW_array, axis=0)
     
     # performs sum(l^n_i)/dot products of each column n_i * d_i, 
@@ -377,6 +427,8 @@ def candidate_totals_rebalancing(SA1_vote_array, Booth_type_actual_vote_totals):
     overall_vote_total = sum(SA1_vote_totals)
 
     if np.round(overall_vote_total,2) != np.sum(Booth_type_actual_vote_totals):
+        import pdb;pdb.set_trace()
+
         raise ValueError("Mine: SA1_vote_array's global vote totals don't match")
 
     adj_weights = SA1_vote_totals / overall_vote_total # proportional to size of SA1
@@ -389,23 +441,24 @@ def candidate_totals_rebalancing(SA1_vote_array, Booth_type_actual_vote_totals):
 
 
 
-def candidate_prior_simulation_weighted(div_nm, mean, weight_Others,PP_coords):
+def candidate_prior_simulation_weighted(div, mean, weight_Others, PP_coords, SA1_centroids, SA1_wide, FP_wide):
     ### generates array of simulated votes per candidate per SA1 using the doubly-multivariate hypergeometric distribution with given K and n vectors
 
-    num_candidates = Div_First_Prefs_By_PP_dict_wide[div_nm].shape[1] - 1 # includes informal
-    num_SA1s = Div_SA1_By_PP_dict_wide[div_nm].shape[1]-1
+    num_candidates = FP_wide.shape[1] - 1 # includes informal
+    num_SA1s = SA1_wide.shape[1] - 1
 
     result_array = np.zeros((num_SA1s,num_candidates))
 
-    Div_PP_Booth_type = Div_First_Prefs_By_PP_dict[div_nm][["pp_id","Booth_type"]].drop_duplicates().sort_values(by='pp_id').reset_index(drop=True)
+    #Div_PP_Booth_type = Div_First_Prefs_By_PP_dict[div][["pp_id","Booth_type"]].drop_duplicates().sort_values(by='pp_id').reset_index(drop=True)
+    Div_PP_Booth_type = PP_coords.loc[PP_coords['div_nm'] == div,["pp_id","Booth_type"]].sort_values(by='pp_id').reset_index(drop=True)
 
     for Booth_type in ["PB","PPVC"]:# first PBs, then PPVCs, then Other
         Booth_type_result_array = np.zeros((num_SA1s,num_candidates))
     
         # get distances bw division PPs and SA1s
-        distances_PB_array, distances_PB_pp_ids = distances_SA1_PP_array(div_nm, Booth_type, PP_coords)
+        distances_PB_array, distances_PB_pp_ids = distances_SA1_PP_array(div, Booth_type, PP_coords, SA1_centroids, SA1_wide)
         # make them into weights
-        weights_PB = weights_SA1_PP_array(distances_PB_array, distances_PB_pp_ids, div_nm, "inverse")
+        weights_PB = weights_SA1_PP_array(distances_PB_array, distances_PB_pp_ids, "inverse", SA1_wide)
 
         booth_type_pp_id_set = set()
 
@@ -413,20 +466,30 @@ def candidate_prior_simulation_weighted(div_nm, mean, weight_Others,PP_coords):
             
             booth_type_pp_id_set.add(curr_pp_id) # to calculate candidate totals later
 
-            K = Div_First_Prefs_By_PP_dict_wide[div_nm][Div_First_Prefs_By_PP_dict_wide[div_nm]['pp_id'] == curr_pp_id].iloc[0, 1:].tolist()
-            n = Div_SA1_By_PP_dict_wide[div_nm][Div_SA1_By_PP_dict_wide[div_nm]['pp_id'] == curr_pp_id].iloc[0, 1:].tolist()
+            K = FP_wide[FP_wide['pp_id'] == curr_pp_id].iloc[0, 1:].tolist()
+            n = SA1_wide[SA1_wide['pp_id'] == curr_pp_id].iloc[0, 1:].tolist()
             N = sum(K)
+
+            if sum(K)!=sum(n):
+                import pdb;pdb.set_trace()
 
             if mean:
                 curr_array = MMHg_mean(N,K,n) # expected value
             else:
                 curr_array = doubly_multivariate_hypergeometric_simulate(N,K,n)
 
+
+
+
             weighted_array = curr_array * weights_PB[i,:][:, np.newaxis]
+
+            if np.isnan(weighted_array).any():
+                import pdb;pdb.set_trace()
+
 
             Booth_type_result_array += weighted_array
 
-        candidate_totals_for_booth_type = Div_First_Prefs_By_PP_dict_wide[div_nm].loc[Div_First_Prefs_By_PP_dict_wide[div_nm]['pp_id'].isin(booth_type_pp_id_set),].sum().values[1:]
+        candidate_totals_for_booth_type = FP_wide.loc[FP_wide['pp_id'].isin(booth_type_pp_id_set),].sum().values[1:]
         Booth_type_result_array = candidate_totals_rebalancing(Booth_type_result_array, candidate_totals_for_booth_type)
 
         result_array += Booth_type_result_array
@@ -436,9 +499,9 @@ def candidate_prior_simulation_weighted(div_nm, mean, weight_Others,PP_coords):
     # lastly, Other: pp_id is always 0!
     if weight_Others:
         # obtain totals and percentages of Other_PPs vs PB+PPVCs
-        Other_PP_cand_totals = Div_First_Prefs_By_PP_dict_wide[div_nm].loc[Div_First_Prefs_By_PP_dict_wide[div_nm]['pp_id']==0,].sum().values[1:]
+        Other_PP_cand_totals = FP_wide.loc[FP_wide['pp_id']==0,].sum().values[1:]
         Other_PP_cand_pcts = Other_PP_cand_totals / np.sum(Other_PP_cand_totals)
-        Div_cand_totals = Div_First_Prefs_By_PP_dict_wide[div_nm].sum().values[1:]
+        Div_cand_totals = FP_wide.sum().values[1:]
         PB_PPVC_cand_totals = Div_cand_totals - Other_PP_cand_totals
         PB_PPVC_cand_pcts = PB_PPVC_cand_totals / np.sum(PB_PPVC_cand_totals)
         
@@ -446,35 +509,35 @@ def candidate_prior_simulation_weighted(div_nm, mean, weight_Others,PP_coords):
         row_sums = result_array.sum(axis=1,keepdims=True)
         result_array_pcts = np.where(row_sums == 0, 1/result_array.shape[1], result_array / row_sums) # replace with even prior over all candidates
 
-        expected_Other_array = result_array_pcts * Div_SA1_By_PP_dict_wide[div_nm].iloc[0,1:].to_numpy()[:,np.newaxis] # multiply by the n_i from 'Other' for each SA1
+        expected_Other_array = result_array_pcts * SA1_wide.iloc[0,1:].to_numpy()[:,np.newaxis] # multiply by the n_i from 'Other' for each SA1
 
         #print(expected_Other_array)
-        print("Comparison")
-        print(Other_PP_cand_totals)
-        print(np.round(np.sum(expected_Other_array, axis=0)))
+        #print("Comparison")
+        #print(Other_PP_cand_totals)
+        #print(np.round(np.sum(expected_Other_array, axis=0)))
 
         Other_adjusted_array = candidate_totals_rebalancing(expected_Other_array, Other_PP_cand_totals)    
-        print("Here we go - Other_adjusted_array")
+        #print("Here we go - Other_adjusted_array")
         #print(Other_adjusted_array)   
         print((Other_adjusted_array<0).any())
         neg_indices = np.where(Other_adjusted_array < 0)
         #print(neg_indices)
-        for i in neg_indices:
-            print(np.round(Other_adjusted_array[neg_indices],2)) 
+        #for i in neg_indices:
+        #    print(np.round(Other_adjusted_array[neg_indices],2)) 
 
         result_array += Other_adjusted_array
-        print("overall negative votes")
+        #print("overall negative votes")
         print((result_array<0).any())
         neg_indices = np.where(result_array < 0)
         #print(neg_indices)
-        for i in neg_indices:
-            print(np.round(Other_adjusted_array[neg_indices],2)) 
+        #for i in neg_indices:
+        #    print(np.round(Other_adjusted_array[neg_indices],2)) 
 
         return np.round(result_array,6)
     
     else:
-        K = Div_First_Prefs_By_PP_dict_wide[div_nm][Div_First_Prefs_By_PP_dict_wide[div_nm]['pp_id'] == 0].iloc[0, 1:].tolist()
-        n = Div_SA1_By_PP_dict_wide[div_nm][Div_SA1_By_PP_dict_wide[div_nm]['pp_id'] == 0].iloc[0, 1:].tolist()
+        K = FP_wide[div_nm][FP_wide[div_nm]['pp_id'] == 0].iloc[0, 1:].tolist()
+        n = SA1_wide[SA1_wide['pp_id'] == 0].iloc[0, 1:].tolist()
         N = sum(K)
 
         if mean:
@@ -486,28 +549,29 @@ def candidate_prior_simulation_weighted(div_nm, mean, weight_Others,PP_coords):
     return np.round(result_array,6)
 
 
-def SA1_candidate_prior_df_output(div_nm,mean, PP_coords):
+def SA1_candidate_prior_df_output(div, mean, PP_coords, SA1_centroids, SA1_wide, FP_wide):
     ### gets array of SA1 vote using weighted algorithm, working with the mean if mean == 1 else using MMHg
 
-    array = candidate_prior_simulation_weighted(div_nm, mean,weight_Others=1, PP_coords=PP_coords)
+    array = candidate_prior_simulation_weighted(div, mean, weight_Others=1, PP_coords=PP_coords, SA1_centroids=SA1_centroids, SA1_wide=SA1_wide,FP_wide=FP_wide)
 
-    SA1s = Div_SA1_By_PP_dict_wide[div_nm].columns[1:].tolist()
-    candidates = Div_First_Prefs_By_PP_dict_wide[div_nm].columns[1:].tolist()
-    print("printing SA1s and candidates numbers")
-    print(len(SA1s))
-    print(len(candidates))
+    SA1s = SA1_wide.columns[1:].tolist()
+    candidates = FP_wide.columns[1:].tolist()
+    #print("printing SA1s and candidates numbers excluding informal")
+    #print(len(SA1s))
+    #print(len(candidates) - 1)
 
     SA1_candidate_prior_df = pd.DataFrame(array, index=SA1s, columns=candidates)
 
     return SA1_candidate_prior_df
 
-print("Getting df of output!!!")
-Vote_by_SA1_df = SA1_candidate_prior_df_output(div_nm,1,PP_coords)
+#print("Getting df of output!!!")
+div = 'Melbourne'
+Vote_by_SA1_df = SA1_candidate_prior_df_output(div,1,PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div],Div_First_Prefs_By_PP_dict_wide[div])
 
 # print overall vote counts to check
-print(round(Vote_by_SA1_df.sum()).astype(int))
+#print(round(Vote_by_SA1_df.sum()).astype(int))
 print(time.time()-start)
-import pdb;pdb.set_trace()
+#import pdb;pdb.set_trace()
 
 #print(Deakin_Aston_df.loc[Deakin_Aston_df.index.isin(Deakin_Aston_SA1s),])
 
@@ -515,25 +579,148 @@ import pdb;pdb.set_trace()
 # 1. Get total electorate votes from last election
 Electorate_total_FP_dict = {div: Div_First_Prefs_By_PP_dict_wide[div].set_index('pp_id').sum() for div in Div_First_Prefs_By_PP_dict_wide.keys()}
 
+new_div_list = ['Bullwinkel']
+for new_div in new_div_list:
+    standard_parties = ['LP','ALP','GRN','ON','UAPP']
+    Electorate_total_FP_dict[new_div] = pd.Series(0, index=standard_parties, dtype='int32')
+
+
+print(len(Electorate_total_FP_dict.keys()))
+
+#import pdb;pdb.set_trace()
+
+
 # 2. 
 mean = 1
 for div in old_divs_set: 
-    Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, PP_coords)
+    print(div)
+    Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Div_First_Prefs_By_PP_dict_wide[div])
 
     # subtract votes being given away from 2022 election results
-    Electorate_total_FP_dict[div] -= Vote_by_SA1_df.loc[Vote_by_SA1_df.index in SA1s_giver_div_dict[div].tolist(),].sum() # assumed SA1s are in the index!
+    curr_div_SA1_list = SA1s_giver_div_dict[div].tolist()
+
+    # check to make sure abolished divisions go to close to 0
+    #low_vote_difference = Vote_by_SA1_df.sum() - Vote_by_SA1_df.loc[Vote_by_SA1_df.index.isin(curr_div_SA1_list),].sum()
+    #print("low vote difference", round(low_vote_difference,2).tolist())
+
+    Electorate_total_FP_dict[div] -= Vote_by_SA1_df.loc[Vote_by_SA1_df.index.isin(curr_div_SA1_list),].sum() # assumed SA1s are in the index!
+#import pdb;pdb.set_trace()
+
+print("Got all dfs: time = ", time.time() - start)
 
 # 3. give to new redistribution
 for div_pair in Redist_Div_First_Prefs_By_PP_dict_wide.keys():
-    giver_div = div_pair[0]
+    print(div_pair)
+    giver_div, receiver_div = div_pair
+
+    Redist_Vote_by_SA1_df = SA1_candidate_prior_df_output(giver_div, mean, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[giver_div], Redist_Div_First_Prefs_By_PP_dict_wide[div_pair])
 
     curr_SA1_list = redistribution_SA1s_dict[div_pair].tolist()
+    SA1_totals_to_transfer = Redist_Vote_by_SA1_df.loc[Redist_Vote_by_SA1_df.index.isin(curr_SA1_list),].sum() # assumed SA1s are in the index!
 
-    Redist_Vote_by_SA1_df = SA1_candidate_prior_df_output(giver_div, mean, PP_coords, Redist_Div_First_Prefs_By_PP_dict_wide[div_pair])
+    # rename COAL parties if we are in NSW/VIC
+    COAL_parties = [p for p in Electorate_total_FP_dict[receiver_div].index if p in ['LP','NP']]
 
-    COAL_names = [p for p in Electorate_total_FP_dict[div].columns if p in ['LP','NP']]
+    if len(COAL_parties) == 1:
+        SA1_totals_to_transfer = SA1_totals_to_transfer.rename({'COAL':COAL_parties[0]})
+    elif len(COAL_parties) == 2:
+         SA1_totals_to_transfer = SA1_totals_to_transfer.rename({'COALLP':'LP','COALNP':'NP'})
 
-    Electorate_total_FP_dict[div] += Redist_Vote_by_SA1_df.loc[Redist_Vote_by_SA1_df.index in curr_SA1_list,].sum() # assumed SA1s are in the index!
+    if receiver_div == 'Wannon':
+        import pdb;pdb.set_trace()
+
+
+
+    Electorate_total_FP_dict[receiver_div] += SA1_totals_to_transfer
+
+print("Got all dfs: time = ", time.time() - start)
+
+
+
+
+
+
+
+
+
+
+
+# 4. TCP Preference Flows!!!
+TCP_dict = {}
+
+TCP_Preference_Flows = pd.read_csv(f"{data_year}TCPPreferenceFlows.csv", skiprows = 1, index_col = None).rename(columns = {'DivisionNm':'div_nm','FromCandidatePartyAb':'PartyAb', \
+                                        'FromCandidateBallotPosition':'Ballot_Position','ToCandidatePartyAb':'TCP_Ab','ToCandidateBallotPosition':'TCP_Ballot_Position'})
+TCP_Preference_Flows = TCP_Preference_Flows[['div_nm','PartyAb','Ballot_Position','TCP_Ab','TCP_Ballot_Position','TransferPercentage']]
+TCP_Preference_Flows = TCP_Preference_Flows.loc[TCP_Preference_Flows['Ballot_Position']>0,]
+
+
+for div in redistirbution_divs_set:
+
+    print(div)
+
+    First_Preferences = Electorate_total_FP_dict[div]
+
+    if div in new_div_list:
+        Top_2 = First_Preferences.loc[First_Preferences.index.isin(['LP','ALP'])].index
+        Remaining_votes = First_Preferences.loc[~(First_Preferences.index.isin(Top_2))].rename("Non-TCP_votes") 
+
+        TCP_votes = First_Preferences[Top_2]
+
+        transfers = TCP_Preference_Flows.loc[TCP_Preference_Flows['div_nm']=='Hasluck',][['PartyAb','TransferPercentage']] # happens to be correct order of ALP/LP
+        transfers = transfers.loc[transfers['PartyAb'].isin(Remaining_votes.index)].merge(Remaining_votes.reset_index().rename(columns={'index': 'PartyAb'}) , on='PartyAb',how='left')
+        transfers.loc[:,'TransferVotes'] = transfers.loc[:,'TransferPercentage'] * transfers.loc[:,'Non-TCP_votes'] / 100
+
+        parties = ['GRN','UAPP','ON']
+        for j in range(len(parties)):
+            TCP_votes += transfers.loc[transfers['PartyAb'] == parties[j],'TransferVotes'].values 
+
+        TCP_dict[div] = TCP_votes/TCP_votes.sum()
+
+    else:
+
+        TCP_Preference_Flows_div = TCP_Preference_Flows.loc[TCP_Preference_Flows['div_nm']==div,]
+
+
+        TCP_Ballot_Positions = TCP_Preference_Flows_div['TCP_Ballot_Position'].unique().tolist()
+
+        Top_2 = First_Preferences.index[np.sort(TCP_Preference_Flows_div['TCP_Ballot_Position'].unique())-1] 
+
+        #assert Top_2.tolist() == Max_2_votes.tolist() # can just use Ballot position to align parties - Nonsense! Can be that 3rd/4th party jumps ahead!!!
+
+
+
+        TCP_votes = First_Preferences[Top_2]
+        Remaining_votes = First_Preferences.loc[~(First_Preferences.index.isin(Top_2))].rename("Non-TCP_votes") 
+
+        # Indices of INDs who didn't make top 2 --> use these to rename INDs in TCP_Preference_Flows_div!
+        IND_indices = np.where(First_Preferences.index.str.startswith('IND') & ~First_Preferences.index.isin(Top_2))[0] 
+
+        for ballot_no in (IND_indices+1).tolist():
+
+            TCP_Preference_Flows_div.loc[TCP_Preference_Flows_div['Ballot_Position'] == ballot_no,'PartyAb'] = First_Preferences.index[ballot_no-1] 
+            
+
+        # merge remaining parties: Note that Informal votes vanish naturally!
+        TCP_Transfer_Percents = TCP_Preference_Flows_div[['PartyAb','TransferPercentage','TCP_Ballot_Position']].merge(Remaining_votes, on = 'PartyAb', how='left')
+
+        # for party in partyab, multiply by corresponding transfer percentage, add to top 2 sum
+        TCP_Transfer_Percents.loc[:,'TransferVotes'] = TCP_Transfer_Percents.loc[:,'TransferPercentage'] * TCP_Transfer_Percents.loc[:,'Non-TCP_votes'] / 100
+        TCP_Transfer_Votes = TCP_Transfer_Percents[['TCP_Ballot_Position','TransferVotes']].groupby('TCP_Ballot_Position')['TransferVotes'].agg('sum')
+
+        TCP_votes += TCP_Transfer_Votes.values
+        TCP_votes.index = TCP_votes.index.where(~TCP_votes.index.str.startswith('IND'), 'IND')
+
+
+
+        TCP_dict[div] = TCP_votes/TCP_votes.sum()
+
+
+
+import pdb;pdb.set_trace()
+
+TCP_Redistributed = pd.DataFrame.from_dict(TCP_dict, orient='index').fillna(0)[['ALP','LP','NP','GRN','IND']]
+
+import pdb;pdb.set_trace()
 
 
 

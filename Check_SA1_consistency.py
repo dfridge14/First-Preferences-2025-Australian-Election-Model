@@ -50,7 +50,7 @@ def perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_2016_2021, SA1_By
 
         new_SA1_section = pd.concat([votes] * weights.shape[0], ignore_index=True)
         new_SA1_section.loc[:,"votes"] = np.round(new_SA1_section.loc[:,"votes"] * np.repeat(weights['RATIO_FROM_TO'].values, votes.shape[0]))
-        new_SA1_section.loc[:,'SA1_CODE16'] = np.repeat(weights['SA1_CODE21'], votes.shape[0]).reset_index(drop=True) 
+        new_SA1_section.loc[:,'SA1_CODE16'] = np.repeat(weights['SA1_CODE21'], votes.shape[0]).reset_index(drop=True).astype(int) 
 
         df_to_add = pd.concat([df_to_add, new_SA1_section], ignore_index=True)
 
@@ -86,8 +86,8 @@ def perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_2016_2021, SA1_By
 
 # perform SA1 Correspondence!
 
-#SA1_By_PP_Votes_2022 = perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_2016_2021, SA1_By_PP_SA1_CODE16)
-#SA1_By_PP_Votes_2022.to_csv("2022SA1_By_PP_Votes.csv", index=False)
+SA1_By_PP_Votes_2022 = perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_2016_2021, SA1_By_PP_SA1_CODE16)
+SA1_By_PP_Votes_2022.to_csv("2022SA1_By_PP_Votes.csv", index=False)
 
 
 
@@ -120,6 +120,10 @@ Redistribution_SA1s_2024.iloc[:,-2:] = Redistribution_SA1s_2024.iloc[:,-2:].asty
 
 # redistribution changes
 Redistribution_SA1_changes_2024 = Redistribution_SA1s_2024.loc[Redistribution_SA1s_2024['new_div']!=Redistribution_SA1s_2024['old_div'],][['SA1_CODE21','new_div','old_div']]
+
+recase_map = {'Mcmahon':'McMahon', 'Mcewen':'McEwen','Eden-monaro':'Eden-Monaro',"O'connor": "O'Connor"}
+Redistribution_SA1_changes_2024.iloc[:,1:] = Redistribution_SA1_changes_2024.iloc[:,1:].replace(recase_map)
+
 Redistribution_SA1_changes_2024.to_csv("Redistribution_SA1_changes2024.csv", index=False)
 
 def check_SA1_consistency(VIC_SA1s_Redistribution):

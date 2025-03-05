@@ -37,6 +37,8 @@ start = time.time()
 FP_ID_COLUMNS = [3,4,5] # remove id columns
 START_OF_PREFS = 2 # Prefs begin on the 3th column (after div_nm,pp_nm) - deleted stateab to accomodate 2016 file
 
+NUM_OF_INDX_LETTERS = 4
+
 
 incumbent_advantage_dict = {5:4.68,4:4.5,3:6}
 final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
@@ -2012,6 +2014,11 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
                 complexrd += 1   
 
         First_Prefs_By_PP_Complete_Redistributed = transform_to_raw_votes(redistributed_votes, div1)
+
+        # Convert any INDXs back to just INDX
+        First_Prefs_By_PP_Complete_Redistributed = First_Prefs_By_PP_Complete_Redistributed.rename(columns = {col: col[:NUM_OF_INDX_LETTERS] for col in First_Prefs_By_PP_Complete_Redistributed.columns if col.startswith('IND')})
+
+
         First_Prefs_By_PP_Complete_Redistributed_dict[(div1,div2)] = First_Prefs_By_PP_Complete_Redistributed.reset_index() # bring back pp_id
 
         print(First_Prefs_By_PP_Complete_Redistributed)
@@ -2021,7 +2028,7 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
 
     print(simplerd, simpleindrd, complexrd)
     print(time.time() - start, 'seconds')
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
     output_folder = "feather Redistribution pairs 2024"
     os.makedirs(output_folder, exist_ok=True)
@@ -2258,7 +2265,7 @@ def amend_Formal_prefs_dict(Formal_prefs_dict):
     lender_FPs.loc[:,'pp_nm'] = borrower
     Formal_prefs_dict["Kingsford Smith"] = pd.concat([FP_div,lender_FPs], ignore_index=True)
     
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
     return Formal_prefs_dict
 
 
@@ -2334,7 +2341,7 @@ def check_PPVC_discrepancies(Formal_prefs_dict, data_year):
             #print(formal_senate_full_house_comparison.loc[(formal_senate_full_house_comparison["house/sen"] < 1) & (formal_senate_full_house_comparison['div_nm']<500),])
             print(formal_senate_full_house_comparison.loc[(formal_senate_full_house_comparison["house/sen"] > 1.2) & (formal_senate_full_house_comparison['div_nm']<500),])
 
-            import pdb;pdb.set_trace()
+            #import pdb;pdb.set_trace()
 
         # In VIC:
         # Cooper: Northcote South

@@ -688,9 +688,10 @@ Redistribution_pair = {key: [] for key in Redistribution_pairs}
 
 Redistribution_pair_SA1s = Redistribution_SA1_changes_2024.groupby(['old_div', 'new_div'])['SA1_CODE21'].apply(list).reset_index()
 
-recase_map = {'Mcmahon':'McMahon', 'Mcewen':'McEwen','Eden-monaro':'Eden-Monaro',"O'connor": "O'Connor"}
+# this has now been corrected when constructing Redistribution_SA1_changes_2024
+#recase_map = {'Mcmahon':'McMahon', 'Mcewen':'McEwen','Eden-monaro':'Eden-Monaro',"O'connor": "O'Connor"}
 
-Redistribution_pair_SA1s.iloc[:,:2] = Redistribution_pair_SA1s.iloc[:,:2].replace(recase_map)
+#Redistribution_pair_SA1s.iloc[:,:2] = Redistribution_pair_SA1s.iloc[:,:2].replace(recase_map)
 
 Redistribution_pairs = Redistribution_pair_SA1s.iloc[:,:2]
 Redistribution_pairs.to_csv("RedistributionPairs2024.csv", index = False)
