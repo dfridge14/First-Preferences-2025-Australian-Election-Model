@@ -353,6 +353,50 @@ def doubly_multivariate_hypergeometric_simulate(N,K,n):
 
 
 
+def candidate_prior_simulation(mean, SA1_wide, FP_wide):
+    ### generates array of simulated votes per candidate per SA1 using the doubly-multivariate hypergeometric distribution with given K and n vectors
+
+    num_candidates = FP_wide.shape[1] - 1 # includes informal
+    num_SA1s = SA1_wide.shape[1]-1
+
+    #print(num_candidates,num_pps,num_SA1s)
+
+
+    result_array = np.zeros((num_SA1s,num_candidates))
+    #print(result_array) # memory issue
+
+    # iterate for each pp_id in division
+    for curr_pp_id in FP_wide["pp_id"].unique():
+
+        if curr_pp_id not in SA1_wide['pp_id'].tolist():
+            print('Zero votes pp_id', curr_pp_id)
+            continue # don't need to worry about these!!!
+
+        K = FP_wide[FP_wide['pp_id'] == curr_pp_id].iloc[0, 1:].tolist()
+        n = SA1_wide[SA1_wide['pp_id'] == curr_pp_id].iloc[0, 1:].tolist()
+        #print("pp_id = ", curr_pp_id, "len_K = ", len(K), "len_n = ", len(n))
+        N = sum(K)
+        #import pdb;pdb.set_trace()
+        #print("Cand Values for the given pp_id:", K)
+        #print("SA1 Values for the given pp_id:", n)
+        if mean:
+            curr_array = MMHg_mean(N,K,n) # expected value
+        else:
+            curr_array = doubly_multivariate_hypergeometric_simulate(N,K,n)
+
+
+        result_array += curr_array
+
+
+    #print(time.time()-start, "seconds")
+
+    return np.round(result_array).astype(int)
+
+
+
+
+
+
 def haversine(PP_Lat, PP_Long, SA1_Lat, SA1_Long): # written by chatgpt
     R = 6371  # Earth radius in kilometers
 
@@ -549,10 +593,13 @@ def candidate_prior_simulation_weighted(div, mean, weight_Others, PP_coords, SA1
     return np.round(result_array,6)
 
 
-def SA1_candidate_prior_df_output(div, mean, PP_coords, SA1_centroids, SA1_wide, FP_wide):
+def SA1_candidate_prior_df_output(div, mean, to_weight, PP_coords, SA1_centroids, SA1_wide, FP_wide):
     ### gets array of SA1 vote using weighted algorithm, working with the mean if mean == 1 else using MMHg
 
-    array = candidate_prior_simulation_weighted(div, mean, weight_Others=1, PP_coords=PP_coords, SA1_centroids=SA1_centroids, SA1_wide=SA1_wide,FP_wide=FP_wide)
+    if to_weight:
+        array = candidate_prior_simulation_weighted(div, mean, weight_Others=1, PP_coords=PP_coords, SA1_centroids=SA1_centroids, SA1_wide=SA1_wide,FP_wide=FP_wide)
+    else:
+        array = candidate_prior_simulation(mean, SA1_wide, FP_wide)
 
     SA1s = SA1_wide.columns[1:].tolist()
     candidates = FP_wide.columns[1:].tolist()
@@ -566,7 +613,7 @@ def SA1_candidate_prior_df_output(div, mean, PP_coords, SA1_centroids, SA1_wide,
 
 #print("Getting df of output!!!")
 div = 'Melbourne'
-Vote_by_SA1_df = SA1_candidate_prior_df_output(div,1,PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div],Div_First_Prefs_By_PP_dict_wide[div])
+Vote_by_SA1_df = SA1_candidate_prior_df_output(div,1,0,PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div],Div_First_Prefs_By_PP_dict_wide[div])
 
 # print overall vote counts to check
 #print(round(Vote_by_SA1_df.sum()).astype(int))
@@ -594,7 +641,7 @@ print(len(Electorate_total_FP_dict.keys()))
 mean = 1
 for div in old_divs_set: 
     print(div)
-    Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Div_First_Prefs_By_PP_dict_wide[div])
+    Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Div_First_Prefs_By_PP_dict_wide[div])
 
     # subtract votes being given away from 2022 election results
     curr_div_SA1_list = SA1s_giver_div_dict[div].tolist()
@@ -613,7 +660,7 @@ for div_pair in Redist_Div_First_Prefs_By_PP_dict_wide.keys():
     print(div_pair)
     giver_div, receiver_div = div_pair
 
-    Redist_Vote_by_SA1_df = SA1_candidate_prior_df_output(giver_div, mean, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[giver_div], Redist_Div_First_Prefs_By_PP_dict_wide[div_pair])
+    Redist_Vote_by_SA1_df = SA1_candidate_prior_df_output(giver_div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[giver_div], Redist_Div_First_Prefs_By_PP_dict_wide[div_pair])
 
     curr_SA1_list = redistribution_SA1s_dict[div_pair].tolist()
     SA1_totals_to_transfer = Redist_Vote_by_SA1_df.loc[Redist_Vote_by_SA1_df.index.isin(curr_SA1_list),].sum() # assumed SA1s are in the index!
@@ -719,6 +766,9 @@ for div in redistirbution_divs_set:
 import pdb;pdb.set_trace()
 
 TCP_Redistributed = pd.DataFrame.from_dict(TCP_dict, orient='index').fillna(0)[['ALP','LP','NP','GRN','IND']]
+
+TCP_Redistributed.to_csv('PostRedistributionTPPMargins2024_InverseWeighted.csv')
+
 
 import pdb;pdb.set_trace()
 
