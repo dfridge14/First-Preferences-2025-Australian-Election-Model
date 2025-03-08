@@ -42,13 +42,24 @@ NUM_OF_INDX_LETTERS = 4
 
 incumbent_advantage_dict = {5:4.68,4:4.5,3:6}
 final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
-data_year = '2022'
+
+
+
+
+data_year = '2019'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 INCUMBENT_ADVANTAGE = incumbent_advantage_dict[FINAL_CANDIDATE_NO]
 
 NONINCUMBENT_DISADVANTAGE =  INCUMBENT_ADVANTAGE/(FINAL_CANDIDATE_NO-1)
 
-data_year = '2022'
+
+
+new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner']}
+# renaming is not yet updated to before 2016!!!!!!!!
+name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
+states_to_redistribute_dict = {'2022': ['NSW','VIC','NSW','NT'],'2019': ['VIC','WA'],'2016':['ACT','NT','QLD','SA','TAS','VIC'],'2013':['ACT','NSW','WA'],'2010':['SA','VIC'],'2007':['NSW','NT','QLD','TAS','WA'],'2004':['ACT','NSW','QLD'],'2001':['QLD','SA','VIC']}
+
+
 
 # Game plan:
 # Four different places where FormalPrefs will be necessary:
@@ -718,7 +729,9 @@ def optimize_dataframe(df):
 
 
 Formal_prefs_dict = {}
-states = ['NSW','VIC','WA']
+
+states = states_to_redistribute_dict[data_year]
+#states = ['NSW','VIC','WA']
 #states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
 for state in states: # currently only 2016 onwards
 
@@ -1032,18 +1045,6 @@ def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, app
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-DOP_By_PP_2022 = pd.read_csv("2022DOP_By_PP_full.csv", index_col=None)
 
 ######## TO DO: Bring in Candidate_Pairs into here, adjusted for DOP_By_PP
 ### Change order within DOP_By_PP to match rather arbitrary m-c1-c2 ordering (consistency)
@@ -1755,7 +1756,7 @@ def check_Coalition_double_divs_for_simple_case(div1,div2,list_div1, list_div2, 
 
 
 def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_dict, Senate_parties_by_div, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, Incumbency_by_div, new_seats_list):
-    # input is df with columns corresponding to giver division and receiver division, respectively. Returns the full redistributed votes for the original giver's votes for 
+    # input is df with columns corresponding to giver division and receiver division, respectively. Returns a dictionary with new div names as keys, and a df of the full redistributed votes for the original giver's votes for each pp_id as values 
     # all redistribution pairs
 
     First_Prefs_By_PP_Complete_Redistributed_dict = {}
@@ -2067,8 +2068,9 @@ def check_house_senate_discrepancies():
 
     senate_votes_full = pd.concat([senate_votes_full,division_senate_Others_sum],axis=0)
 
-
-    First_Prefs_By_PP = pd.read_csv("FirstPrefsByPollingPlace2022.csv", skiprows=1,index_col = None)[['pp_nm','div_nm','PartyAb','votes']] 
+    ############ CHANGED THIS - MAKE SURE STILL OK!!!
+    import pdb;pdb.set_trace()
+    First_Prefs_By_PP = pd.read_csv(f"{data_year}FirstPrefsByPPComplete.csv", skiprows=1,index_col = None)[['pp_nm','div_nm','PartyAb','votes']] 
     house_votes = First_Prefs_By_PP.groupby(['div_nm','pp_nm'], as_index=False).agg({"votes":"sum"}).rename(columns={'votes':'house_votes'})
     division_house_Others = pd.read_csv(f"{data_year}HouseVotesCountedByDivision.csv", skiprows=1).iloc[:,[1,5,6,7,8]].rename(columns={'DivisionNm':'div_nm'})
 
@@ -2140,6 +2142,8 @@ def check_house_senate_discrepancies():
 
 
 def amend_Formal_prefs_dict(Formal_prefs_dict):
+
+    import pdb;pdb.set_trace()
 
     h_s_discrepancies = check_house_senate_discrepancies()
 
@@ -2273,7 +2277,7 @@ def amend_Formal_prefs_dict(Formal_prefs_dict):
 
 
 
-def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, x=5):
+def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, new_seats_list, name_changes_year_dict, x=5):
     Formal_prefs_dict = allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_party_df, Senate_party_abvs_dict)
 
     print("done", time.time() - start)
@@ -2310,15 +2314,17 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
         # borrows from Candidate_Pairs
         Incumbency_by_div = pd.read_csv(f"{data_year}Incumbents.csv", index_col = None)
 
-        new_seats_list = ['Bullwinkel']
+        #new_seats_list = ['Bullwinkel']
 
         Formal_prefs_dict = amend_Formal_prefs_dict(Formal_prefs_dict)
 
         transformed_votes = full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_dict, Senate_parties_by_div, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, Incumbency_by_div, new_seats_list)
 
+
+    #if electorate_similarity:
+
+
     return Final_allocated_pcts_aggregated_dict, Final_x_HS_df
-
-
 
 
 
@@ -2364,7 +2370,10 @@ def check_PPVC_discrepancies(Formal_prefs_dict, data_year):
 #check_PPVC_discrepancies(Formal_prefs_dict, data_year)
 
 
-Final_allocated_pcts_aggregated_dict, Final_x_HS_df = whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, x=5)
+
+new_seats_list = new_seats_year_dict[data_year]
+name_changes_year_dict = name_changes_year_dict[data_year]
+Final_allocated_pcts_aggregated_dict, Final_x_HS_df = whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, new_seats_list, name_changes_year_dict, x=5)
 
 
 

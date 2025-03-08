@@ -8,7 +8,7 @@ os.chdir('C:\\Dania\\2024\\Australian Election')
 
 INCUMBENT_ADVANTAGE = 4
 final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
-data_year = '2022'
+data_year = '2016'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 NONINCUMBENT_DISADVANTAGE =  INCUMBENT_ADVANTAGE/(FINAL_CANDIDATE_NO-1)
 
@@ -214,7 +214,7 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
 
 #expand_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Expand")
 #reduce_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Reduce")
-Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
+#Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
 #VoteCount_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "VoteCount")
 
 
@@ -285,7 +285,10 @@ def create_DOP_By_PP_csvs(data_year):
 
     return 1
 
-#create_DOP_By_PP_csvs(data_year) # create csv file!
+create_DOP_By_PP_csvs(data_year) # create csv file!
+
+import pdb;pdb.set_trace()
+
 # else, read the existing csv file
 DOP_By_PP_Expand = pd.read_csv("2022DOP_By_PP_Expand.csv", index_col=None)
 DOP_By_PP_Pref_Percent = pd.read_csv("2022DOP_By_PP_Pref_Percent.csv", index_col=None)
@@ -313,6 +316,9 @@ def convert_long_to_wide_format(DOP_table_long):
 
         group.loc[:,'PartyAb'] = pd.concat([adjusted_party_names] * (num_rows), ignore_index=True).values
         group.loc[group["PartyAb"] == "GVIC","PartyAb"] = 'GRN' # change any GVIC into GRN ------ manual fix!
+
+        import pdb;pdb.set_trace()
+
 
         DOP_table_wide = convert_to_wide_format(group, "DOP_By_PP")
         DOP_By_PP_dict[div] = DOP_table_wide

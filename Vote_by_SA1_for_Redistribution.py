@@ -673,9 +673,6 @@ for div_pair in Redist_Div_First_Prefs_By_PP_dict_wide.keys():
     elif len(COAL_parties) == 2:
          SA1_totals_to_transfer = SA1_totals_to_transfer.rename({'COALLP':'LP','COALNP':'NP'})
 
-    if receiver_div == 'Wannon':
-        import pdb;pdb.set_trace()
-
 
 
     Electorate_total_FP_dict[receiver_div] += SA1_totals_to_transfer
@@ -766,8 +763,8 @@ for div in redistirbution_divs_set:
 import pdb;pdb.set_trace()
 
 TCP_Redistributed = pd.DataFrame.from_dict(TCP_dict, orient='index').fillna(0)[['ALP','LP','NP','GRN','IND']]
-
-TCP_Redistributed.to_csv('PostRedistributionTPPMargins2024_InverseWeighted.csv')
+TCP_Redistributed = TCP_Redistributed.sort_index()
+#TCP_Redistributed.to_csv('PostRedistributionTPPMargins2024_InverseWeighted.csv')
 
 
 import pdb;pdb.set_trace()

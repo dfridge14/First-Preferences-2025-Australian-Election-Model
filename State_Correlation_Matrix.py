@@ -70,7 +70,7 @@ eigenvalues = np.linalg.eigvals(correlation_matrix)
 if np.any(eigenvalues<0):
     raise ValueError("Not positive definite!")
 
-state_correlation_data.to_csv('State_Sample_Correlation_matrix.csv', index=True)
+correlation_matrix.to_csv('State_Sample_Correlation_matrix.csv', index=True)
 
 
 # AUD can perhaps get more data from senate elections

@@ -8,7 +8,6 @@ os.chdir('C:\\Dania\\2024\\Australian Election')
 
 data_year = "2016"
 
-
 incumbent_df = pd.read_csv("incumbent_df.csv")
 
 election_years = ['1993','1996','1998','2001','2004','2007','2010','2013','2016','2019','2022']
@@ -161,7 +160,7 @@ def create_Incumbents_by_div(Candidate_Incumbency, data_year):
 
     return 1
 
-#create_Incumbents_by_div(Candidate_Incumbency, data_year)
+create_Incumbents_by_div(Candidate_Incumbency, data_year)
 
 
 

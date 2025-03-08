@@ -16,7 +16,7 @@ DEGREE_TO_KM = 111.319
 def create_PB_combined():
 
     # create PB_data
-    PB_data_full = pd.read_csv("PollingBoothData2022.csv", index_col=None)
+    PB_data_full = pd.read_csv("2022PollingBoothData.csv", index_col=None)
     PB_data_full['DivName'] = PB_data_full['DivName'].str.strip()
     PB_data = PB_data_full[["DivName","PPId","Lat","Long","OrdVoteEst","DecVoteEst"]]
     PB_data.set_index('PPId', inplace=True)
@@ -24,9 +24,11 @@ def create_PB_combined():
     PB_data.insert(0,'Booth_type',"PB")
     #print(PB_data)
 
+    import pdb;pdb.set_trace()
+
 
     # create PPVC_data (includes RMTs)
-    PPVC_data_full = pd.read_csv("PPVCData2022.csv")
+    PPVC_data_full = pd.read_csv("2022PPVCData.csv")
     PPVC_data = PPVC_data_full[["PPId","DivName","Lat","Long","OrdVoteEst","DecVoteEst"]]
     # Issue resolved: encountering issue - I want to combine all the rows with identical entries, but am wary that there might be PPVC that are valid for the same division. A simple solution would be to introduce the index column as an ordinary column again. Why not?
     PPVC_data = PPVC_data.groupby(["PPId","DivName","Lat","Long","OrdVoteEst","DecVoteEst"]).first().reset_index()
@@ -58,6 +60,8 @@ def create_PB_combined():
     #print(PPVC_data)
 
     PB_combined = pd.concat([PB_data,PPVC_RMT_data], axis=0)
+
+
     return PB_combined
 
 
@@ -66,7 +70,7 @@ def create_PB_combined():
 ### To DO: remove Abolition Status and handle Appointment Status if not present on SA1s list - maybe we will ignore PB_combined
 
 
-#PB_combined = create_PB_combined()
+PB_combined = create_PB_combined()
 
 #print(PB_combined)
 #print(PB_combined.index[PB_combined["Booth_type"] == "PB"].tolist())
