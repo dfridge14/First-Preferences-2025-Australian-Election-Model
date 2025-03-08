@@ -6,6 +6,8 @@ from collections import Counter
 import io
 import os
 import glob
+from pathlib import Path
+
 
 
 import gc
@@ -25,7 +27,8 @@ sys.excepthook = exception_handler
 
 
 
-os.chdir('C:\\Dania\\2024\\Australian Election')
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else base_dir = Path.home() / "Australian Election"
+os.chdir(base_dir)
 
 
 

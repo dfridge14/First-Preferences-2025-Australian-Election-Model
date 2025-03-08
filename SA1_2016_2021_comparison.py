@@ -1,11 +1,11 @@
 import pandas as pd
-import geopandas as gpd
 import numpy as np
 import os
 import matplotlib
 from matplotlib import pyplot as plt
 
-os.chdir('C:\\Dania\\2024\\Australian Election')
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else base_dir = Path.home() / "Australian Election"
+os.chdir(base_dir)
 
 
 SA1s = pd.read_csv("CG_SA1_2016_SA1_2021.csv", index_col=None)

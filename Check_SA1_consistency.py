@@ -1,52 +1,47 @@
 import pandas as pd
 import numpy as np
 import os, time
+from pathlib import Path
 
 
-os.chdir('C:\\Dania\\2024\\Australian Election')
 
-start = time.time()
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else base_dir = Path.home() / "Australian Election"
+os.chdir(base_dir)
+
 
 MIN_OBSERVABLE_RATIO = 0.001 # If SA1 somehow has 1000 voters, 0.01*1000=1 vote - anything else will not be observed due to rounding errors
 
-SA1_Correspondence_2016_2021 = pd.read_csv("CG_SA1_2016_SA1_2021.csv", index_col=None)
-SA1_Correspondence_2016_2021.rename(columns={"SA1_MAINCODE_2016": "SA1_CODE16", "SA1_CODE_2021":"SA1_CODE21"}, inplace=True)
-SA1_Correspondence_2016_2021 = SA1_Correspondence_2016_2021[["SA1_CODE16","SA1_CODE21","RATIO_FROM_TO"]].drop(SA1_Correspondence_2016_2021.index[-1]) # removes last misbehaving row
-SA1_Correspondence_2016_2021['SA1_CODE16'] = SA1_Correspondence_2016_2021['SA1_CODE16'].apply(lambda x: int(x))
+SA1_year_dict = {'2025':'2021','2022':'2016','2019':'2016','2016':'2011','2013':'2011','2010':'2006'}
 
-SA1_Correspondence_2016_2021['SA1_CODE21'] = SA1_Correspondence_2016_2021['SA1_CODE21'].astype(str).str[:1] + SA1_Correspondence_2016_2021['SA1_CODE21'].astype(str).str[5:]
-SA1_Correspondence_2016_2021['SA1_CODE16'] = SA1_Correspondence_2016_2021['SA1_CODE16'].astype(str).str[:1] + SA1_Correspondence_2016_2021['SA1_CODE16'].astype(str).str[5:]
+data_year = '2019'
+correspondence_years = [SA1_year_dict[data_year],SA1_year_dict[str(int(data_year)+3)]]
 
-# fix exception where SA1 donates to nowhere
-SA1_Correspondence_2016_2021.loc[SA1_Correspondence_2016_2021["SA1_CODE16"]=='1153109',"RATIO_FROM_TO"] = 1
-SA1_Correspondence_2016_2021 = SA1_Correspondence_2016_2021.loc[~(SA1_Correspondence_2016_2021["SA1_CODE21"]=='n'),]
+# TO DO: 1. Make separate correspondence functions for each year - too few cases to generalise, especially since 2006--> 2001 is whole different structure!
 
-# expand SA1_By_PP_Complete to SA1_CODE21
-SA1_By_PP_SA1_CODE16 = pd.read_csv("SA1_By_PP_Complete.csv", index_col=None)
 
-def perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_2016_2021, SA1_By_PP_SA1_CODE16):
+def perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_old_new, SA1_By_PP_SA1_CODE16):
 
-    ### inputs SA1_Correspondence_2016_2021: a df of proportions of each 2016 SA1 that were transferred to 2021 SA1s, and SA1_By_PP_SA1_CODE16, the Votes_By_PP_Complete file from the previous election
+    ### inputs SA1_Correspondence_old_new: a df of proportions of each 2016 SA1 that were transferred to 2021 SA1s, and SA1_By_PP_SA1_CODE16, the Votes_By_PP_Complete file from the previous election
 
-    SA1_Correspondence_2016_2021_redistribution = SA1_Correspondence_2016_2021.loc[SA1_Correspondence_2016_2021["SA1_CODE16"].str.startswith(("1","2","5","7")),] # NSW,VIC,WA,NT
-    SA1_Correspondence_2016_2021_redistribution_changed = SA1_Correspondence_2016_2021_redistribution.loc[(SA1_Correspondence_2016_2021_redistribution["RATIO_FROM_TO"]<1-MIN_OBSERVABLE_RATIO) & (SA1_Correspondence_2016_2021_redistribution["RATIO_FROM_TO"]>MIN_OBSERVABLE_RATIO),]
+    SA1_Correspondence_old_new_redistribution = SA1_Correspondence_old_new.loc[SA1_Correspondence_old_new["SA1_CODE16"].str.startswith(("1","2","5","7")),] # NSW,VIC,WA,NT
+    SA1_Correspondence_old_new_redistribution_changed = SA1_Correspondence_old_new_redistribution.loc[(SA1_Correspondence_old_new_redistribution["RATIO_FROM_TO"]<1-MIN_OBSERVABLE_RATIO) & (SA1_Correspondence_old_new_redistribution["RATIO_FROM_TO"]>MIN_OBSERVABLE_RATIO),]
 
-    SA1_Correspondence_2016_2021_redistribution_changed.iloc[:,:2] = SA1_Correspondence_2016_2021_redistribution_changed.iloc[:,:2].astype(int)
+    SA1_Correspondence_old_new_redistribution_changed.iloc[:,:2] = SA1_Correspondence_old_new_redistribution_changed.iloc[:,:2].astype(int)
 
     # only 6 SA1s changed, but numbers kept:
-    #kept_SA1_nos = SA1_Correspondence_2016_2021_redistribution_changed.loc[SA1_Correspondence_2016_2021_redistribution_changed["SA1_CODE21"].isin(SA1_Correspondence_2016_2021_redistribution.loc[:,"SA1_CODE16"].unique()),]
+    #kept_SA1_nos = SA1_Correspondence_old_new_redistribution_changed.loc[SA1_Correspondence_old_new_redistribution_changed["SA1_CODE21"].isin(SA1_Correspondence_old_new_redistribution.loc[:,"SA1_CODE16"].unique()),]
     # ones that are not between 0 and  MIN_OBSERVABLE_RATIO and vice versa
-    #SA1_Correspondence_2016_2021_redistribution.loc[((SA1_Correspondence_2016_2021_redistribution["RATIO_FROM_TO"]>1-MIN_OBSERVABLE_RATIO) & (SA1_Correspondence_2016_2021_redistribution["RATIO_FROM_TO"]<1)) | ((SA1_Correspondence_2016_2021_redistribution["RATIO_FROM_TO"]<MIN_OBSERVABLE_RATIO)&(SA1_Correspondence_2016_2021_redistribution["RATIO_FROM_TO"]>0)),]
+    #SA1_Correspondence_old_new_redistribution.loc[((SA1_Correspondence_old_new_redistribution["RATIO_FROM_TO"]>1-MIN_OBSERVABLE_RATIO) & (SA1_Correspondence_old_new_redistribution["RATIO_FROM_TO"]<1)) | ((SA1_Correspondence_old_new_redistribution["RATIO_FROM_TO"]<MIN_OBSERVABLE_RATIO)&(SA1_Correspondence_old_new_redistribution["RATIO_FROM_TO"]>0)),]
 
     df_to_add = pd.DataFrame(columns=SA1_By_PP_SA1_CODE16.columns.tolist())
 
     # for every changed SA1 in redistribution state where someone voted last election
-    change_set = set(SA1_Correspondence_2016_2021_redistribution_changed.iloc[:,0]) & set(SA1_By_PP_SA1_CODE16.loc[:,"SA1_CODE16"])
+    change_set = set(SA1_Correspondence_old_new_redistribution_changed.iloc[:,0]) & set(SA1_By_PP_SA1_CODE16.loc[:,"SA1_CODE16"])
     
     for changed_redistributed_SA1 in change_set: # 1377 of them
 
         votes = SA1_By_PP_SA1_CODE16.loc[SA1_By_PP_SA1_CODE16["SA1_CODE16"]==changed_redistributed_SA1,]
-        weights = SA1_Correspondence_2016_2021_redistribution_changed.loc[SA1_Correspondence_2016_2021_redistribution_changed["SA1_CODE16"]==changed_redistributed_SA1,]
+        weights = SA1_Correspondence_old_new_redistribution_changed.loc[SA1_Correspondence_old_new_redistribution_changed["SA1_CODE16"]==changed_redistributed_SA1,]
 
         new_SA1_section = pd.concat([votes] * weights.shape[0], ignore_index=True)
         new_SA1_section.loc[:,"votes"] = np.round(new_SA1_section.loc[:,"votes"] * np.repeat(weights['RATIO_FROM_TO'].values, votes.shape[0]))
@@ -58,10 +53,10 @@ def perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_2016_2021, SA1_By
     SA1_By_PP_SA1_CODE16 = SA1_By_PP_SA1_CODE16[~SA1_By_PP_SA1_CODE16["SA1_CODE16"].isin(change_set)]
 
     # SA1_CODE16 and SA1_CODE21 different, but RATIO is 1
-    name_changes_or_full_donations = SA1_Correspondence_2016_2021_redistribution.loc[(SA1_Correspondence_2016_2021_redistribution["SA1_CODE16"]!=SA1_Correspondence_2016_2021_redistribution["SA1_CODE21"]) &  (SA1_Correspondence_2016_2021_redistribution["RATIO_FROM_TO"]==1),]
+    name_changes_or_full_donations = SA1_Correspondence_old_new_redistribution.loc[(SA1_Correspondence_old_new_redistribution["SA1_CODE16"]!=SA1_Correspondence_old_new_redistribution["SA1_CODE21"]) &  (SA1_Correspondence_old_new_redistribution["RATIO_FROM_TO"]==1),]
     name_changes_or_full_donations_set = set(name_changes_or_full_donations.iloc[:,0].astype(int))  & set(SA1_By_PP_SA1_CODE16.loc[:,"SA1_CODE16"]) # only those with votes at last election
     # almost full donations (up to MIN_OBSERVABLE_RATIO)
-    almost_full_donations = SA1_Correspondence_2016_2021_redistribution.loc[(SA1_Correspondence_2016_2021_redistribution["RATIO_FROM_TO"]>1-MIN_OBSERVABLE_RATIO) & (SA1_Correspondence_2016_2021_redistribution["RATIO_FROM_TO"]<1),]
+    almost_full_donations = SA1_Correspondence_old_new_redistribution.loc[(SA1_Correspondence_old_new_redistribution["RATIO_FROM_TO"]>1-MIN_OBSERVABLE_RATIO) & (SA1_Correspondence_old_new_redistribution["RATIO_FROM_TO"]<1),]
     almost_full_donations_set = set(almost_full_donations.iloc[:,0].astype(int)) & set(SA1_By_PP_SA1_CODE16.loc[:,"SA1_CODE16"]) # only those with votes at last election
     # combine both
     all_donations = pd.concat([name_changes_or_full_donations,almost_full_donations], ignore_index=True).iloc[:,:2]
@@ -84,10 +79,35 @@ def perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_2016_2021, SA1_By
     return SA1_By_PP_SA1_CODE16.groupby(['div_nm', 'SA1_CODE21','pp_id'], as_index=False)['votes'].sum() # aggregate split up SA1s and result correct SA1_By_PP
 
 
-# perform SA1 Correspondence!
+if correspondence_years[0]!=correspondence_years[1]: # same SA1s - no need for correspondence
 
-SA1_By_PP_Votes_2022 = perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_2016_2021, SA1_By_PP_SA1_CODE16)
-SA1_By_PP_Votes_2022.to_csv("2022SA1_By_PP_Votes.csv", index=False)
+    start = time.time()
+
+
+    SA1_Correspondence_old_new = pd.read_csv("CG_SA1_2016_SA1_2021.csv", index_col=None)
+    SA1_Correspondence_old_new.rename(columns={"SA1_MAINCODE_2016": "SA1_CODE16", "SA1_CODE_2021":"SA1_CODE21"}, inplace=True)
+    SA1_Correspondence_old_new = SA1_Correspondence_old_new[["SA1_CODE16","SA1_CODE21","RATIO_FROM_TO"]].drop(SA1_Correspondence_old_new.index[-1]) # removes last misbehaving row
+    SA1_Correspondence_old_new['SA1_CODE16'] = SA1_Correspondence_old_new['SA1_CODE16'].apply(lambda x: int(x))
+
+    SA1_Correspondence_old_new['SA1_CODE21'] = SA1_Correspondence_old_new['SA1_CODE21'].astype(str).str[:1] + SA1_Correspondence_old_new['SA1_CODE21'].astype(str).str[5:]
+    SA1_Correspondence_old_new['SA1_CODE16'] = SA1_Correspondence_old_new['SA1_CODE16'].astype(str).str[:1] + SA1_Correspondence_old_new['SA1_CODE16'].astype(str).str[5:]
+
+    # fix exception where SA1 donates to nowhere
+    SA1_Correspondence_old_new.loc[SA1_Correspondence_old_new["SA1_CODE16"]=='1153109',"RATIO_FROM_TO"] = 1
+    SA1_Correspondence_old_new = SA1_Correspondence_old_new.loc[~(SA1_Correspondence_old_new["SA1_CODE21"]=='n'),]
+
+    # expand SA1_By_PP_Complete to SA1_CODE21
+    SA1_By_PP_SA1_CODE16 = pd.read_csv(f"{data_year}SA1ByPPComplete.csv", index_col=None)
+
+
+    # perform SA1 Correspondence!
+
+    SA1_By_PP_Votes_new = perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_old_new, SA1_By_PP_SA1_CODE16)
+    SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
+else:
+    SA1_By_PP_Votes_new = pd.read_csv(f"{data_year}SA1ByPPComplete.csv", index_col=None)
+    SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
+
 
 
 
@@ -138,10 +158,10 @@ def check_SA1_consistency(VIC_SA1s_Redistribution):
     spread_over_divs_SA1s = set(spread_over_divs["SA1_CODE16"])
 
     # check if any have been updates in 2021 SA1s
-    changed_spread_divs = SA1_Correspondence_2016_2021.loc[(SA1_Correspondence_2016_2021['SA1_CODE16'].astype(int).isin(spread_over_divs_SA1s)) & (SA1_Correspondence_2016_2021['SA1_CODE16'] != SA1_Correspondence_2016_2021['SA1_CODE21']),]
+    changed_spread_divs = SA1_Correspondence_old_new.loc[(SA1_Correspondence_old_new['SA1_CODE16'].astype(int).isin(spread_over_divs_SA1s)) & (SA1_Correspondence_old_new['SA1_CODE16'] != SA1_Correspondence_old_new['SA1_CODE21']),]
     changed_spread_divs_set = set(changed_spread_divs.iloc[:,0].unique())
     changed_spread_divs_set = {int(x) for x in changed_spread_divs_set if str(x).startswith(("1","2","5","7"))} # only redistr
-    changed_spread_divs_newSA1s_set = {int(x) for x in set(SA1_Correspondence_2016_2021.loc[SA1_Correspondence_2016_2021['SA1_CODE16'].astype(int).isin(changed_spread_divs_set),]['SA1_CODE21'])}
+    changed_spread_divs_newSA1s_set = {int(x) for x in set(SA1_Correspondence_old_new.loc[SA1_Correspondence_old_new['SA1_CODE16'].astype(int).isin(changed_spread_divs_set),]['SA1_CODE21'])}
 
     spread_SA1s = (spread_over_divs_SA1s - changed_spread_divs_set)| changed_spread_divs_newSA1s_set
 
@@ -171,15 +191,15 @@ print("Higgins stuff")
 
 SA1s_From_Higgins = VIC_SA1s_Redistribution.loc[VIC_SA1s_Redistribution["old_div"]=="Higgins","SA1_CODE21"].tolist()
 print(sorted(SA1s_From_Higgins), len(SA1s_From_Higgins))
-Higgins_SA1_Correspondence_2016_2021 = SA1_Correspondence_2016_2021.loc[SA1_Correspondence_2016_2021["SA1_CODE21"].isin(SA1s_From_Higgins),]
-Dodgy_SA1s = Higgins_SA1_Correspondence_2016_2021.loc[Higgins_SA1_Correspondence_2016_2021["RATIO_FROM_TO"] < 1,]
+Higgins_SA1_Correspondence_old_new = SA1_Correspondence_old_new.loc[SA1_Correspondence_old_new["SA1_CODE21"].isin(SA1s_From_Higgins),]
+Dodgy_SA1s = Higgins_SA1_Correspondence_old_new.loc[Higgins_SA1_Correspondence_old_new["RATIO_FROM_TO"] < 1,]
 print(Dodgy_SA1s, Dodgy_SA1s.shape)
 
 print("Aston stuff")
 SA1s_to_Aston = VIC_SA1s_Redistribution.loc[(VIC_SA1s_Redistribution["old_div"]=="Deakin") & (VIC_SA1s_Redistribution["new_div"]=="Aston"),"SA1_CODE21"].tolist()
 print(sorted(SA1s_to_Aston), len(SA1s_to_Aston))
-Aston_SA1_Correspondence_2016_2021 = SA1_Correspondence_2016_2021.loc[SA1_Correspondence_2016_2021["SA1_CODE21"].isin(SA1s_to_Aston),]
-Dodgy_SA1s = Aston_SA1_Correspondence_2016_2021.loc[Aston_SA1_Correspondence_2016_2021["RATIO_FROM_TO"] < 1,]
+Aston_SA1_Correspondence_old_new = SA1_Correspondence_old_new.loc[SA1_Correspondence_old_new["SA1_CODE21"].isin(SA1s_to_Aston),]
+Dodgy_SA1s = Aston_SA1_Correspondence_old_new.loc[Aston_SA1_Correspondence_old_new["RATIO_FROM_TO"] < 1,]
 print(Dodgy_SA1s, Dodgy_SA1s.shape)
 print(time.time()-start, "seconds")
 
