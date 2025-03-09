@@ -27,7 +27,7 @@ sys.excepthook = exception_handler
 
 
 
-base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else base_dir = Path.home() / "Australian Election"
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
 
@@ -2055,13 +2055,21 @@ def check_house_senate_discrepancies(data_year):
 
     #directory = f"C:/Dania/2024/Australian Election/SenateVotesByPP{data_year}"
     directory = Path(f"C:/Dania/2024/Australian Election/SenateVotesByPP{data_year}") if os.name == "nt" else Path.home() / f"Australian Election/SenateVotesByPP{data_year}"
-    csv_files = sorted(glob.glob(f"{directory}/*.csv"))
+    import pdb;pdb.set_trace()
+
+    
+    csv_files = sorted(glob.glob(str(f"{directory}/*.csv")))
     senate_votes_full = pd.concat((pd.read_csv(f, skiprows=1)[['DivisionNm','PollingPlaceNm','OrdinaryVotes']].groupby(['DivisionNm','PollingPlaceNm'], as_index=False) \
                                                             .agg({'OrdinaryVotes': 'sum'}) for f in csv_files), ignore_index=True) \
                                                             .rename(columns={'DivisionNm':'div_nm','PollingPlaceNm':'pp_nm','OrdinaryVotes':'senate_votes'})
     #senate_votes_full_aston = senate_votes_full.loc[senate_votes_full['div_nm']=='Aston','senate_votes'].sum()
+
+    # change directory
+    base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+    os.chdir(base_dir)
+
     #add_Other_category
-    os.chdir('C:\\Dania\\2024\\Australian Election')
+
     division_senate_Others = pd.read_csv(f"{data_year}SenateVotesCountedByDivision.csv", skiprows=1).iloc[:,[1,5,6,7,8]].rename(columns={'DivisionNm':'div_nm'})
     division_senate_Others.loc[:,'senate_votes'] = division_senate_Others.iloc[:, 1:].sum(axis=1)
     division_senate_Others_sum = division_senate_Others.iloc[:,[0,-1]]
@@ -2073,29 +2081,34 @@ def check_house_senate_discrepancies(data_year):
 
     ############ CHANGED THIS - MAKE SURE STILL OK!!!
     import pdb;pdb.set_trace()
-    First_Prefs_By_PP = pd.read_csv(f"{data_year}FirstPrefsByPPComplete.csv", skiprows=1,index_col = None)[['pp_nm','div_nm','PartyAb','votes']] 
-    house_votes = First_Prefs_By_PP.groupby(['div_nm','pp_nm'], as_index=False).agg({"votes":"sum"}).rename(columns={'votes':'house_votes'})
-    division_house_Others = pd.read_csv(f"{data_year}HouseVotesCountedByDivision.csv", skiprows=1).iloc[:,[1,5,6,7,8]].rename(columns={'DivisionNm':'div_nm'})
-
-    division_house_Others.loc[:,'house_votes'] = division_house_Others.iloc[:, 1:].sum(axis=1)
-    division_house_Others_sum = division_house_Others.iloc[:,[0,-1]]
-    division_house_Others_sum = division_house_Others_sum.copy()
-    division_house_Others_sum.loc[:,'pp_nm'] = 'Other'
-    division_house_Others_sum = division_house_Others_sum[['div_nm','pp_nm','house_votes']]
+    First_Prefs_By_PP = pd.read_csv(f"{data_year}FirstPrefsByPPComplete.csv",index_col = None)[['pp_nm','div_nm','PartyAb','votes']] 
+    house_votes_full = First_Prefs_By_PP.groupby(['div_nm','pp_nm'], as_index=False).agg({"votes":"sum"}).rename(columns={'votes':'house_votes'})
 
 
-    house_votes_full = pd.concat([house_votes,division_house_Others_sum],axis=0)
+    # The rest is already done when constructing FirstPrefsByPPComplete, so not necessary!!!!!!!!!
+
+
+    #division_house_Others = pd.read_csv(f"{data_year}HouseVotesCountedByDivision.csv", skiprows=1).iloc[:,[1,5,6,7,8]].rename(columns={'DivisionNm':'div_nm'})
+
+    #division_house_Others.loc[:,'house_votes'] = division_house_Others.iloc[:, 1:].sum(axis=1)
+    #division_house_Others_sum = division_house_Others.iloc[:,[0,-1]]
+    #division_house_Others_sum = division_house_Others_sum.copy()
+    #division_house_Others_sum.loc[:,'pp_nm'] = 'Other'
+    #division_house_Others_sum = division_house_Others_sum[['div_nm','pp_nm','house_votes']]
+
+
+    #house_votes_full = pd.concat([house_votes,division_house_Others_sum],axis=0)
 
     Other_booth_type_prefixes = ['Remote Mobile', 'Other Mobile','Special Hospital', 'EAV']
 
-    #import pdb;pdb.set_trace()
+    import pdb;pdb.set_trace()
 
 
     # combine Others together
-    house_votes_full.loc[:,"pp_nm"] = house_votes_full.loc[:,"pp_nm"].apply(lambda x: 'Other' if any(x.startswith(prefix) for prefix in Other_booth_type_prefixes) else x)
+    #house_votes_full.loc[:,"pp_nm"] = house_votes_full.loc[:,"pp_nm"].apply(lambda x: 'Other' if any(x.startswith(prefix) for prefix in Other_booth_type_prefixes) else x)
     senate_votes_full.loc[:,"pp_nm"] = senate_votes_full.loc[:,"pp_nm"].apply(lambda x: 'Other' if any(x.startswith(prefix) for prefix in Other_booth_type_prefixes) else x)
 
-    house_votes_full = house_votes_full.groupby(["div_nm", "pp_nm"], as_index=False).agg({'house_votes':'sum'})
+    #house_votes_full = house_votes_full.groupby(["div_nm", "pp_nm"], as_index=False).agg({'house_votes':'sum'})
     senate_votes_full = senate_votes_full.groupby(["div_nm", "pp_nm"], as_index=False).agg({'senate_votes':'sum'})
 
 
@@ -2112,10 +2125,13 @@ def check_house_senate_discrepancies(data_year):
 
     #print(formal_senate_full_house_comparison.loc[(formal_senate_full_house_comparison["house/sen"] > 1.2) & (formal_senate_full_house_comparison['div_nm']<500),])
 
+    import pdb;pdb.set_trace()
 
 
-    # needs attention if less than 200 votes and difference is stark!
+    # needs attention if less than 500 votes and difference is stark!
     formal_senate_full_house_comparison.loc[~(formal_senate_full_house_comparison['pp_nm'].str.endswith('PPVC')) & ~(formal_senate_full_house_comparison['pp_nm'].str.endswith('Other')) & (np.abs(formal_senate_full_house_comparison['house-sen'])>100),]       
+    formal_senate_full_house_comparison.loc[(formal_senate_full_house_comparison['pp_nm'].str.endswith('PPVC')) & ~(formal_senate_full_house_comparison['pp_nm'].str.endswith('Other')) & (np.abs(formal_senate_full_house_comparison['house-sen'])>100),]
+    formal_senate_full_house_comparison.loc[~(formal_senate_full_house_comparison['pp_nm'].str.endswith('PPVC')) & (formal_senate_full_house_comparison['senate_votes']<500) & (formal_senate_full_house_comparison['house/sen']>1.05),]
 
     # FOR 2022:
 
@@ -2277,7 +2293,9 @@ def amend_Formal_prefs_dict(Formal_prefs_dict, data_year):
         lender_FPs.loc[:,'pp_nm'] = borrower
         Formal_prefs_dict["Kingsford Smith"] = pd.concat([FP_div,lender_FPs], ignore_index=True)
 
-    elif data_year == '2019':
+    # 2019 - Glorious - nothing to adjust!!!!
+
+    elif data_year == '2016':
         1
     
     #import pdb;pdb.set_trace()
@@ -2288,7 +2306,8 @@ def amend_Formal_prefs_dict(Formal_prefs_dict, data_year):
 
 
 
-def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, new_seats_list, name_changes_year_dict, x=5):
+def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, new_seats_list, name_changes_year_dict, data_year, x=5):
+    
     Formal_prefs_dict = allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_party_df, Senate_party_abvs_dict)
 
     print("done", time.time() - start)
@@ -2327,7 +2346,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
         #new_seats_list = ['Bullwinkel']
 
-        Formal_prefs_dict = amend_Formal_prefs_dict(Formal_prefs_dict)
+        Formal_prefs_dict = amend_Formal_prefs_dict(Formal_prefs_dict, data_year)
 
         transformed_votes = full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_dict, Senate_parties_by_div, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, Incumbency_by_div, new_seats_list)
 
@@ -2385,7 +2404,7 @@ def check_PPVC_discrepancies(Formal_prefs_dict, data_year):
 
 new_seats_list = new_seats_year_dict[data_year]
 name_changes_year_dict = name_changes_year_dict[data_year]
-Final_allocated_pcts_aggregated_dict, Final_x_HS_df = whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, new_seats_list, name_changes_year_dict, x=5)
+Final_allocated_pcts_aggregated_dict, Final_x_HS_df = whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, new_seats_list, name_changes_year_dict, data_year, x=5)
 
 
 

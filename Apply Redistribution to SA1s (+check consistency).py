@@ -226,6 +226,20 @@ Redistribution_SA1s_changes.iloc[:,1:] = Redistribution_SA1s_changes.iloc[:,1:].
 
 Redistribution_SA1s_changes.to_csv(f"Redistribution_SA1_changes{str(int(data_year)+2)}.csv", index=False)
 
+# get df of just the Redistribution pairs, for information on which electorate margins are necessary to calculate
+SA1_By_PP_Votes = pd.read_csv(f"{data_year}SA1_By_PP_Votes.csv", index_col=None)
+SA1s_with_votes = set(SA1_By_PP_Votes.iloc[:,1])
+
+
+Redistribution_SA1s_changes = Redistribution_SA1s_changes.loc[Redistribution_SA1s_changes[f"SA1_CODE{SA1_suffix[-2:]}"].isin(SA1s_with_votes),]
+Redistribution_pair_SA1s = Redistribution_SA1s_changes.groupby(['old_div', 'new_div'])[f"SA1_CODE{SA1_suffix[-2:]}"].apply(list).reset_index()
+#Redistribution_pairs = list(Redistribution_SA1s_changes_dict.keys())
+
+Redistribution_pairs = Redistribution_pair_SA1s.iloc[:,:2]
+Redistribution_pairs.to_csv("RedistributionPairs2024.csv", index = False)
+
+import pdb;pdb.set_trace()
+
 
 
 
