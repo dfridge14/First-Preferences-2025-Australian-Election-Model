@@ -5,13 +5,14 @@ from pathlib import Path
 
 
 
-base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else base_dir = Path.home() / "Australian Election"
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
 
 MIN_OBSERVABLE_RATIO = 0.001 # If SA1 somehow has 1000 voters, 0.01*1000=1 vote - anything else will not be observed due to rounding errors
 
 SA1_year_dict = {'2025':'2021','2022':'2016','2019':'2016','2016':'2011','2013':'2011','2010':'2006'}
+Redistribution_SA1_year_dict = {'2022':'2021','2019':'2016','2016':'2011'}
 
 data_year = '2019'
 correspondence_years = [SA1_year_dict[data_year],SA1_year_dict[str(int(data_year)+3)]]
@@ -79,7 +80,7 @@ def perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_old_new, SA1_By_P
     return SA1_By_PP_SA1_CODE16.groupby(['div_nm', 'SA1_CODE21','pp_id'], as_index=False)['votes'].sum() # aggregate split up SA1s and result correct SA1_By_PP
 
 
-if correspondence_years[0]!=correspondence_years[1]: # same SA1s - no need for correspondence
+if data_year == '2022': # different edition of SA1s - need for correspondence
 
     start = time.time()
 
@@ -104,47 +105,129 @@ if correspondence_years[0]!=correspondence_years[1]: # same SA1s - no need for c
 
     SA1_By_PP_Votes_new = perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_old_new, SA1_By_PP_SA1_CODE16)
     SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
-else:
+
+elif data_year in ['2016','2019']:
+    # post-2016 data still in 2011, post-2019 data all in 2016!!
     SA1_By_PP_Votes_new = pd.read_csv(f"{data_year}SA1ByPPComplete.csv", index_col=None)
     SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
+    import pdb;pdb.set_trace()
 
 
 
 
 
+def format_state_rdst_full(df,SA1_suffix):
+    
+
+    df = df.rename(columns={df.columns[0]: f'SA1_CODE{SA1_suffix}',df.columns[1]: 'new_div', df.columns[2]: 'old_div', df.columns[4]: 'curr_enrol',df.columns[5]: 'proj_enrol'})
+    df = df[[f'SA1_CODE{SA1_suffix}',"new_div","old_div",'curr_enrol','proj_enrol']].drop(df.index[-1]) # removes last misbehaving row
+    import pdb;pdb.set_trace()
+
+    if not df.iloc[:, -2:].dtypes.isin([np.float64, np.int64]).all():
+        df.iloc[:,-2:] = df.iloc[:,-2:].replace(',', '', regex=True).apply(lambda col: col.str.strip()).replace('-', '0').astype(int)
+
+    df = df.loc[(df['curr_enrol'] > 10) & (df['proj_enrol'] > 10)].reset_index(drop=True) # ignore small changes
+
+    #import pdb;pdb.set_trace()
 
 
+    df.loc[:,f'SA1_CODE{SA1_suffix}'] = df[f'SA1_CODE{SA1_suffix}'].astype(str).str[:7].astype(int)  # remove alpha characters at end - split SA1s don't matter as they are mostly taken care of
 
-VIC_SA1s_Redistribution_full = pd.read_csv("Redistribution2024VIC-by-SA2-and-SA1.csv", index_col=None)
-NSW_SA1s_Redistribution_full = pd.read_csv("Redistribution2024NSW-by-SA2-and-SA1.csv", index_col=None)
-WA_SA1s_Redistribution_full = pd.read_csv("Redistribution2024WA-by-SA2-and-SA1.csv", index_col=None)
+    return df
 
+def format_state_rdst_full_without_enrol(df,SA1_suffix):
 
-def format_state_rdst_full(df):
-    df = df.rename(columns={df.columns[0]: 'SA1_CODE21',df.columns[1]: 'new_div', df.columns[2]: 'old_div', df.columns[4]: 'curr_enrol',df.columns[5]: 'proj_enrol'})
-    df = df[["SA1_CODE21","new_div","old_div",'curr_enrol','proj_enrol']].drop(df.index[-1]) # removes last misbehaving row
-    df.iloc[:,-2:] = df.iloc[:,-2:].astype(int)
-    df = df.loc[(df['curr_enrol'] > 10) & (df['proj_enrol'] > 10)] # ignore small changes
-    df.loc[:,"SA1_CODE21"] = df["SA1_CODE21"].astype(str).str[:7] # remove alpha characters at end - split SA1s don't matter as they are taken care of
+    df = df.rename(columns={df.columns[0]: 'new_div',df.columns[1]: 'old_div', f'SA1 Code\n(20{SA1_suffix} SA1s)': f'SA1_CODE{SA1_suffix}'})
+    df = df[[f'SA1_CODE{SA1_suffix}',"new_div","old_div"]].drop(df.index[-1]) # removes last misbehaving row
+    #import pdb;pdb.set_trace()
+
+    df.loc[:,f'SA1_CODE{SA1_suffix}'] = df[f'SA1_CODE{SA1_suffix}'].astype(str).str[:7].astype(int) # remove alpha characters at end - split SA1s don't matter as they are mostly taken care of
 
     return df
 
 
-# combine into one Redistributions df
-VIC_SA1s_Redistribution = format_state_rdst_full(VIC_SA1s_Redistribution_full)
-NSW_SA1s_Redistribution = format_state_rdst_full(NSW_SA1s_Redistribution_full)
-WA_SA1s_Redistribution = format_state_rdst_full(WA_SA1s_Redistribution_full)
+SA1_suffix = Redistribution_SA1_year_dict[data_year][-2:]
 
-Redistribution_SA1s_2024 = pd.concat([VIC_SA1s_Redistribution,NSW_SA1s_Redistribution,WA_SA1s_Redistribution], ignore_index=True)
-Redistribution_SA1s_2024.iloc[:,-2:] = Redistribution_SA1s_2024.iloc[:,-2:].astype(int)
+
+if data_year == '2022':
+
+    states = ['VIC','NSW','WA','NT']
+    state_dfs = [pd.read_csv(f"Redistribution2024{state}-by-SA2-and-SA1.csv", index_col=None) for state in states]
+
+    state_dfs_Redistribution = [format_state_rdst_full(state_df, SA1_suffix) for state_df in state_dfs]
+    Redistribution_SA1s = pd.concat(state_dfs_Redistribution, ignore_index=True)
+
+    import pdb;pdb.set_trace()
+
+    #VIC_SA1s_Redistribution_full = pd.read_csv("Redistribution2024VIC-by-SA2-and-SA1.csv", index_col=None)
+    #NSW_SA1s_Redistribution_full = pd.read_csv("Redistribution2024NSW-by-SA2-and-SA1.csv", index_col=None)
+    #WA_SA1s_Redistribution_full = pd.read_csv("Redistribution2024WA-by-SA2-and-SA1.csv", index_col=None)
+
+
+
+    # combine into one Redistributions df
+    #VIC_SA1s_Redistribution = format_state_rdst_full(VIC_SA1s_Redistribution_full, SA1_suffix)
+    #NSW_SA1s_Redistribution = format_state_rdst_full(NSW_SA1s_Redistribution_full, SA1_suffix)
+    #WA_SA1s_Redistribution = format_state_rdst_full(WA_SA1s_Redistribution_full, SA1_suffix)
+
+    #Redistribution_SA1s = pd.concat([VIC_SA1s_Redistribution,NSW_SA1s_Redistribution,WA_SA1s_Redistribution], ignore_index=True)
+    #Redistribution_SA1s.iloc[:,-2:] = Redistribution_SA1s.iloc[:,-2:].astype(int)
+
+    
+
+elif data_year == '2019':
+    #VIC_SA1s_Redistribution_full = pd.read_csv("Redistribution2021VIC-by-SA2-and-SA1.csv", index_col=None)
+    #WA_SA1s_Redistribution_full = pd.read_csv("Redistribution2021WA-by-SA2-and-SA1.csv", index_col=None)
+
+
+    #VIC_SA1s_Redistribution = format_state_rdst_full(VIC_SA1s_Redistribution_full, SA1_suffix)
+    #WA_SA1s_Redistribution = format_state_rdst_full(WA_SA1s_Redistribution_full, SA1_suffix)
+
+    #Redistribution_SA1s = pd.concat([VIC_SA1s_Redistribution,WA_SA1s_Redistribution], ignore_index=True)
+
+
+    states = ['VIC','WA']
+    state_dfs = [pd.read_csv(f"Redistribution2021{state}-by-SA2-and-SA1.csv", index_col=None) for state in states]
+
+    state_dfs_Redistribution = [format_state_rdst_full(state_df, SA1_suffix) for state_df in state_dfs]
+    Redistribution_SA1s = pd.concat(state_dfs_Redistribution, ignore_index=True)
+
+    import pdb;pdb.set_trace()
+
+
+    #Redistribution_SA1s.iloc[:,-2:] = Redistribution_SA1s.iloc[:,-2:].astype(int)
+
+elif data_year == '2016':
+
+    states = ['VIC','TAS','QLD','NT','ACT']
+    state_dfs = [pd.read_csv(f"Redistribution2018{state}-by-SA2-and-SA1.csv", index_col=None) for state in states]
+    # format SA SA1s correctly starting with a '4'
+    SA_df = pd.read_csv(f"Redistribution2018SA-by-SA2-and-SA1.csv", index_col=None)
+    SA_df.iloc[:,0] = '4' + SA_df.iloc[:,0].astype(str)
+    state_dfs.append(SA_df)
+    
+    # combine into one Redistributions df
+    state_dfs_Redistribution = [format_state_rdst_full(state_df, SA1_suffix) if len(state_df.columns)==6 
+                                                                else format_state_rdst_full_without_enrol(state_df, SA1_suffix) for state_df in state_dfs]
+
+    Redistribution_SA1s = pd.concat(state_dfs_Redistribution, ignore_index=True)
+
+
+
 
 # redistribution changes
-Redistribution_SA1_changes_2024 = Redistribution_SA1s_2024.loc[Redistribution_SA1s_2024['new_div']!=Redistribution_SA1s_2024['old_div'],][['SA1_CODE21','new_div','old_div']]
+Redistribution_SA1s_changes = Redistribution_SA1s.loc[Redistribution_SA1s['new_div']!=Redistribution_SA1s['old_div'],][[f'SA1_CODE{SA1_suffix}','new_div','old_div']]
 
-recase_map = {'Mcmahon':'McMahon', 'Mcewen':'McEwen','Eden-monaro':'Eden-Monaro',"O'connor": "O'Connor"}
-Redistribution_SA1_changes_2024.iloc[:,1:] = Redistribution_SA1_changes_2024.iloc[:,1:].replace(recase_map)
+import pdb;pdb.set_trace()
 
-Redistribution_SA1_changes_2024.to_csv("Redistribution_SA1_changes2024.csv", index=False)
+
+recase_map = {'Mcmahon':'McMahon', 'Mcewen':'McEwen','Eden-monaro':'Eden-Monaro',"O'connor": "O'Connor",'LINGIARI':'Lingiari','SOLOMON':'Solomon'}
+Redistribution_SA1s_changes.iloc[:,1:] = Redistribution_SA1s_changes.iloc[:,1:].replace(recase_map)
+
+Redistribution_SA1s_changes.to_csv(f"Redistribution_SA1_changes{str(int(data_year)+2)}.csv", index=False)
+
+
+
 
 def check_SA1_consistency(VIC_SA1s_Redistribution):
     # investigates SA1s that were spread between divisions at 2022 election, how they changed in correspondence, and which are again split in 
@@ -187,7 +270,18 @@ def check_SA1_consistency(VIC_SA1s_Redistribution):
 import pdb;pdb.set_trace()
 
 
+
+
+
+
+
+
+
+# initial exploration for Higgins
 print("Higgins stuff")
+
+VIC_SA1s_Redistribution_full = pd.read_csv("Redistribution2024VIC-by-SA2-and-SA1.csv", index_col=None)
+VIC_SA1s_Redistribution = format_state_rdst_full(VIC_SA1s_Redistribution_full, SA1_suffix)
 
 SA1s_From_Higgins = VIC_SA1s_Redistribution.loc[VIC_SA1s_Redistribution["old_div"]=="Higgins","SA1_CODE21"].tolist()
 print(sorted(SA1s_From_Higgins), len(SA1s_From_Higgins))

@@ -84,8 +84,8 @@ states_to_redistribute_dict = {'2022': ['NSW','VIC','NSW','NT'],'2019': ['VIC','
 
 ######### Candidate Pairs stuff
 
-DOP_By_PP_Expand = pd.read_csv("2022DOP_By_PP_Expand.csv", index_col=None)
-DOP_By_PP_Pref_Percent = pd.read_csv("2022DOP_By_PP_Pref_Percent.csv", index_col=None)
+DOP_By_PP_Expand = pd.read_csv(f"{data_year}DOP_By_PP_Expand.csv", index_col=None)
+DOP_By_PP_Pref_Percent = pd.read_csv(f"{data_year}DOP_By_PP_Pref_Percent.csv", index_col=None)
 
 def convert_to_wide_format(df, df_type):
     # converts to wide format indexed by pp_id for either First Preferences or SA1 dfs
@@ -2051,10 +2051,10 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Elimination_order_di
 
 
 
+def check_house_senate_discrepancies(data_year):
 
-def check_house_senate_discrepancies():
-
-    directory = f"C:/Dania/2024/Australian Election/SenateVotesByPP{data_year}"
+    #directory = f"C:/Dania/2024/Australian Election/SenateVotesByPP{data_year}"
+    directory = Path(f"C:/Dania/2024/Australian Election/SenateVotesByPP{data_year}") if os.name == "nt" else Path.home() / f"Australian Election/SenateVotesByPP{data_year}"
     csv_files = sorted(glob.glob(f"{directory}/*.csv"))
     senate_votes_full = pd.concat((pd.read_csv(f, skiprows=1)[['DivisionNm','PollingPlaceNm','OrdinaryVotes']].groupby(['DivisionNm','PollingPlaceNm'], as_index=False) \
                                                             .agg({'OrdinaryVotes': 'sum'}) for f in csv_files), ignore_index=True) \
@@ -2117,6 +2117,9 @@ def check_house_senate_discrepancies():
     # needs attention if less than 200 votes and difference is stark!
     formal_senate_full_house_comparison.loc[~(formal_senate_full_house_comparison['pp_nm'].str.endswith('PPVC')) & ~(formal_senate_full_house_comparison['pp_nm'].str.endswith('Other')) & (np.abs(formal_senate_full_house_comparison['house-sen'])>100),]       
 
+    # FOR 2022:
+
+
     # to fix: Duggan? Don't worry about it (maxnamara), HOLT, Manjimup East (O'Connor), Sydney
     # PPVCs: McEwen Epping, Footscray MELBOURNE, Haymarket MITCHELL/NORTH SYDNEY/PARRAMATTA/(also BEROWRA PPVC),  Mill Park COOPER/JAGAJAGA/MCEWEN,Newtown SYDNEY,Northcote MELBOURNE,South Yarra MELBOURNE, Sydney GRAYNDLER, The Ponds MITCHELL,  Waverley KINGSFORD SMITH
 
@@ -2144,133 +2147,138 @@ def check_house_senate_discrepancies():
     return formal_senate_full_house_comparison
 
 
-def amend_Formal_prefs_dict(Formal_prefs_dict):
+def amend_Formal_prefs_dict(Formal_prefs_dict, data_year):
 
     import pdb;pdb.set_trace()
 
-    h_s_discrepancies = check_house_senate_discrepancies()
+    h_s_discrepancies = check_house_senate_discrepancies(data_year)
 
-    # 1. New England: take Blackville's from Ben Venue!
-    FP_div = Formal_prefs_dict['New England']
-    lender = 'Ben Venue'
-    borrower = 'Blackville'
+    if data_year == '2022':
 
-    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs.loc[:,'pp_nm'] = borrower
-    Formal_prefs_dict['New England'] = pd.concat([FP_div,lender_FPs], ignore_index=True)
+        # 1. New England: take Blackville's from Ben Venue!
+        FP_div = Formal_prefs_dict['New England']
+        lender = 'Ben Venue'
+        borrower = 'Blackville'
+
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        lender_FPs.loc[:,'pp_nm'] = borrower
+        Formal_prefs_dict['New England'] = pd.concat([FP_div,lender_FPs], ignore_index=True)
 
 
-    # 2. O'Connor: Manjimup East from Manjimup PPVC
-    FP_div = Formal_prefs_dict["O'Connor"]
-    lender = 'Manjimup PPVC'
-    borrower = 'Manjimup East'
+        # 2. O'Connor: Manjimup East from Manjimup PPVC
+        FP_div = Formal_prefs_dict["O'Connor"]
+        lender = 'Manjimup PPVC'
+        borrower = 'Manjimup East'
 
-    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs.loc[:,'pp_nm'] = borrower
-    Formal_prefs_dict["O'Connor"] = pd.concat([FP_div,lender_FPs], ignore_index=True)
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        lender_FPs.loc[:,'pp_nm'] = borrower
+        Formal_prefs_dict["O'Connor"] = pd.concat([FP_div,lender_FPs], ignore_index=True)
 
-    #3. Holt!
-   
-    FP_div = Formal_prefs_dict['Holt']
-    lender = 'Cranbourne East'
-    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        #3. Holt!
+    
+        FP_div = Formal_prefs_dict['Holt']
+        lender = 'Cranbourne East'
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
 
-    borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['div_nm'] == 'Holt' ) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
-    for borrower_pp in borrower_list:
-        to_add_FP = lender_FPs.copy()
-        to_add_FP.loc[:,'pp_nm'] = borrower_pp
-        Formal_prefs_dict['Holt'] = pd.concat([Formal_prefs_dict['Holt'],to_add_FP], ignore_index=True)
+        borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['div_nm'] == 'Holt' ) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
+        for borrower_pp in borrower_list:
+            to_add_FP = lender_FPs.copy()
+            to_add_FP.loc[:,'pp_nm'] = borrower_pp
+            Formal_prefs_dict['Holt'] = pd.concat([Formal_prefs_dict['Holt'],to_add_FP], ignore_index=True)
 
-    # 4. Sydney (Sydney) --> remove from Syndey and add to to Sydney GRAYNDLER
-    FP_div = Formal_prefs_dict['Sydney']
-    lender = 'Sydney (Sydney)'
-    borrower = 'Sydney GRAYNDLER PPVC'
+        # 4. Sydney (Sydney) --> remove from Syndey and add to to Sydney GRAYNDLER
+        FP_div = Formal_prefs_dict['Sydney']
+        lender = 'Sydney (Sydney)'
+        borrower = 'Sydney GRAYNDLER PPVC'
 
-    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs.loc[:,'pp_nm'] = borrower
-    lender_FPs.loc[:,'div_nm'] = 'Grayndler'
-    Formal_prefs_dict['Sydney'] = Formal_prefs_dict['Sydney'].loc[Formal_prefs_dict['Sydney']['pp_nm'] != 'Sydney (Sydney)',]
-    Formal_prefs_dict["Grayndler"] = pd.concat([Formal_prefs_dict["Grayndler"],lender_FPs], ignore_index=True)
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        lender_FPs.loc[:,'pp_nm'] = borrower
+        lender_FPs.loc[:,'div_nm'] = 'Grayndler'
+        Formal_prefs_dict['Sydney'] = Formal_prefs_dict['Sydney'].loc[Formal_prefs_dict['Sydney']['pp_nm'] != 'Sydney (Sydney)',]
+        Formal_prefs_dict["Grayndler"] = pd.concat([Formal_prefs_dict["Grayndler"],lender_FPs], ignore_index=True)
 
-    # 5. Epping ----- PPVC (add Scullin's to McEwen)
-    FP_div = Formal_prefs_dict['Scullin']
-    lender = 'Epping SCULLIN PPVC'
-    borrower = 'Epping MCEWEN PPVC'
+        # 5. Epping ----- PPVC (add Scullin's to McEwen)
+        FP_div = Formal_prefs_dict['Scullin']
+        lender = 'Epping SCULLIN PPVC'
+        borrower = 'Epping MCEWEN PPVC'
 
-    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs.loc[:,'pp_nm'] = borrower
-    lender_FPs.loc[:,'div_nm'] = 'McEwen'
-    Formal_prefs_dict["McEwen"] = pd.concat([Formal_prefs_dict["McEwen"],lender_FPs], ignore_index=True)
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        lender_FPs.loc[:,'pp_nm'] = borrower
+        lender_FPs.loc[:,'div_nm'] = 'McEwen'
+        Formal_prefs_dict["McEwen"] = pd.concat([Formal_prefs_dict["McEwen"],lender_FPs], ignore_index=True)
 
-    # 6. MELBOURNE ones - all take from Melbourne MELBOURNE!
-    FP_div = Formal_prefs_dict['Melbourne']
-    lender = 'Melbourne MELBOURNE PPVC'
-    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        # 6. MELBOURNE ones - all take from Melbourne MELBOURNE!
+        FP_div = Formal_prefs_dict['Melbourne']
+        lender = 'Melbourne MELBOURNE PPVC'
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
 
-    borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['div_nm'] == 'Melbourne' ) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
-    for borrower_pp in borrower_list:
-        to_add_FP = lender_FPs.copy()
-        to_add_FP.loc[:,'pp_nm'] = borrower_pp
-        Formal_prefs_dict['Melbourne'] = pd.concat([Formal_prefs_dict['Melbourne'],to_add_FP], ignore_index=True)
+        borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['div_nm'] == 'Melbourne' ) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
+        for borrower_pp in borrower_list:
+            to_add_FP = lender_FPs.copy()
+            to_add_FP.loc[:,'pp_nm'] = borrower_pp
+            Formal_prefs_dict['Melbourne'] = pd.concat([Formal_prefs_dict['Melbourne'],to_add_FP], ignore_index=True)
 
-    # 7. Haymarkets (including BEROWRA!) - take from GRAYNDLER! not neat
-    FP_div = Formal_prefs_dict['Grayndler']
-    lender = 'Haymarket GRAYNDLER PPVC'
-    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        # 7. Haymarkets (including BEROWRA!) - take from GRAYNDLER! not neat
+        FP_div = Formal_prefs_dict['Grayndler']
+        lender = 'Haymarket GRAYNDLER PPVC'
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
 
-    borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Haymarket')) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
-    div_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Haymarket')) & (h_s_discrepancies['senate_votes']==0),'div_nm'].tolist()
-    for i, borrower_pp in enumerate(borrower_list):
-        to_add_FP = lender_FPs.copy()
-        to_add_FP.loc[:,'pp_nm'] = borrower_pp
-        to_add_FP.loc[:,'div_nm'] = div_list[i]
-        borrower_div = div_list[i] #borrower_pp.split(' ')[-2].capitalize() 
-        Formal_prefs_dict[borrower_div] = pd.concat([Formal_prefs_dict[borrower_div],to_add_FP], ignore_index=True)
+        borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Haymarket')) & (h_s_discrepancies['senate_votes']==0),'pp_nm'].tolist()
+        div_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Haymarket')) & (h_s_discrepancies['senate_votes']==0),'div_nm'].tolist()
+        for i, borrower_pp in enumerate(borrower_list):
+            to_add_FP = lender_FPs.copy()
+            to_add_FP.loc[:,'pp_nm'] = borrower_pp
+            to_add_FP.loc[:,'div_nm'] = div_list[i]
+            borrower_div = div_list[i] #borrower_pp.split(' ')[-2].capitalize() 
+            Formal_prefs_dict[borrower_div] = pd.concat([Formal_prefs_dict[borrower_div],to_add_FP], ignore_index=True)
 
-    # 8. # Mill park - all 3 take from scullin!
-    FP_div = Formal_prefs_dict['Scullin']
-    lender = 'Mill Park SCULLIN PPVC'
-    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    MCEWEN_LIMIT = 30
+        # 8. # Mill park - all 3 take from scullin!
+        FP_div = Formal_prefs_dict['Scullin']
+        lender = 'Mill Park SCULLIN PPVC'
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        MCEWEN_LIMIT = 30
 
-    borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Mill Park')) & (h_s_discrepancies['senate_votes']<MCEWEN_LIMIT),'pp_nm'].tolist()
-    div_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Mill Park')) & (h_s_discrepancies['senate_votes']<MCEWEN_LIMIT),'div_nm'].tolist()
-    for i, borrower_pp in enumerate(borrower_list):
-        to_add_FP = lender_FPs.copy()
-        to_add_FP.loc[:,'pp_nm'] = borrower_pp
-        borrower_div = div_list[i] if div_list[i] != 'Mcewen' else 'McEwen'
-        to_add_FP.loc[:,'div_nm'] = borrower_div
+        borrower_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Mill Park')) & (h_s_discrepancies['senate_votes']<MCEWEN_LIMIT),'pp_nm'].tolist()
+        div_list = h_s_discrepancies.loc[(h_s_discrepancies['pp_nm'].str.startswith('Mill Park')) & (h_s_discrepancies['senate_votes']<MCEWEN_LIMIT),'div_nm'].tolist()
+        for i, borrower_pp in enumerate(borrower_list):
+            to_add_FP = lender_FPs.copy()
+            to_add_FP.loc[:,'pp_nm'] = borrower_pp
+            borrower_div = div_list[i] if div_list[i] != 'Mcewen' else 'McEwen'
+            to_add_FP.loc[:,'div_nm'] = borrower_div
 
-        Formal_prefs_dict[borrower_div] = pd.concat([Formal_prefs_dict[borrower_div],to_add_FP], ignore_index=True)
+            Formal_prefs_dict[borrower_div] = pd.concat([Formal_prefs_dict[borrower_div],to_add_FP], ignore_index=True)
 
-    # 9. Newtown - take from GRAYNDLER!
-    FP_div = Formal_prefs_dict['Grayndler']
-    lender = 'Newtown GRAYNDLER PPVC'
-    borrower = 'Newtown SYDNEY PPVC'
+        # 9. Newtown - take from GRAYNDLER!
+        FP_div = Formal_prefs_dict['Grayndler']
+        lender = 'Newtown GRAYNDLER PPVC'
+        borrower = 'Newtown SYDNEY PPVC'
 
-    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs.loc[:,'pp_nm'] = borrower
-    lender_FPs.loc[:,'div_nm'] = 'Sydney'
-    Formal_prefs_dict["Sydney"] = pd.concat([Formal_prefs_dict["Sydney"],lender_FPs], ignore_index=True)
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        lender_FPs.loc[:,'pp_nm'] = borrower
+        lender_FPs.loc[:,'div_nm'] = 'Sydney'
+        Formal_prefs_dict["Sydney"] = pd.concat([Formal_prefs_dict["Sydney"],lender_FPs], ignore_index=True)
 
-    # 10. The Ponds MITCHELL - take form Greenway, but mystery unsolved!
-    FP_div = Formal_prefs_dict['Greenway']
-    lender = 'The Ponds GREENWAY PPVC'
-    borrower = 'The Ponds MITCHELL PPVC'
+        # 10. The Ponds MITCHELL - take form Greenway, but mystery unsolved!
+        FP_div = Formal_prefs_dict['Greenway']
+        lender = 'The Ponds GREENWAY PPVC'
+        borrower = 'The Ponds MITCHELL PPVC'
 
-    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs.loc[:,'pp_nm'] = borrower
-    lender_FPs.loc[:,'pp_nm'] = 'Mitchell'
-    Formal_prefs_dict["Mitchell"] = pd.concat([Formal_prefs_dict["Mitchell"],lender_FPs], ignore_index=True)
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        lender_FPs.loc[:,'pp_nm'] = borrower
+        lender_FPs.loc[:,'pp_nm'] = 'Mitchell'
+        Formal_prefs_dict["Mitchell"] = pd.concat([Formal_prefs_dict["Mitchell"],lender_FPs], ignore_index=True)
 
-    # 11. Waverley KINGSFORD SMITH - combine with Randwick KINGSFORD SMITH PPVC - mystery half solved!
-    FP_div = Formal_prefs_dict["Kingsford Smith"]
-    lender = 'Randwick KINGSFORD SMITH PPVC'
-    borrower = 'Waverley KINGSFORD SMITH PPVC'
+        # 11. Waverley KINGSFORD SMITH - combine with Randwick KINGSFORD SMITH PPVC - mystery half solved!
+        FP_div = Formal_prefs_dict["Kingsford Smith"]
+        lender = 'Randwick KINGSFORD SMITH PPVC'
+        borrower = 'Waverley KINGSFORD SMITH PPVC'
 
-    lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
-    lender_FPs.loc[:,'pp_nm'] = borrower
-    Formal_prefs_dict["Kingsford Smith"] = pd.concat([FP_div,lender_FPs], ignore_index=True)
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        lender_FPs.loc[:,'pp_nm'] = borrower
+        Formal_prefs_dict["Kingsford Smith"] = pd.concat([FP_div,lender_FPs], ignore_index=True)
+
+    elif data_year == '2019':
+        1
     
     #import pdb;pdb.set_trace()
     return Formal_prefs_dict
@@ -2332,6 +2340,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
 
 def check_PPVC_discrepancies(Formal_prefs_dict, data_year):
+    ### old, redundant, to be removed
 
     First_Prefs_By_PP = pd.read_csv("FirstPrefsByPollingPlace2022.csv", skiprows=1,index_col = None)[['pp_nm','div_nm','PartyAb','votes']] 
 
