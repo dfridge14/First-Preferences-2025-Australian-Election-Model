@@ -14,7 +14,7 @@ MIN_OBSERVABLE_RATIO = 0.001 # If SA1 somehow has 1000 voters, 0.01*1000=1 vote 
 SA1_year_dict = {'2025':'2021','2022':'2016','2019':'2016','2016':'2011','2013':'2011','2010':'2006'}
 Redistribution_SA1_year_dict = {'2022':'2021','2019':'2016','2016':'2011'}
 
-data_year = '2019'
+data_year = '2016'
 correspondence_years = [SA1_year_dict[data_year],SA1_year_dict[str(int(data_year)+3)]]
 
 # TO DO: 1. Make separate correspondence functions for each year - too few cases to generalise, especially since 2006--> 2001 is whole different structure!
@@ -215,10 +215,15 @@ elif data_year == '2016':
 
 
 
-# redistribution changes
-Redistribution_SA1s_changes = Redistribution_SA1s.loc[Redistribution_SA1s['new_div']!=Redistribution_SA1s['old_div'],][[f'SA1_CODE{SA1_suffix}','new_div','old_div']]
+# redistribution changes - ignore the effect of renaming divisions!
+name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
 
 import pdb;pdb.set_trace()
+# remame old_div to new_div if there was a name change!
+Redistribution_SA1s.loc[Redistribution_SA1s['old_div'].isin(name_changes_year_dict[data_year].keys()),'old_div'] = Redistribution_SA1s.loc[Redistribution_SA1s['old_div'].isin(name_changes_year_dict[data_year].keys()),'new_div']
+
+Redistribution_SA1s_changes = Redistribution_SA1s.loc[Redistribution_SA1s['new_div']!=Redistribution_SA1s['old_div'],][[f'SA1_CODE{SA1_suffix}','new_div','old_div']]
+
 
 
 recase_map = {'Mcmahon':'McMahon', 'Mcewen':'McEwen','Eden-monaro':'Eden-Monaro',"O'connor": "O'Connor",'LINGIARI':'Lingiari','SOLOMON':'Solomon'}
@@ -236,7 +241,7 @@ Redistribution_pair_SA1s = Redistribution_SA1s_changes.groupby(['old_div', 'new_
 #Redistribution_pairs = list(Redistribution_SA1s_changes_dict.keys())
 
 Redistribution_pairs = Redistribution_pair_SA1s.iloc[:,:2]
-Redistribution_pairs.to_csv("RedistributionPairs2024.csv", index = False)
+Redistribution_pairs.to_csv(f"RedistributionPairs{str(int(data_year)+2)}.csv", index = False)
 
 import pdb;pdb.set_trace()
 

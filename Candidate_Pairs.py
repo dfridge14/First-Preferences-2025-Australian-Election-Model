@@ -690,7 +690,6 @@ Redistribution_SA1_changes_2024 = Redistribution_SA1_changes_2024.loc[Redistribu
 Redistribution_SA1_changes_2024_dict = Redistribution_SA1_changes_2024.groupby(['old_div', 'new_div'])['SA1_CODE21'].apply(list).to_dict()
 Redistribution_pairs = list(Redistribution_SA1_changes_2024_dict.keys())
 
-Redistribution_pair = {key: [] for key in Redistribution_pairs}
 
 Redistribution_pair_SA1s = Redistribution_SA1_changes_2024.groupby(['old_div', 'new_div'])['SA1_CODE21'].apply(list).reset_index()
 
