@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import os, time
 from pathlib import Path
+import re
 
 # automatic error debugging
 import sys
@@ -16,11 +17,8 @@ def exception_handler(type, value, tb):
 sys.excepthook = exception_handler
 
 
-if os.name == "nt":  # Windows
-    base_dir = Path('C:\\Dania\\2024\\Australian Election')
-else:  # Ubuntu/Linux/macOS
-    base_dir = Path.home() / "Australian Election"
 
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
 data_year = "2016"
@@ -60,8 +58,55 @@ PP_data.loc[(PP_data["pp_type"]==5) & (~PP_data["pp_nm"].str.startswith("EAV")),
 PP_data.loc[(PP_data["pp_type"]==1),'Booth_type'] = 'PB'
 PP_data.loc[PP_data["pp_type"].isin([2,3,4]) | (PP_data["pp_type"]==5) & (PP_data["pp_nm"].str.startswith("EAV")),['Lat','Long','Booth_type']] = np.nan,np.nan,'Other'
 
+# Fix up missing Lat/Longs if necessary
+div_names = PP_data['div_nm'].unique().tolist()
+div_names = [d.upper() for d in div_names]
+
+
+def remove_division_name(pp_nm, div_list_upper): # written by chatgpt
+    pattern = r"\b" + r"\b|\b".join(map(re.escape, div_list_upper)) + r"\b"  # Match full word(s)
+    
+    # Remove matched division name, replacing it with a single space
+    cleaned_pp_nm = re.sub(pattern, " ", pp_nm)
+    
+    # Ensure single spacing and strip extra spaces
+    return " ".join(cleaned_pp_nm.split())
+
+
+def remove_pp_nm_div_identifier(df, div_names):
+    # remove (div_nm)
+    df.loc[:,'pp_nm'] = df.loc[:,'pp_nm'].str.replace(r'\[.*?\]|\(.*?\)','',regex=True).str.strip()
+    # remove 'DIVNM' PPVC
+    df.loc[df['pp_nm'].str.endswith('PPVC'),'pp_nm'] = df.loc[df['pp_nm'].str.endswith('PPVC'),'pp_nm'].apply(lambda x: remove_division_name(x, div_names))
+
+    return df
+
+
 
 PP_data.drop(columns = 'pp_type',inplace=True)
+
+unlocated_PPs = PP_data.loc[PP_data['Lat'].isna() & (PP_data['Booth_type']!='Other'),].copy()
+unlocated_PPs = remove_pp_nm_div_identifier(unlocated_PPs.copy(), div_names)
+PP_data_names_undiv_ed = remove_pp_nm_div_identifier(PP_data.copy(), div_names)
+
+lat_lon_means = PP_data_names_undiv_ed.groupby('pp_nm')[['Lat', 'Long']].mean()
+
+
+
+#unlocated_PPs[['Lat', 'Long']] = unlocated_PPs[['Lat', 'Long']].combine_first(unlocated_PPs['pp_nm'].map(lat_lon_means.to_dict())).apply(pd.Series)
+
+unlocated_PPs = unlocated_PPs.merge(lat_lon_means, on='pp_nm', how='left',suffixes = ('nan',''))[['div_nm','pp_id','pp_nm','Booth_type','Lat','Long']]
+
+
+PP_data.loc[PP_data['Lat'].isna() & (PP_data['Booth_type']!='Other'),['Lat','Long']] = unlocated_PPs[['Lat','Long']].values
+
+# check if remaining unlocated ones have any votes! Happens at the end using formatted FPbyPP
+
+
+import ipdb;ipdb.set_trace()
+
+
+# ensure all PB and PPVC have coordinates, if not, match with other iterations of the same pp
 
 
 
@@ -178,6 +223,13 @@ import ipdb;ipdb.set_trace()
 SA1_By_PP_grouped.to_csv(f'{data_year}SA1ByPPComplete.csv', index = False)
 
 import ipdb;ipdb.set_trace()
+
+
+
+# check that unlocated_PPs catches all the non-zero-vote pps!
+FP_By_PP_Complete_sum = remove_pp_nm_div_identifier(FP_By_PP_Complete[['div_nm','pp_nm','votes']], div_names).groupby(['div_nm','pp_nm'], as_index = False)['votes'].agg('sum')
+unlocated_PPs = unlocated_PPs.merge(FP_By_PP_Complete_sum, on=['div_nm','pp_nm'], how='left')
+
 
 
 # Finally, submit PP_data

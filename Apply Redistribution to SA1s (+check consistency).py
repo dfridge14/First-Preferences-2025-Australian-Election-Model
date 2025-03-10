@@ -4,6 +4,19 @@ import os, time
 from pathlib import Path
 
 
+# automatic error debugging
+import sys
+import pdb
+import traceback
+
+def exception_handler(type, value, tb):
+    traceback.print_exception(type, value, tb)  # Print the error as usual
+    print("\n--- Entering post-mortem debugging ---\n")
+    pdb.pm()  # Start debugger at the error location
+
+sys.excepthook = exception_handler
+
+
 
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
@@ -104,12 +117,12 @@ if data_year == '2022': # different edition of SA1s - need for correspondence
     # perform SA1 Correspondence!
 
     SA1_By_PP_Votes_new = perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_old_new, SA1_By_PP_SA1_CODE16)
-    SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
+    #SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
 
 elif data_year in ['2016','2019']:
     # post-2016 data still in 2011, post-2019 data all in 2016!!
     SA1_By_PP_Votes_new = pd.read_csv(f"{data_year}SA1ByPPComplete.csv", index_col=None)
-    SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
+    #SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
     import pdb;pdb.set_trace()
 
 
@@ -121,9 +134,9 @@ def format_state_rdst_full(df,SA1_suffix):
 
     df = df.rename(columns={df.columns[0]: f'SA1_CODE{SA1_suffix}',df.columns[1]: 'new_div', df.columns[2]: 'old_div', df.columns[4]: 'curr_enrol',df.columns[5]: 'proj_enrol'})
     df = df[[f'SA1_CODE{SA1_suffix}',"new_div","old_div",'curr_enrol','proj_enrol']].drop(df.index[-1]) # removes last misbehaving row
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
-    if not df.iloc[:, -2:].dtypes.isin([np.float64, np.int64]).all():
+    if df.iloc[:, -2:].dtypes.isin([np.dtype(np.float64), np.dtype(np.int64)]).sum() < 2:
         df.iloc[:,-2:] = df.iloc[:,-2:].replace(',', '', regex=True).apply(lambda col: col.str.strip()).replace('-', '0').astype(int)
 
     df = df.loc[(df['curr_enrol'] > 10) & (df['proj_enrol'] > 10)].reset_index(drop=True) # ignore small changes
@@ -173,8 +186,6 @@ if data_year == '2022':
     #Redistribution_SA1s = pd.concat([VIC_SA1s_Redistribution,NSW_SA1s_Redistribution,WA_SA1s_Redistribution], ignore_index=True)
     #Redistribution_SA1s.iloc[:,-2:] = Redistribution_SA1s.iloc[:,-2:].astype(int)
 
-    
-
 elif data_year == '2019':
     #VIC_SA1s_Redistribution_full = pd.read_csv("Redistribution2021VIC-by-SA2-and-SA1.csv", index_col=None)
     #WA_SA1s_Redistribution_full = pd.read_csv("Redistribution2021WA-by-SA2-and-SA1.csv", index_col=None)
@@ -220,7 +231,8 @@ name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman
 
 import pdb;pdb.set_trace()
 # remame old_div to new_div if there was a name change!
-Redistribution_SA1s.loc[Redistribution_SA1s['old_div'].isin(name_changes_year_dict[data_year].keys()),'old_div'] = Redistribution_SA1s.loc[Redistribution_SA1s['old_div'].isin(name_changes_year_dict[data_year].keys()),'new_div']
+if name_changes_year_dict[data_year]:
+    Redistribution_SA1s.loc[Redistribution_SA1s['old_div'].isin(name_changes_year_dict[data_year].keys()),'old_div'] = Redistribution_SA1s['old_div'].map(name_changes_year_dict[data_year])
 
 Redistribution_SA1s_changes = Redistribution_SA1s.loc[Redistribution_SA1s['new_div']!=Redistribution_SA1s['old_div'],][[f'SA1_CODE{SA1_suffix}','new_div','old_div']]
 
@@ -229,7 +241,7 @@ Redistribution_SA1s_changes = Redistribution_SA1s.loc[Redistribution_SA1s['new_d
 recase_map = {'Mcmahon':'McMahon', 'Mcewen':'McEwen','Eden-monaro':'Eden-Monaro',"O'connor": "O'Connor",'LINGIARI':'Lingiari','SOLOMON':'Solomon'}
 Redistribution_SA1s_changes.iloc[:,1:] = Redistribution_SA1s_changes.iloc[:,1:].replace(recase_map)
 
-Redistribution_SA1s_changes.to_csv(f"Redistribution_SA1_changes{str(int(data_year)+2)}.csv", index=False)
+#Redistribution_SA1s_changes.to_csv(f"Redistribution_SA1_changes{str(int(data_year)+2)}.csv", index=False)
 
 # get df of just the Redistribution pairs, for information on which electorate margins are necessary to calculate
 SA1_By_PP_Votes = pd.read_csv(f"{data_year}SA1_By_PP_Votes.csv", index_col=None)
@@ -241,9 +253,41 @@ Redistribution_pair_SA1s = Redistribution_SA1s_changes.groupby(['old_div', 'new_
 #Redistribution_pairs = list(Redistribution_SA1s_changes_dict.keys())
 
 Redistribution_pairs = Redistribution_pair_SA1s.iloc[:,:2]
-Redistribution_pairs.to_csv(f"RedistributionPairs{str(int(data_year)+2)}.csv", index = False)
+#Redistribution_pairs.to_csv(f"RedistributionPairs{str(int(data_year)+2)}.csv", index = False)
 
 import pdb;pdb.set_trace()
+
+
+
+
+
+# Construct proportions of electorates transferred!
+Proportions_transferred = pd.read_csv(f'CG_CED_{str(int(data_year) - 1)}_CED_{str(int(data_year) +2)}.csv', index_col=None) # will fix 2016 --> 2015
+Proportions_transferred = Proportions_transferred.rename(columns = {f'CED_NAME_{str(int(data_year) - 1)}':'old_div', f'CED_NAME_{str(int(data_year) +2)}':'new_div'})
+Proportions_transferred = Proportions_transferred[['new_div','old_div','RATIO_FROM_TO']]
+# ensure all corrrespondence is from 4 years before election to 1 year before election
+
+Redistribution_pairs_ratios = Redistribution_pairs.merge(Proportions_transferred, on = ['new_div','old_div'], how='left')
+
+import pdb;pdb.set_trace()
+Redistribution_pairs_ratios.to_csv(f"RedistributionPairs{str(int(data_year)+2)}.csv", index = False)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -287,13 +331,6 @@ def check_SA1_consistency(VIC_SA1s_Redistribution):
 
 
 import pdb;pdb.set_trace()
-
-
-
-
-
-
-
 
 
 # initial exploration for Higgins
