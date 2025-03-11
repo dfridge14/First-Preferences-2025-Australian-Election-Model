@@ -27,7 +27,7 @@ MIN_OBSERVABLE_RATIO = 0.001 # If SA1 somehow has 1000 voters, 0.01*1000=1 vote 
 SA1_year_dict = {'2025':'2021','2022':'2016','2019':'2016','2016':'2011','2013':'2011','2010':'2006'}
 Redistribution_SA1_year_dict = {'2022':'2021','2019':'2016','2016':'2011'}
 
-data_year = '2016'
+data_year = '2019'
 correspondence_years = [SA1_year_dict[data_year],SA1_year_dict[str(int(data_year)+3)]]
 
 # TO DO: 1. Make separate correspondence functions for each year - too few cases to generalise, especially since 2006--> 2001 is whole different structure!
@@ -234,14 +234,16 @@ import pdb;pdb.set_trace()
 if name_changes_year_dict[data_year]:
     Redistribution_SA1s.loc[Redistribution_SA1s['old_div'].isin(name_changes_year_dict[data_year].keys()),'old_div'] = Redistribution_SA1s['old_div'].map(name_changes_year_dict[data_year])
 
+# ensure re-case-ment before selecting only changes across divisions
+recase_map = {'Mcmahon':'McMahon', 'Mcewen':'McEwen','Eden-monaro':'Eden-Monaro',"O'connor": "O'Connor",'LINGIARI':'Lingiari','SOLOMON':'Solomon'}
+Redistribution_SA1s.loc[:,['new_div','old_div']] = Redistribution_SA1s.loc[:,['new_div','old_div']].replace(recase_map)
+
 Redistribution_SA1s_changes = Redistribution_SA1s.loc[Redistribution_SA1s['new_div']!=Redistribution_SA1s['old_div'],][[f'SA1_CODE{SA1_suffix}','new_div','old_div']]
 
+import pdb;pdb.set_trace()
 
 
-recase_map = {'Mcmahon':'McMahon', 'Mcewen':'McEwen','Eden-monaro':'Eden-Monaro',"O'connor": "O'Connor",'LINGIARI':'Lingiari','SOLOMON':'Solomon'}
-Redistribution_SA1s_changes.iloc[:,1:] = Redistribution_SA1s_changes.iloc[:,1:].replace(recase_map)
-
-#Redistribution_SA1s_changes.to_csv(f"Redistribution_SA1_changes{str(int(data_year)+2)}.csv", index=False)
+Redistribution_SA1s_changes.to_csv(f"Redistribution_SA1_changes{str(int(data_year)+2)}.csv", index=False)
 
 # get df of just the Redistribution pairs, for information on which electorate margins are necessary to calculate
 SA1_By_PP_Votes = pd.read_csv(f"{data_year}SA1_By_PP_Votes.csv", index_col=None)
@@ -253,12 +255,103 @@ Redistribution_pair_SA1s = Redistribution_SA1s_changes.groupby(['old_div', 'new_
 #Redistribution_pairs = list(Redistribution_SA1s_changes_dict.keys())
 
 Redistribution_pairs = Redistribution_pair_SA1s.iloc[:,:2]
-#Redistribution_pairs.to_csv(f"RedistributionPairs{str(int(data_year)+2)}.csv", index = False)
+Redistribution_pairs.to_csv(f"RedistributionPairs{str(int(data_year)+2)}.csv", index = False)
 
 import pdb;pdb.set_trace()
 
 
 
+
+
+def format_2018_2021_correspondence():
+    
+    Correspondence_CED_2018_2021 = pd.read_csv(f'CG_CED_2018_CED_2021.csv', index_col=None)[['CED_NAME_2018','CED_NAME_2021','RATIO_FROM_TO']].dropna()
+
+    Correspondence_CED_2018_2021.rename(columns={'CED_NAME_2018':'div_nm_2018','CED_NAME_2021':'div_nm_2021'}, inplace=True)
+
+
+    Correspondence_CED_2018_2021 = Correspondence_CED_2018_2021.loc[~Correspondence_CED_2018_2021['div_nm_2021'].str.contains(r'\(', na=False)]
+
+    Redistribution_pairs_2021 = pd.read_csv(f"RedistributionPairs2021.csv", index_col = None).rename(columns={'old_div':'div_nm_2018','new_div':'div_nm_2021'}).iloc[:,:2]
+
+    # add transfers of dfs to themselves
+    unique_old_divs = Redistribution_pairs_2021['div_nm_2018'].unique()
+    new_rows = pd.DataFrame({'div_nm_2018': unique_old_divs, 'div_nm_2021': unique_old_divs})
+    Redistribution_pairs_2021_full = pd.concat([Redistribution_pairs_2021,new_rows], ignore_index=True)
+
+    # remove insignificant transfers not appearing in Redistribution_pairs_2021
+    redist_map = Redistribution_pairs_2021_full.groupby('div_nm_2018')['div_nm_2021'].apply(set).to_dict()
+    mask_valid_old_div = Correspondence_CED_2018_2021['div_nm_2018'].isin(redist_map)
+    mask_invalid_new_div = ~Correspondence_CED_2018_2021.loc[mask_valid_old_div].apply(lambda row: row['div_nm_2021'] in redist_map[row['div_nm_2018']], axis=1)
+    mask = mask_valid_old_div.copy()
+    mask.loc[mask_valid_old_div] = mask_invalid_new_div.values
+    Correspondence_CED_2018_2021 = Correspondence_CED_2018_2021.loc[~mask,]
+
+    # if old_div is not in Redistribution_pairs_2021_full's rows, then replace it with div, div, 1 & remove duplicates
+    mask_not_in_old_divs = ~Correspondence_CED_2018_2021['div_nm_2018'].isin(unique_old_divs)
+    Correspondence_CED_2018_2021.loc[mask_not_in_old_divs, 'div_nm_2021'] = Correspondence_CED_2018_2021.loc[mask_not_in_old_divs, 'div_nm_2018']
+    Correspondence_CED_2018_2021.loc[mask_not_in_old_divs, 'RATIO_FROM_TO'] = 1
+    Correspondence_CED_2018_2021.drop_duplicates(inplace=True)
+
+    Correspondence_CED_2018_2021['RATIO_FROM_TO'] = Correspondence_CED_2018_2021.groupby('div_nm_2018')['RATIO_FROM_TO'].transform(lambda x: x / x.sum())
+
+    Correspondence_CED_2018_2021.to_csv('Correspondence_CED_2018_2021.csv', index=False)
+
+    return Correspondence_CED_2018_2021
+
+
+def reverse_2021_2018_correspondence(Correspondence_df):
+    Correspondence_df = Correspondence_df.copy()
+    total_per_new = Correspondence_df.groupby('div_nm_2021')['RATIO_FROM_TO'].transform('sum')
+    Correspondence_df['REVERSE_RATIO'] = Correspondence_df['RATIO_FROM_TO'] / total_per_new
+
+    Correspondence_df = Correspondence_df[['div_nm_2021','div_nm_2018','REVERSE_RATIO']]
+
+    import pdb;pdb.set_trace()
+
+    Correspondence_df.to_csv('Correspondence_CED_2021_2018_Reversed.csv', index=False)
+
+    return Correspondence_df
+
+def convert_2016_2021_proportions_to_2015_2018():
+
+    Correspondence_CED_2016_2021 = pd.read_csv(f'CG_CED_2016_CED_2021.csv', index_col=None)[['CED_NAME_2016','CED_NAME_2021','RATIO_FROM_TO']].dropna()
+    Correspondence_CED_2016_2021.rename(columns={'CED_NAME_2016':'div_nm_2015','CED_NAME_2021':'div_nm_2021'}, inplace=True)
+    Correspondence_CED_2016_2021 = Correspondence_CED_2016_2021.loc[~Correspondence_CED_2016_2021['div_nm_2021'].str.contains(r'\(', na=False)]
+    Correspondence_CED_2018_2021 = format_2018_2021_correspondence()
+
+    
+    Redistribution_pairs_2018 = pd.read_csv(f"RedistributionPairs2018.csv", index_col = None).rename(columns={'old_div':'div_nm_2015','new_div':'div_nm_2018'}).iloc[:,:2]
+    Redistribution_pairs_2021 = pd.read_csv(f"RedistributionPairs2021.csv", index_col = None).rename(columns={'old_div':'div_nm_2018','new_div':'div_nm_2021'}).iloc[:,:2]
+
+    # merge on div_nm_2018. First, add all unchanging divs (except ones that are abolished!!!)
+    name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
+    abolished_divs = {'2016': set('Port Adelaide'),'2019':set('Stirling')}
+
+    maintaining_divs_2016_set = set(Correspondence_CED_2016_2021['div_nm_2015']) - abolished_divs['2016'] - set(name_changes_year_dict['2016'].keys())
+
+    to_extend = pd.DataFrame([(div, div) for div in maintaining_divs_2016_set], columns=['div_nm_2015', 'div_nm_2018'])
+    to_extend_name_changes = pd.DataFrame([(div, name_changes_year_dict['2016'][div]) for div in set(name_changes_year_dict['2016'].keys())], columns=['div_nm_2015', 'div_nm_2018'])
+
+    # full spread of 2015-2018 div changes, including those that stayed the same
+    Redistribution_pairs_2018_extended = pd.concat([Redistribution_pairs_2018,to_extend,to_extend_name_changes])
+
+
+    rd = Redistribution_pairs_2018.merge(Redistribution_pairs_2021, on='div_nm_2018', how='left')
+
+    import pdb;pdb.set_trace()
+
+
+    Redistribution_pairs_2018 = pd.read_csv(f"RedistributionPairs2018.csv", index_col = None).rename(columns={'old_div':'div_nm_2015','new_div':'div_nm_2018'}).iloc[:,:2]
+
+
+    return Correspondence_CED_2015_2018
+
+
+reverse_2021_2018_correspondence(format_2018_2021_correspondence())
+
+convert_2016_2021_proportions_to_2015_2018()
+import pdb;pdb.set_trace()
 
 
 # Construct proportions of electorates transferred!
