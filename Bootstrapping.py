@@ -28,8 +28,8 @@ previous_data_year = str(int(data_year)-3)
 
 
 
-Omnipresent_parties_df_curr = pd.read_csv(f'{data_year}OmnipresentPartiesByPP.csv', index_col=None)
-Omnipresent_parties_df_last = pd.read_csv(f'{previous_data_year}OmnipresentPartiesByPP.csv', index_col=None).drop('pp_id', axis=1)
+Omnipresent_parties_df_curr = pd.read_csv(f'{data_year}OmnipresentPartiesByPP.csv', index_col=None).drop('INFORMAL', axis = 1)
+Omnipresent_parties_df_last = pd.read_csv(f'{previous_data_year}OmnipresentPartiesByPP.csv', index_col=None).drop(['pp_id','INFORMAL'], axis=1)
 
 # Fix up missing Lat/Longs if necessary
 div_names_curr = Omnipresent_parties_df_curr['div_nm'].unique().tolist()
@@ -74,7 +74,7 @@ import pdb;pdb.set_trace()
 Omnipresent_parties_merged = Omnipresent_parties_df_curr_adj.merge(Omnipresent_parties_df_last_adj, on=['pp_nm','div_nm'], how='left', suffixes=(f'_{data_year}', f'_{previous_data_year}'))
 
 # unmatched:
-unmatched_pps_full = Omnipresent_parties_merged.loc[(Omnipresent_parties_merged['ALP_2019'].isna()) & (Omnipresent_parties_merged['pp_nm']!='Other'),]
+unmatched_pps_full = Omnipresent_parties_merged.loc[(Omnipresent_parties_merged.iloc[:,-1].isna()) & (Omnipresent_parties_merged['pp_nm']!='Other'),]
 unmatched_pps = unmatched_pps_full[['div_nm','pp_nm']]
 
 
@@ -172,9 +172,60 @@ matched_pps.drop(['div_nm_old','pp_nm_old','to_match'], axis=1, inplace=True)
 
 
 unmatched_pps_mostly_filled = unmatched_pps_full.reset_index().merge(matched_pps, on = ['div_nm','pp_nm'], how='left',suffixes=('_nan','')).iloc[:, list(range(7)) + list(range(10, 13))]
-unmatched_pps_mostly_filled = unmatched_pps_mostly_filled.loc[unmatched_pps_mostly_filled.iloc[:,-1].notna(),]
+unmatched_pps_mostly_filled = unmatched_pps_mostly_filled.loc[unmatched_pps_mostly_filled.iloc[:,-1].notna(),].set_index('index')
+
+Omnipresent_parties_merged.loc[unmatched_pps_mostly_filled.index] = unmatched_pps_mostly_filled
 
 
+Omnipresent_parties_culled = Omnipresent_parties_merged[Omnipresent_parties_merged.iloc[:,-1].notna()]
+
+Omnipresent_parties_culled = Omnipresent_parties_culled.loc[Omnipresent_parties_culled['pp_nm']!='Other',]
+
+# Others - in redistributed states, take some from each other's by proportions!
+Others_old = Omnipresent_parties_df_last.loc[Omnipresent_parties_df_last['pp_nm']=='Other']
+Others_new = Omnipresent_parties_df_curr.loc[Omnipresent_parties_df_curr['pp_nm']=='Other']
+
+Redistribution_proportions = pd.read_csv(f"Correspondence_CED_{str(int(data_year)-1)}_{str(int(data_year)-4)}_Reversed.csv", index_col=None)
+
+Others_old_merged = Others_old.merge(Redistribution_proportions, left_on='div_nm', right_on='old_div').sort_values(by='new_div')
+Others_old_merged.iloc[:,2:5] = Others_old_merged.iloc[:,2:5].multiply(Others_old_merged['proportion'], axis=0).round(0).astype(int)
+Post_redistribution_Others_old = Others_old_merged.groupby('new_div', as_index=False)[Others_old_merged.columns[2:5]].sum().rename(columns={'new_div':'div_nm'})
+Post_redistribution_Others_old.loc[:,'pp_nm'] = 'Other'
+
+# get full form of Others new and old
+Omnipresent_parties_Others = Others_new.merge(Post_redistribution_Others_old, on=['pp_nm','div_nm'], how='left', suffixes=(f'_{data_year}', f'_{previous_data_year}'))
+
+Omnipresent_parties_full = pd.concat([Omnipresent_parties_culled,Omnipresent_parties_Others], ignore_index=True)
+
+Omnipresent_parties_full = Omnipresent_parties_full.loc[~(Omnipresent_parties_full.iloc[:,6:9].sum(axis=1)<100),]
+Omnipresent_parties_full = Omnipresent_parties_full.loc[~(Omnipresent_parties_full.iloc[:,3:6].sum(axis=1)<100),]
+
+# remove those that have vote difference of over 100
+
+
+# rewrite both data sets as percentages
+data_year_cols = Omnipresent_parties_full.columns[-6:-3]
+previous_year_cols = Omnipresent_parties_full.columns[-3:]
+Omnipresent_parties_full[previous_year_cols] = Omnipresent_parties_full[previous_year_cols].div(Omnipresent_parties_full[previous_year_cols].sum(axis=1), axis=0)
+Omnipresent_parties_full[data_year_cols] = Omnipresent_parties_full[data_year_cols].div(Omnipresent_parties_full[data_year_cols].sum(axis=1), axis=0)
+
+Omnipresent_parties_swings = Omnipresent_parties_full.copy()
+Omnipresent_parties_swings[data_year_cols] = (Omnipresent_parties_full[data_year_cols].values - Omnipresent_parties_full[previous_year_cols].values)*100
+
+Omnipresent_parties_swings.rename(columns = {f'COAL_{data_year}':'COAL_swing', f'ALP_{data_year}':'ALP_swing'}, inplace=True)
+Omnipresent_parties_swings = Omnipresent_parties_swings[['div_nm','COAL_swing','ALP_swing']].sort_values(by='div_nm')
+
+Omnipresent_parties_swings_melted = Omnipresent_parties_swings.melt(id_vars=['div_nm'], value_vars=['COAL_swing', 'ALP_swing'], var_name='party_swing', value_name='Swing')
+swing_set = Omnipresent_parties_swings_melted.groupby(['div_nm', 'party_swing'])['Swing'].apply(set).reset_index() 
+
+# MAKE SURE THAT BY USING SET NO INFO IS DESTROYED - UNLIKELY!
+
+
+
+
+# get counts - Omnipresent_parties_swings.groupby('div_nm').size().reset_index(name='count').sort_values(by='count')
+
+import pdb;pdb.set_trace()
 
 
 

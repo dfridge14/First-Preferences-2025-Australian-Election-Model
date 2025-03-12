@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import os, time
 import glob
+from pathlib import Path
+
 
 # automatic error debugging
 import sys
@@ -16,33 +18,28 @@ def exception_handler(type, value, tb):
 sys.excepthook = exception_handler
 
 
-os.chdir('C:\\Dania\\2024\\Australian Election')
 
-census_year = "2021"
-data_year = "2022"
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+os.chdir(base_dir)
+
+census_year = "2016"
+data_year = "2019"
 
 div_nm = "Melbourne"
 
 start = time.time()
 
-
-# will need to create dictionary of SA1s
-Redistribution_SA1_changes2024 = pd.read_csv("Redistribution_SA1_changes2024.csv", index_col = None)
-
-redistribution_SA1s_dict = {div: group.iloc[:,0] for div, group in Redistribution_SA1_changes2024.groupby(["old_div",'new_div'])}
-SA1s_giver_div_dict = {div: group.iloc[:,0] for div, group in Redistribution_SA1_changes2024.groupby("old_div")}
-
-# NOTE: Redistribution_SA1_changes2024 MISSES SOME OF THE SA1S THAT HAVE FEWER THAN 10 VOTES!!!
-
-old_divs_set = set(Redistribution_SA1_changes2024.loc[:,'old_div'])
-new_divs_set = set(Redistribution_SA1_changes2024.loc[:,'new_div'])
-
-redistirbution_divs_set = old_divs_set | new_divs_set
+new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner']}
+abolished_divs_dict = {'2016': set(['Port Adelaide']),'2019':set(['Stirling'])}
 
 
-def load_FPBPPRed_dict():
+
+
+
+
+def load_FPBPPRed_dict(data_year):
     df_dict_reloaded = {}
-    output_folder = "feather Redistribution pairs 2024"
+    output_folder = f"feather Redistribution pairs {str(int(data_year)+2)}"
     for filepath in glob.glob(f"{output_folder}/*.feather"):
         # Extract keys from filename
         parts = filepath.split("_")
@@ -53,54 +50,18 @@ def load_FPBPPRed_dict():
     
     return df_dict_reloaded
 
-# obtain all relevant redistribution pairs
-Redist_Div_First_Prefs_By_PP_dict_wide = load_FPBPPRed_dict()
-
-# preliminary dictionary imports and massaging
-First_Prefs_by_PP_Complete = pd.read_csv(f'{data_year}FirstPrefsByPPComplete.csv', index_col=None)
 
 
-
-
-# load some data for PPs and SA1s (types, centroids)
-PP_coords = First_Prefs_by_PP_Complete[['div_nm','pp_id','Booth_type','Lat','Long']].drop_duplicates()
-SA1_By_PP_Votes = pd.read_csv("2022SA1_By_PP_Votes.csv", index_col=None) # SA1_By_PP_Complete /
-
-
-
-SA1_centroids = pd.read_csv(f"SA1_centroids_{census_year}.csv")
-if census_year == '2016':
-    SA1_centroids = SA1_centroids.rename(columns={"SA1_7DIG16": "SA1_CODE16"})
-
-ExistingSA1s = SA1_By_PP_Votes.iloc[:,1].drop_duplicates()
-Ghost_SA1s = ExistingSA1s.loc[~(ExistingSA1s.isin(SA1_centroids['SA1_CODE21'].tolist())) & (ExistingSA1s.astype(str).str.startswith(('1', '2', '5', '7'))),].sort_values().tolist()
-
-# remove Ghost Votes rows from SA1_By_PP_Votes
-SA1_By_PP_Votes = SA1_By_PP_Votes.loc[~SA1_By_PP_Votes['SA1_CODE21'].isin(Ghost_SA1s),]
-
-#SA1_centroids = SA1_centroids.loc[SA1_centroids['SA1_CODE21'].isin(Redistribution_SA1_changes2024['SA1_CODE21'].tolist())]
-
-# check to make sure all redistribution sa1s are in SA1_centroids
-# Redistribution_SA1_changes2024.loc[Redistribution_SA1_changes2024['SA1_CODE21'].isin(SA1_centroids['SA1_CODE21'].tolist()),]  
-
-
-
-
-
-# Dictionaries of all division first_prefs and SA1s
-Div_First_Prefs_By_PP_dict = {div: group for div, group in First_Prefs_by_PP_Complete.groupby("div_nm")}
-Div_SA1_By_PP_dict = {div: group for div, group in SA1_By_PP_Votes.groupby("div_nm")}
-
-def unique_SA1s_dict(Div_SA1_By_PP_dict):
+def unique_SA1s_dict(Div_SA1_By_PP_dict, census_year):
     # generates dict of list of unique SA1s for each division
     unique_SA1s_dict = {}
 
     for div in Div_SA1_By_PP_dict.keys():
-        unique_SA1s_dict[div] = Div_SA1_By_PP_dict[div]["SA1_CODE21"].unique()
+        unique_SA1s_dict[div] = Div_SA1_By_PP_dict[div][f"SA1_CODE{census_year[-2:]}"].unique()
 
     return unique_SA1s_dict
 
-def convert_to_wide_format(df, df_type):
+def convert_to_wide_format(df, df_type, census_year):
     # converts to wide format indexed by pp_id for either First Preferences or SA1 dfs. If First Prefs, it first adjusts the Party names in case of multiple independents
 
     if df_type == "First Preferences":
@@ -132,8 +93,10 @@ def convert_to_wide_format(df, df_type):
                                 sort = False)  # No duplicates, so we can use 'first'
         pivot_df = pivot_df.sort_index(ascending=True)
         pivot_df = pivot_df.reset_index()
+
+
     if df_type == "SA1s":
-        pivot_df = df.pivot(index='pp_id', columns='SA1_CODE21', values='votes')
+        pivot_df = df.pivot(index='pp_id', columns=f'SA1_CODE{census_year[-2:]}', values='votes')
         pivot_df = pivot_df.fillna(0)
         pivot_df = pivot_df.astype(int)
         pivot_df = pivot_df.reset_index()
@@ -151,13 +114,9 @@ def convert_to_wide_format(df, df_type):
 
 def convert_dict_to_wide_format(dict, df_type):
 
-    converted_dict = {key: convert_to_wide_format(dict[key], df_type) for key in dict.keys()}
+    converted_dict = {key: convert_to_wide_format(dict[key], df_type, census_year) for key in dict.keys()}
 
     return converted_dict
-
-# get wide formats for First Prefs and SA1s
-Div_First_Prefs_By_PP_dict_wide = convert_dict_to_wide_format(Div_First_Prefs_By_PP_dict, "First Preferences")
-Div_SA1_By_PP_dict_wide = convert_dict_to_wide_format(Div_SA1_By_PP_dict, "SA1s")
 
 
 
@@ -184,7 +143,8 @@ def rectify_div_SA1_votes(div, Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_di
         samples = np.random.choice(labels, size=np.abs(int(row["vote_difference"])), p=probs)
         return samples.tolist()
 
-    # Apply sampling to all rows
+    # Apply sampling to all rows, unless house has 0 votes!
+    all.dropna(inplace = True) # when 0 votes
     all["Sampled"] = all.drop(columns=['pp_id','n','K']).apply(lambda row: sample_with_replacement(row), axis=1)
 
 
@@ -244,32 +204,90 @@ def rectify_div_SA1_votes(div, Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_di
     return Div_SA1_By_PP_dict_wide[div]
 
 
-Div_SA1_By_PP_dict_wide = {div: rectify_div_SA1_votes(div, Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide) for div in old_divs_set}
-#rectify_redistribution_SA1_votes(Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, redistribution_divs)
+
+
+def prepare_wide_dicts_for_MMHg(data_year, census_year, redistribution_type = 'redistribution'):
+
+    # create dictionary of SA1s for each giver_div
+    Redistribution_SA1_changes = pd.read_csv(f"Redistribution_SA1_changes{str(int(data_year)+2)}.csv", index_col = None)
+
+    redistribution_SA1s_dict = {div: group.iloc[:,0] for div, group in Redistribution_SA1_changes.groupby(["old_div",'new_div'])}
+    SA1s_giver_div_dict = {div: group.iloc[:,0] for div, group in Redistribution_SA1_changes.groupby("old_div")}
+
+    ### NOTE: Redistribution_SA1_changes MISSES SOME OF THE SA1S THAT HAVE FEWER THAN 10 VOTES!!!
+
+    old_divs_set = set(Redistribution_SA1_changes.loc[:,'old_div'])
+    new_divs_set = set(Redistribution_SA1_changes.loc[:,'new_div'])
+
+    redistribution_divs_set = old_divs_set | new_divs_set
+
+
+    # obtain wide dfs for all relevant redistribution pairs
+    if redistribution_type == 'redistribution':
+        Redist_Div_First_Prefs_By_PP_dict_wide = load_FPBPPRed_dict(data_year)
+
+    elif redistribution_type == 'omnipresent':
+        # transform 3PP df into dictionary structure with tuples as keys
+        Redistribution_pairs = pd.read_csv(f"RedistributionPairs{str(int(data_year)+2)}.csv", index_col = None)
+        df_3PP = pd.read_csv(f'{data_year}OmnipresentPartiesByPP.csv', index_col=None).drop('pp_nm', axis=1)
+        # need to transform so that only old-new pairs get a key
+        Redist_Div_First_Prefs_By_PP_dict_wide = {tuple(row): df_3PP[df_3PP['div_nm'] == row[0]].drop('div_nm', axis=1) for row in Redistribution_pairs.itertuples(index=False)}
+
+    # unaltered First Preferences
+    First_Prefs_by_PP_Complete = pd.read_csv(f'{data_year}FirstPrefsByPPComplete.csv', index_col=None)
+
+
+    # load some data for PPs and SA1s (types, centroids)
+    PP_coords = First_Prefs_by_PP_Complete[['div_nm','pp_id','Booth_type','Lat','Long']].drop_duplicates()
+    SA1_By_PP_Votes = pd.read_csv(f"{data_year}SA1_By_PP_Votes.csv", index_col=None) # SA1_By_PP_Complete /
+
+    SA1_centroids = pd.read_csv(f"SA1_centroids_{census_year}.csv")
+    if census_year == '2016':
+        SA1_centroids = SA1_centroids.rename(columns={"SA1_7DIG16": "SA1_CODE16"})
+
+    ExistingSA1s = SA1_By_PP_Votes.iloc[:,1].drop_duplicates()
+    Ghost_SA1s = ExistingSA1s.loc[~(ExistingSA1s.isin(SA1_centroids[f'SA1_CODE{census_year[-2:]}'].tolist())) & (ExistingSA1s.astype(str).str.startswith(('1', '2', '5', '7'))),].sort_values().tolist()
+
+    # remove Ghost Votes rows from SA1_By_PP_Votes
+    SA1_By_PP_Votes = SA1_By_PP_Votes.loc[~SA1_By_PP_Votes[f'SA1_CODE{census_year[-2:]}'].isin(Ghost_SA1s),]
+
+
+    # check to make sure all redistribution sa1s are in SA1_centroids
+    # SA1_centroids = SA1_centroids.loc[SA1_centroids[f'SA1_CODE{census_year[-2:]}'].isin(Redistribution_SA1_changes[f'SA1_CODE{census_year[-2:]}'].tolist())]
+    # Redistribution_SA1_changes.loc[Redistribution_SA1_changes[f'SA1_CODE{census_year[-2:]}'].isin(SA1_centroids[f'SA1_CODE{census_year[-2:]}'].tolist()),]  
+
+
+
+    # Dictionaries of all division first_prefs and SA1s
+    Div_First_Prefs_By_PP_dict = {div: group for div, group in First_Prefs_by_PP_Complete.groupby("div_nm")}
+    Div_SA1_By_PP_dict = {div: group for div, group in SA1_By_PP_Votes.groupby("div_nm")}
+
+    # get wide formats for First Prefs and SA1s
+    Div_First_Prefs_By_PP_dict_wide = convert_dict_to_wide_format(Div_First_Prefs_By_PP_dict, "First Preferences")
+    Div_SA1_By_PP_dict_wide = convert_dict_to_wide_format(Div_SA1_By_PP_dict, "SA1s")
+
+
+    # ensure match between K and n for each PP in Div_First_Prefs_By_PP_dict Div_SA1_By_PP_dict_wide
+    Div_SA1_By_PP_dict_wide = {div: rectify_div_SA1_votes(div, Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide) for div in old_divs_set}
+
+    if redistribution_type == 'omnipresent':
+        Div_First_Prefs_By_PP_dict_wide = {div: group.drop('div_nm', axis=1) for div, group in df_3PP.groupby('div_nm')}
+
+
+    return Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, redistribution_divs_set, old_divs_set
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-###########################Load 2021 CENTROIDS!!!!!!!!!!!!!!
-
+Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, PP_coords, SA1_centroids, SA1s_giver_div_dict, \
+            redistribution_SA1s_dict, redistribution_divs_set, old_divs_set = prepare_wide_dicts_for_MMHg(data_year, census_year, redistribution_type = 'omnipresent')
 
 
 print("Got all dfs: time = ", time.time() - start)
 
 
 
-#import pdb;pdb.set_trace()
+import pdb;pdb.set_trace()
 
 
 
@@ -418,7 +436,7 @@ def haversine(PP_Lat, PP_Long, SA1_Lat, SA1_Long): # written by chatgpt
 def distance_formula(PP_Lat, PP_Long, SA1_Lat, SA1_Long):
     return haversine(PP_Lat, PP_Long, SA1_Lat, SA1_Long)
 
-def distances_SA1_PP_array(div, Booth_type, PP_coords, SA1_centroids, SA1_wide):
+def distances_SA1_PP_array(div, Booth_type, PP_coords, SA1_centroids, SA1_wide, census_year):
     ### computes distances array of pp_id * SA1 for the given division. Sorts pp_id numerically, but SA1s already sorted in SA1_by_PP_Complete!
     ### uses haversine formula for computations
 
@@ -428,8 +446,8 @@ def distances_SA1_PP_array(div, Booth_type, PP_coords, SA1_centroids, SA1_wide):
     pp_ids_used = set(PP_coords_div["pp_id"])
 
     # get SA1 coords of giver division
-    div_SA1s = pd.DataFrame(SA1_wide.columns[1:], columns=['SA1_CODE21']) 
-    SA1_coords = pd.merge(div_SA1s, SA1_centroids, on="SA1_CODE21", how="left") # adds lat/long to SA1s in div
+    div_SA1s = pd.DataFrame(SA1_wide.columns[1:], columns=[f'SA1_CODE{census_year[-2:]}']) 
+    SA1_coords = pd.merge(div_SA1s, SA1_centroids, on=f'SA1_CODE{census_year[-2:]}', how="left") # adds lat/long to SA1s in div
 
     # Extract latitude and longitude arrays
     PP_Lat = PP_coords_div.iloc[:, 1].to_numpy()[:, np.newaxis] 
@@ -485,7 +503,7 @@ def candidate_totals_rebalancing(SA1_vote_array, Booth_type_actual_vote_totals):
 
 
 
-def candidate_prior_simulation_weighted(div, mean, weight_Others, PP_coords, SA1_centroids, SA1_wide, FP_wide):
+def candidate_prior_simulation_weighted(div, mean, weight_Others, PP_coords, SA1_centroids, SA1_wide, FP_wide, census_year):
     ### generates array of simulated votes per candidate per SA1 using the doubly-multivariate hypergeometric distribution with given K and n vectors
 
     num_candidates = FP_wide.shape[1] - 1 # includes informal
@@ -500,7 +518,7 @@ def candidate_prior_simulation_weighted(div, mean, weight_Others, PP_coords, SA1
         Booth_type_result_array = np.zeros((num_SA1s,num_candidates))
     
         # get distances bw division PPs and SA1s
-        distances_PB_array, distances_PB_pp_ids = distances_SA1_PP_array(div, Booth_type, PP_coords, SA1_centroids, SA1_wide)
+        distances_PB_array, distances_PB_pp_ids = distances_SA1_PP_array(div, Booth_type, PP_coords, SA1_centroids, SA1_wide, census_year)
         # make them into weights
         weights_PB = weights_SA1_PP_array(distances_PB_array, distances_PB_pp_ids, "inverse", SA1_wide)
 
@@ -593,11 +611,11 @@ def candidate_prior_simulation_weighted(div, mean, weight_Others, PP_coords, SA1
     return np.round(result_array,6)
 
 
-def SA1_candidate_prior_df_output(div, mean, to_weight, PP_coords, SA1_centroids, SA1_wide, FP_wide):
+def SA1_candidate_prior_df_output(div, mean, to_weight, PP_coords, SA1_centroids, SA1_wide, FP_wide, census_year):
     ### gets array of SA1 vote using weighted algorithm, working with the mean if mean == 1 else using MMHg
 
     if to_weight:
-        array = candidate_prior_simulation_weighted(div, mean, weight_Others=1, PP_coords=PP_coords, SA1_centroids=SA1_centroids, SA1_wide=SA1_wide,FP_wide=FP_wide)
+        array = candidate_prior_simulation_weighted(div, mean, weight_Others=1, PP_coords=PP_coords, SA1_centroids=SA1_centroids, SA1_wide=SA1_wide,FP_wide=FP_wide, census_year=census_year)
     else:
         array = candidate_prior_simulation(mean, SA1_wide, FP_wide)
 
@@ -612,8 +630,8 @@ def SA1_candidate_prior_df_output(div, mean, to_weight, PP_coords, SA1_centroids
     return SA1_candidate_prior_df
 
 #print("Getting df of output!!!")
-div = 'Melbourne'
-Vote_by_SA1_df = SA1_candidate_prior_df_output(div,1,0,PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div],Div_First_Prefs_By_PP_dict_wide[div])
+#div = 'Melbourne'
+#Vote_by_SA1_df = SA1_candidate_prior_df_output(div,1,0,PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div],Div_First_Prefs_By_PP_dict_wide[div], census_year)
 
 # print overall vote counts to check
 #print(round(Vote_by_SA1_df.sum()).astype(int))
@@ -623,157 +641,181 @@ print(time.time()-start)
 #print(Deakin_Aston_df.loc[Deakin_Aston_df.index.isin(Deakin_Aston_SA1s),])
 
 
-# 1. Get total electorate votes from last election
-Electorate_total_FP_dict = {div: Div_First_Prefs_By_PP_dict_wide[div].set_index('pp_id').sum() for div in Div_First_Prefs_By_PP_dict_wide.keys()}
+def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, old_divs_set, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, census_year, new_div_list, abolished_div_list, redistribution_type = 'redistribution'):
 
-new_div_list = ['Bullwinkel']
-for new_div in new_div_list:
-    standard_parties = ['LP','ALP','GRN','ON','UAPP']
-    Electorate_total_FP_dict[new_div] = pd.Series(0, index=standard_parties, dtype='int32')
+    # 1. Get total electorate votes from last election
+    #if redistribution_type == 'redistribution':
+    Electorate_total_FP_dict = {div: Div_First_Prefs_By_PP_dict_wide[div].set_index('pp_id').sum() for div in Div_First_Prefs_By_PP_dict_wide.keys()}
+    #elif redistribution_type == 'omnipresent':
+    #    Electorate_total_FP_dict = {div: Redist_Div_First_Prefs_By_PP_dict_wide[div].set_index('pp_id').sum() for div in Redist_Div_First_Prefs_By_PP_dict_wide.keys()}
 
+    for new_div in new_div_list:
+        if redistribution_type == 'redistribution':
+            standard_parties = ['LP','ALP','GRN','ON','UAPP', 'INFORMAL']
+        elif redistribution_type == 'omnipresent':
+            standard_parties = ['COAL','ALP','GRN', 'INFORMAL']
+        Electorate_total_FP_dict[new_div] = pd.Series(0, index=standard_parties, dtype='int32')
 
-print(len(Electorate_total_FP_dict.keys()))
 
-#import pdb;pdb.set_trace()
+    print(len(Electorate_total_FP_dict.keys()))
 
+    #import pdb;pdb.set_trace()
 
-# 2. 
-mean = 1
-for div in old_divs_set: 
-    print(div)
-    Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Div_First_Prefs_By_PP_dict_wide[div])
 
-    # subtract votes being given away from 2022 election results
-    curr_div_SA1_list = SA1s_giver_div_dict[div].tolist()
+    # 2. 
+    mean = 1
+    for div in old_divs_set: 
+        print(div)
+        #if redistribution_type == 'redistribution':
+        Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Div_First_Prefs_By_PP_dict_wide[div], census_year)
+        #elif redistribution_type == 'omnipresent':
+        #    Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, 0, PP_coords, SA1_centroids, Redist_Div_First_Prefs_By_PP_dict_wide[div], Redist_Div_First_Prefs_By_PP_dict_wide[div], census_year)
 
-    # check to make sure abolished divisions go to close to 0
-    #low_vote_difference = Vote_by_SA1_df.sum() - Vote_by_SA1_df.loc[Vote_by_SA1_df.index.isin(curr_div_SA1_list),].sum()
-    #print("low vote difference", round(low_vote_difference,2).tolist())
 
-    Electorate_total_FP_dict[div] -= Vote_by_SA1_df.loc[Vote_by_SA1_df.index.isin(curr_div_SA1_list),].sum() # assumed SA1s are in the index!
-#import pdb;pdb.set_trace()
+        # subtract votes being given away from 2022 election results
+        curr_div_SA1_list = SA1s_giver_div_dict[div].tolist()
 
-print("Got all dfs: time = ", time.time() - start)
+        # check to make sure abolished divisions go to close to 0
+        #low_vote_difference = Vote_by_SA1_df.sum() - Vote_by_SA1_df.loc[Vote_by_SA1_df.index.isin(curr_div_SA1_list),].sum()
+        #print("low vote difference", round(low_vote_difference,2).tolist())
 
-# 3. give to new redistribution
-for div_pair in Redist_Div_First_Prefs_By_PP_dict_wide.keys():
-    print(div_pair)
-    giver_div, receiver_div = div_pair
+        Electorate_total_FP_dict[div] -= Vote_by_SA1_df.loc[Vote_by_SA1_df.index.isin(curr_div_SA1_list),].sum() # assumed SA1s are in the index!
+    #import pdb;pdb.set_trace()
 
-    Redist_Vote_by_SA1_df = SA1_candidate_prior_df_output(giver_div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[giver_div], Redist_Div_First_Prefs_By_PP_dict_wide[div_pair])
+    print("Got all dfs: time = ", time.time() - start)
 
-    curr_SA1_list = redistribution_SA1s_dict[div_pair].tolist()
-    SA1_totals_to_transfer = Redist_Vote_by_SA1_df.loc[Redist_Vote_by_SA1_df.index.isin(curr_SA1_list),].sum() # assumed SA1s are in the index!
+    # 3. give to new redistribution
+    for div_pair in Redist_Div_First_Prefs_By_PP_dict_wide.keys():
+        print(div_pair)
+        giver_div, receiver_div = div_pair
 
-    # rename COAL parties if we are in NSW/VIC
-    COAL_parties = [p for p in Electorate_total_FP_dict[receiver_div].index if p in ['LP','NP']]
+        Redist_Vote_by_SA1_df = SA1_candidate_prior_df_output(giver_div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[giver_div], Redist_Div_First_Prefs_By_PP_dict_wide[div_pair], census_year)
 
-    if len(COAL_parties) == 1:
-        SA1_totals_to_transfer = SA1_totals_to_transfer.rename({'COAL':COAL_parties[0]})
-    elif len(COAL_parties) == 2:
-         SA1_totals_to_transfer = SA1_totals_to_transfer.rename({'COALLP':'LP','COALNP':'NP'})
+        curr_SA1_list = redistribution_SA1s_dict[div_pair].tolist()
+        SA1_totals_to_transfer = Redist_Vote_by_SA1_df.loc[Redist_Vote_by_SA1_df.index.isin(curr_SA1_list),].sum() # assumed SA1s are in the index!
 
+        # rename COAL parties if we are in NSW/VIC
+        COAL_parties = [p for p in Electorate_total_FP_dict[receiver_div].index if p in ['LP','NP']]
 
+        if len(COAL_parties) == 1:
+            SA1_totals_to_transfer = SA1_totals_to_transfer.rename({'COAL':COAL_parties[0]})
+        elif len(COAL_parties) == 2:
+            SA1_totals_to_transfer = SA1_totals_to_transfer.rename({'COALLP':'LP','COALNP':'NP'})
 
-    Electorate_total_FP_dict[receiver_div] += SA1_totals_to_transfer
 
-print("Got all dfs: time = ", time.time() - start)
 
+        Electorate_total_FP_dict[receiver_div] += SA1_totals_to_transfer
 
+    print("Got all dfs: time = ", time.time() - start)
 
 
 
+    import pdb;pdb.set_trace()
 
+    if redistribution_type == 'omnipresent':
+        Electorate_3PPs_redistributed = pd.DataFrame.from_dict(Electorate_total_FP_dict, orient='index').drop('INFORMAL', axis = 1)
+        Electorate_3PPs_redistributed = Electorate_3PPs_redistributed.loc[~Electorate_3PPs_redistributed.index.isin(abolished_div_list),].astype(int)
 
+        Electorate_3PPs_redistributed.to_csv(f'{data_year}Electorate_3PPs_redistributed.csv', index=False)
 
+        import pdb;pdb.set_trace()
 
 
 
-# 4. TCP Preference Flows!!!
-TCP_dict = {}
 
-TCP_Preference_Flows = pd.read_csv(f"{data_year}TCPPreferenceFlows.csv", skiprows = 1, index_col = None).rename(columns = {'DivisionNm':'div_nm','FromCandidatePartyAb':'PartyAb', \
-                                        'FromCandidateBallotPosition':'Ballot_Position','ToCandidatePartyAb':'TCP_Ab','ToCandidateBallotPosition':'TCP_Ballot_Position'})
-TCP_Preference_Flows = TCP_Preference_Flows[['div_nm','PartyAb','Ballot_Position','TCP_Ab','TCP_Ballot_Position','TransferPercentage']]
-TCP_Preference_Flows = TCP_Preference_Flows.loc[TCP_Preference_Flows['Ballot_Position']>0,]
 
+    elif redistribution_type == 'redistribution':
 
-for div in redistirbution_divs_set:
 
-    print(div)
 
-    First_Preferences = Electorate_total_FP_dict[div]
 
-    if div in new_div_list:
-        Top_2 = First_Preferences.loc[First_Preferences.index.isin(['LP','ALP'])].index
-        Remaining_votes = First_Preferences.loc[~(First_Preferences.index.isin(Top_2))].rename("Non-TCP_votes") 
 
-        TCP_votes = First_Preferences[Top_2]
 
-        transfers = TCP_Preference_Flows.loc[TCP_Preference_Flows['div_nm']=='Hasluck',][['PartyAb','TransferPercentage']] # happens to be correct order of ALP/LP
-        transfers = transfers.loc[transfers['PartyAb'].isin(Remaining_votes.index)].merge(Remaining_votes.reset_index().rename(columns={'index': 'PartyAb'}) , on='PartyAb',how='left')
-        transfers.loc[:,'TransferVotes'] = transfers.loc[:,'TransferPercentage'] * transfers.loc[:,'Non-TCP_votes'] / 100
 
-        parties = ['GRN','UAPP','ON']
-        for j in range(len(parties)):
-            TCP_votes += transfers.loc[transfers['PartyAb'] == parties[j],'TransferVotes'].values 
 
-        TCP_dict[div] = TCP_votes/TCP_votes.sum()
+        # 4. TCP Preference Flows!!!
+        TCP_dict = {}
 
-    else:
+        TCP_Preference_Flows = pd.read_csv(f"{data_year}TCPPreferenceFlows.csv", skiprows = 1, index_col = None).rename(columns = {'DivisionNm':'div_nm','FromCandidatePartyAb':'PartyAb', \
+                                                'FromCandidateBallotPosition':'Ballot_Position','ToCandidatePartyAb':'TCP_Ab','ToCandidateBallotPosition':'TCP_Ballot_Position'})
+        TCP_Preference_Flows = TCP_Preference_Flows[['div_nm','PartyAb','Ballot_Position','TCP_Ab','TCP_Ballot_Position','TransferPercentage']]
+        TCP_Preference_Flows = TCP_Preference_Flows.loc[TCP_Preference_Flows['Ballot_Position']>0,]
 
-        TCP_Preference_Flows_div = TCP_Preference_Flows.loc[TCP_Preference_Flows['div_nm']==div,]
 
+        for div in redistribution_divs_set:
 
-        TCP_Ballot_Positions = TCP_Preference_Flows_div['TCP_Ballot_Position'].unique().tolist()
+            print(div)
 
-        Top_2 = First_Preferences.index[np.sort(TCP_Preference_Flows_div['TCP_Ballot_Position'].unique())-1] 
+            First_Preferences = Electorate_total_FP_dict[div]
 
-        #assert Top_2.tolist() == Max_2_votes.tolist() # can just use Ballot position to align parties - Nonsense! Can be that 3rd/4th party jumps ahead!!!
+            if div in new_div_list:
+                Top_2 = First_Preferences.loc[First_Preferences.index.isin(['LP','ALP'])].index
+                Remaining_votes = First_Preferences.loc[~(First_Preferences.index.isin(Top_2))].rename("Non-TCP_votes") 
 
+                TCP_votes = First_Preferences[Top_2]
 
+                transfers = TCP_Preference_Flows.loc[TCP_Preference_Flows['div_nm']=='Hasluck',][['PartyAb','TransferPercentage']] # happens to be correct order of ALP/LP
+                transfers = transfers.loc[transfers['PartyAb'].isin(Remaining_votes.index)].merge(Remaining_votes.reset_index().rename(columns={'index': 'PartyAb'}) , on='PartyAb',how='left')
+                transfers.loc[:,'TransferVotes'] = transfers.loc[:,'TransferPercentage'] * transfers.loc[:,'Non-TCP_votes'] / 100
 
-        TCP_votes = First_Preferences[Top_2]
-        Remaining_votes = First_Preferences.loc[~(First_Preferences.index.isin(Top_2))].rename("Non-TCP_votes") 
+                parties = ['GRN','UAPP','ON']
+                for j in range(len(parties)):
+                    TCP_votes += transfers.loc[transfers['PartyAb'] == parties[j],'TransferVotes'].values 
 
-        # Indices of INDs who didn't make top 2 --> use these to rename INDs in TCP_Preference_Flows_div!
-        IND_indices = np.where(First_Preferences.index.str.startswith('IND') & ~First_Preferences.index.isin(Top_2))[0] 
+                TCP_dict[div] = TCP_votes/TCP_votes.sum()
 
-        for ballot_no in (IND_indices+1).tolist():
+            else:
 
-            TCP_Preference_Flows_div.loc[TCP_Preference_Flows_div['Ballot_Position'] == ballot_no,'PartyAb'] = First_Preferences.index[ballot_no-1] 
-            
+                TCP_Preference_Flows_div = TCP_Preference_Flows.loc[TCP_Preference_Flows['div_nm']==div,]
 
-        # merge remaining parties: Note that Informal votes vanish naturally!
-        TCP_Transfer_Percents = TCP_Preference_Flows_div[['PartyAb','TransferPercentage','TCP_Ballot_Position']].merge(Remaining_votes, on = 'PartyAb', how='left')
 
-        # for party in partyab, multiply by corresponding transfer percentage, add to top 2 sum
-        TCP_Transfer_Percents.loc[:,'TransferVotes'] = TCP_Transfer_Percents.loc[:,'TransferPercentage'] * TCP_Transfer_Percents.loc[:,'Non-TCP_votes'] / 100
-        TCP_Transfer_Votes = TCP_Transfer_Percents[['TCP_Ballot_Position','TransferVotes']].groupby('TCP_Ballot_Position')['TransferVotes'].agg('sum')
+                TCP_Ballot_Positions = TCP_Preference_Flows_div['TCP_Ballot_Position'].unique().tolist()
 
-        TCP_votes += TCP_Transfer_Votes.values
-        TCP_votes.index = TCP_votes.index.where(~TCP_votes.index.str.startswith('IND'), 'IND')
+                Top_2 = First_Preferences.index[np.sort(TCP_Preference_Flows_div['TCP_Ballot_Position'].unique())-1] 
 
+                #assert Top_2.tolist() == Max_2_votes.tolist() # can just use Ballot position to align parties - Nonsense! Can be that 3rd/4th party jumps ahead!!!
 
 
-        TCP_dict[div] = TCP_votes/TCP_votes.sum()
 
+                TCP_votes = First_Preferences[Top_2]
+                Remaining_votes = First_Preferences.loc[~(First_Preferences.index.isin(Top_2))].rename("Non-TCP_votes") 
 
+                # Indices of INDs who didn't make top 2 --> use these to rename INDs in TCP_Preference_Flows_div!
+                IND_indices = np.where(First_Preferences.index.str.startswith('IND') & ~First_Preferences.index.isin(Top_2))[0] 
 
-import pdb;pdb.set_trace()
+                for ballot_no in (IND_indices+1).tolist():
 
-TCP_Redistributed = pd.DataFrame.from_dict(TCP_dict, orient='index').fillna(0)[['ALP','LP','NP','GRN','IND']]
-TCP_Redistributed = TCP_Redistributed.sort_index()
-#TCP_Redistributed.to_csv('PostRedistributionTPPMargins2024_InverseWeighted.csv')
+                    TCP_Preference_Flows_div.loc[TCP_Preference_Flows_div['Ballot_Position'] == ballot_no,'PartyAb'] = First_Preferences.index[ballot_no-1] 
+                    
 
+                # merge remaining parties: Note that Informal votes vanish naturally!
+                TCP_Transfer_Percents = TCP_Preference_Flows_div[['PartyAb','TransferPercentage','TCP_Ballot_Position']].merge(Remaining_votes, on = 'PartyAb', how='left')
 
-import pdb;pdb.set_trace()
+                # for party in partyab, multiply by corresponding transfer percentage, add to top 2 sum
+                TCP_Transfer_Percents.loc[:,'TransferVotes'] = TCP_Transfer_Percents.loc[:,'TransferPercentage'] * TCP_Transfer_Percents.loc[:,'Non-TCP_votes'] / 100
+                TCP_Transfer_Votes = TCP_Transfer_Percents[['TCP_Ballot_Position','TransferVotes']].groupby('TCP_Ballot_Position')['TransferVotes'].agg('sum')
 
+                TCP_votes += TCP_Transfer_Votes.values
+                TCP_votes.index = TCP_votes.index.where(~TCP_votes.index.str.startswith('IND'), 'IND')
 
 
 
-# final outcome!
-Electorate_total_FP_dict[div]
+                TCP_dict[div] = TCP_votes/TCP_votes.sum()
 
-# Goal: do one per redistribution pair - as candidate change occurs beforehand
-# :. need dict of redistribution pairs with candidate/vote sets per PB!
+
+
+        import pdb;pdb.set_trace()
+
+        TCP_Redistributed = pd.DataFrame.from_dict(TCP_dict, orient='index').fillna(0)[['ALP','LP','NP','GRN','IND']]
+        TCP_Redistributed = TCP_Redistributed.sort_index()
+        #TCP_Redistributed.to_csv('PostRedistributionTPPMargins2024_InverseWeighted.csv')
+
+
+        import pdb;pdb.set_trace()
+
+    return TCP_Redistributed
+
+
+new_div_list = new_seats_year_dict[data_year]
+abolished_div_list = abolished_divs_dict[data_year]
+perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, old_divs_set, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, census_year, new_div_list, abolished_div_list, redistribution_type = 'omnipresent')

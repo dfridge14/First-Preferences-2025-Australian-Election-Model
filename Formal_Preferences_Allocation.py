@@ -2384,6 +2384,9 @@ def reduce_to_Omnipresent_parties(Formal_prefs_dict, Elimination_order_dict, Sen
 
     print(div1, First_Prefs_By_PP_Complete_Redistributed) # last one for general check
 
+    import pdb;pdb.set_trace()
+
+
 
     # add pp_nm to pp_id cols via PP_data
     PP_id_nm = pd.read_csv(f'{data_year}_PP_data.csv', index_col=None)[['div_nm','pp_id','pp_nm']]
@@ -2391,7 +2394,7 @@ def reduce_to_Omnipresent_parties(Formal_prefs_dict, Elimination_order_dict, Sen
     Omnipresent_parties_df = Omnipresent_parties_df.merge(PP_id_nm, on = ['div_nm','pp_id'],how = 'left')
 
     Omnipresent_columns.insert(2,'pp_nm')
-    Omnipresent_parties_df = Omnipresent_parties_df[Omnipresent_columns] # nice order!
+    Omnipresent_parties_df = Omnipresent_parties_df[Omnipresent_columns + ['INFORMAL']] # nice order!
 
     Omnipresent_parties_df.to_csv(f'{data_year}OmnipresentPartiesByPP.csv', index=False)
 
