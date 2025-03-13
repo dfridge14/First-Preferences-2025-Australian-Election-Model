@@ -17,6 +17,9 @@ def exception_handler(type, value, tb):
 
 sys.excepthook = exception_handler
 
+print(sys.executable)
+
+
 
 
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
@@ -128,7 +131,7 @@ for Booth_type in ['PB','PPVC']:
     df2_closest = df2.iloc[closest_indices.flatten()].copy().reset_index(drop=True).rename(columns={'pp_nm':'pp_nm_old','div_nm':'div_nm_old'})
     df2_closest.loc[:,'distance'] = distances_meters
 
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
 
     dfs_merged = pd.concat([df1,df2_closest[['div_nm_old','pp_nm_old','distance']]], axis=1)
@@ -157,7 +160,7 @@ for Booth_type in ['PB','PPVC']:
     dfs_merged.loc[matched_redistributed_dfs.index] = matched_redistributed_dfs
 
 
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
 
     merged_df_list.append(dfs_merged[['div_nm','pp_nm','div_nm_old','pp_nm_old','to_match']].copy())
@@ -165,7 +168,7 @@ for Booth_type in ['PB','PPVC']:
 mostly_matched_pps = pd.concat(merged_df_list, ignore_index=True) # make sure order is maintained! Or that index values are enough!
 
 
-import pdb;pdb.set_trace()
+#import pdb;pdb.set_trace()
 
 # merge past results onto matched_pps
 matched_pps = mostly_matched_pps.loc[mostly_matched_pps['to_match']==1,].merge(Omnipresent_parties_df_last_adj.rename(columns={'div_nm':'div_nm_old','pp_nm':'pp_nm_old'}), on = ['div_nm_old','pp_nm_old'], how='left')
@@ -233,50 +236,107 @@ Omnipresent_parties_swings[data_year_cols] = (Omnipresent_parties_full[data_year
 Omnipresent_parties_swings.rename(columns = {f'COAL_{data_year}':'COAL_swing', f'ALP_{data_year}':'ALP_swing'}, inplace=True)
 Omnipresent_parties_swings = Omnipresent_parties_swings[['div_nm','COAL_swing','ALP_swing']].sort_values(by='div_nm')
 
+import pdb;pdb.set_trace()
+
+
 ###
-Omnipresent_parties_swings_melted = Omnipresent_parties_swings.melt(id_vars=['div_nm'], value_vars=['COAL_swing', 'ALP_swing'], var_name='party_swing', value_name='Swing')
-PP_swings = Omnipresent_parties_swings_melted.groupby(['div_nm', 'party_swing'])['Swing'].apply(set).reset_index() 
+#Omnipresent_parties_swings_melted = Omnipresent_parties_swings.melt(id_vars=['div_nm'], value_vars=['COAL_swing', 'ALP_swing'], var_name='party_swing', value_name='Swing')
+#PP_swings = Omnipresent_parties_swings_melted.groupby(['div_nm', 'party_swing'])['Swing'].apply(list).reset_index() 
+
+# keep COAL and ALP cols separate - don't melt!
+PP_swings = Omnipresent_parties_swings.groupby('div_nm').agg({'COAL_swing': lambda x: list(x),'ALP_swing': lambda x: list(x)}).reset_index()
+
 
 # MAKE SURE THAT BY USING SETS NO INFO IS DESTROYED - UNLIKELY!
 
 
 
 
-Electorate_3PPs_redistributed = pd.read_csv(f'{data_year}Electorate_3PPs_redistributed.csv', index_col=None).drop('INFORMAL', axis=1)
+Electorate_3PPs_redistributed = pd.read_csv(f'{previous_data_year}Electorate_3PPs_redistributed.csv', index_col=None)
 
 Electorate_3PPs_curr = Omnipresent_parties_df_curr.groupby('div_nm', as_index=False).sum(numeric_only=True)
-Electorate_3PPs_curr = Electorate_3PPs_curr[['div_nm'] + Electorate_3PPs_curr.columns[-4:].tolist()]
+Electorate_3PPs_curr = Electorate_3PPs_curr[['div_nm'] + Electorate_3PPs_curr.columns[-3:].tolist()]
+
+import pdb;pdb.set_trace()
+
 
 Electorate_3PPs_swings = Electorate_3PPs_curr.merge(Electorate_3PPs_redistributed, on = 'div_nm', suffixes=(f'_{data_year}',f'_{previous_data_year}'))
 
 Electorate_3PPs_swings = get_swings_from_merged_df(Electorate_3PPs_swings)
 
 
+import pdb;pdb.set_trace()
 
 
 # standardise PP swings!
 
 
 # get location shift and apply
-PP_sample_means = PP_swings.iloc[:,1:].apply(lambda x: x.explode()).stack().groupby(level=0).mean()
+PP_sample_means = PP_swings.iloc[:, 1:].apply(lambda x: x.apply(np.mean) if x.apply(isinstance, args=(list,)).all() else x)
+
 location_shift = Electorate_3PPs_swings.iloc[:,1:] - PP_sample_means
+location_shift['div_nm'] = Electorate_3PPs_swings['div_nm'].values
 
-PP_swings.iloc[:,1:] = PP_swings.iloc[:,1:].applymap(lambda x, shift: (np.array(x) + shift).tolist(), shift=location_shift.values)
+PP_swings_merged = Omnipresent_parties_swings.merge(location_shift, on='div_nm',how='left', suffixes = ('','_shift'))
+PP_swings_merged.iloc[:,1:3] = PP_swings_merged.iloc[:,1:3].values + PP_swings_merged.iloc[:,3:5].values
+PP_swings_centered = PP_swings_merged.iloc[:,:3]
 
+#PP_swings.iloc[:,1:] = PP_swings.iloc[:, 1:].apply(lambda col: col.apply(lambda x: (np.array(x) + location_shift.values).tolist() if isinstance(x, list) else x))
+
+#PP_swings.iloc[:, 1:].apply(lambda col: col.apply(lambda x, idx: (np.array(x) + location_shift.iloc[idx, :]).tolist() if isinstance(x, list) else x, idx=col.index))
+import pdb;pdb.set_trace()
 
 
 sigma2_electorates = Electorate_3PPs_swings[['COAL_swing', 'ALP_swing']].var()
+sigma2_PPs = PP_swings_centered.iloc[:,1:].var()
 
-# PP variances 2 alternatives:
-PP_sample_variances = PP_swings.iloc[:,1:].applymap(lambda x: pd.Series(x).var()).values.flatten()
-PP_sample_variances = PP_swings.iloc[:,1:].apply(lambda x: x.explode()).stack().groupby(level=0).var()
+scaling_factors = sigma2_electorates / sigma2_PPs
 
-# only COAL for now - actually get variance of all polling places!
-PP_swings_concatenated = np.concatenate(PP_swings['COAL_swing'].values)
-sigma2_sub_total = np.var(PP_swings_concatenated, ddof=1)  # ddof=1 ensures sample variance
-scaling_factor = np.sqrt(sigma2_electorates[0] / sigma2_sub_total)
+PP_swings_standardised = PP_swings_centered
+PP_swings_standardised.iloc[:,1:] = PP_swings_standardised.iloc[:,1:] * np.sqrt(scaling_factors)
+PP_swings_standardised_COAL = PP_swings_standardised.groupby('div_nm')['COAL_swing'].apply(list)
+PP_swings_standardised_ALP = PP_swings_standardised.groupby('div_nm')['ALP_swing'].apply(list)
 
-PP_swings['rescaled_sub_obs'] = PP_swings['COAL_swing'].apply(lambda lst: (np.array(lst) * scaling_factor).tolist())
+grouped_array = np.array(PP_swings_standardised_COAL.tolist(), dtype=object)
+n_groups = grouped_array.shape[0]
+
+
+import pdb;pdb.set_trace()
+
+# Actual Bootstrapping
+
+n_iterations = 500000
+bootstrap_samples = np.empty((n_iterations, n_groups))
+
+
+for i in range(n_groups):
+    # Sample one observation from each group
+    #sampled_df = PP_swings_standardised.iloc[:,:2].groupby('div_nm', group_keys=False).apply(lambda x: x.sample(n=1, replace=True), include_groups=False)
+
+    #bootstrap_samples[i] = sampled_df['COAL_swing'].values
+
+    bootstrap_samples[:, i] = np.random.choice(grouped_array[i], size=n_iterations, replace=True) # one div at a time!
+
+
+#df = pd.DataFrame(bootstrap_samples, columns = PP_swings_standardised['div_nm'].unique())
+#correlation_matrix = df.corr()
+
+import pdb;pdb.set_trace()
+
+from pynetcor import CorrelationMatrix
+
+
+corr_matrix_calculator = CorrelationMatrix()
+
+# Compute the correlation matrix
+correlation_matrix = corr_matrix_calculator.fit_transform(bootstrap_samples)
+
+correlation_df = pd.DataFrame(correlation_matrix, columns=PP_swings_standardised['div_nm'].unique(), index=PP_swings_standardised['div_nm'].unique())
+
+#correlation_matrix = np.corrcoef(bootstrap_samples, rowvar=False)
+
+import pdb;pdb.set_trace()
+
 
 
 

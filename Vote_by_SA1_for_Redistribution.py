@@ -22,8 +22,8 @@ sys.excepthook = exception_handler
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-census_year = "2011"
-data_year = "2016"
+census_year = "2021"
+data_year = "2022"
 redistribution_type = 'omnipresent'
 
 div_nm = "Melbourne"
@@ -32,7 +32,7 @@ start = time.time()
 
 name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
 new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner']}
-abolished_divs_dict = {'2016': set(['Port Adelaide']),'2019':set(['Stirling'])}
+abolished_divs_dict = {'2022':set(['Higgins','North Sydney']), '2016': set(['Port Adelaide']),'2019':set(['Stirling'])}
 
 
 
@@ -292,7 +292,7 @@ print("Got all dfs: time = ", time.time() - start)
 
 
 
-import pdb;pdb.set_trace()
+#import pdb;pdb.set_trace()
 
 
 
@@ -720,7 +720,7 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
     if redistribution_type == 'omnipresent':
         Electorate_3PPs_redistributed = pd.DataFrame.from_dict(Electorate_total_FP_dict, orient='index').drop('INFORMAL', axis = 1)
         Electorate_3PPs_redistributed = Electorate_3PPs_redistributed.loc[~Electorate_3PPs_redistributed.index.isin(abolished_div_list),].astype(int)
-
+        Electorate_3PPs_redistributed.reset_index(names='div_nm',inplace=True)
         Electorate_3PPs_redistributed.to_csv(f'{data_year}Electorate_3PPs_redistributed.csv', index=False)
 
         import pdb;pdb.set_trace()

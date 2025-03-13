@@ -229,7 +229,7 @@ import ipdb;ipdb.set_trace()
 # check that unlocated_PPs catches all the non-zero-vote pps!
 FP_By_PP_Complete_sum = remove_pp_nm_div_identifier(FP_By_PP_Complete[['div_nm','pp_nm','votes']], div_names).groupby(['div_nm','pp_nm'], as_index = False)['votes'].agg('sum')
 unlocated_PPs = unlocated_PPs.merge(FP_By_PP_Complete_sum, on=['div_nm','pp_nm'], how='left')
-
+# misses some BLVs - Burt/Werriwa
 
 
 # Finally, submit PP_data
