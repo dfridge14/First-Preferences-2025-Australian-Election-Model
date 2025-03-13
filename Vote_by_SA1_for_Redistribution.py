@@ -22,13 +22,15 @@ sys.excepthook = exception_handler
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-census_year = "2016"
-data_year = "2019"
+census_year = "2011"
+data_year = "2016"
+redistribution_type = 'omnipresent'
 
 div_nm = "Melbourne"
 
 start = time.time()
 
+name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
 new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner']}
 abolished_divs_dict = {'2016': set(['Port Adelaide']),'2019':set(['Stirling'])}
 
@@ -206,7 +208,7 @@ def rectify_div_SA1_votes(div, Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_di
 
 
 
-def prepare_wide_dicts_for_MMHg(data_year, census_year, redistribution_type = 'redistribution'):
+def prepare_wide_dicts_for_MMHg(data_year, census_year, name_changes_year_dict, redistribution_type = 'redistribution'):
 
     # create dictionary of SA1s for each giver_div
     Redistribution_SA1_changes = pd.read_csv(f"Redistribution_SA1_changes{str(int(data_year)+2)}.csv", index_col = None)
@@ -235,15 +237,18 @@ def prepare_wide_dicts_for_MMHg(data_year, census_year, redistribution_type = 'r
 
     # unaltered First Preferences
     First_Prefs_by_PP_Complete = pd.read_csv(f'{data_year}FirstPrefsByPPComplete.csv', index_col=None)
+    First_Prefs_by_PP_Complete['div_nm'] = First_Prefs_by_PP_Complete['div_nm'].replace(name_changes_year_dict[data_year])
 
 
     # load some data for PPs and SA1s (types, centroids)
     PP_coords = First_Prefs_by_PP_Complete[['div_nm','pp_id','Booth_type','Lat','Long']].drop_duplicates()
     SA1_By_PP_Votes = pd.read_csv(f"{data_year}SA1_By_PP_Votes.csv", index_col=None) # SA1_By_PP_Complete /
+    SA1_By_PP_Votes['div_nm'] = SA1_By_PP_Votes['div_nm'].replace(name_changes_year_dict[data_year])
+
 
     SA1_centroids = pd.read_csv(f"SA1_centroids_{census_year}.csv")
-    if census_year == '2016':
-        SA1_centroids = SA1_centroids.rename(columns={"SA1_7DIG16": "SA1_CODE16"})
+    if census_year != '2021':
+        SA1_centroids = SA1_centroids.rename(columns={f"SA1_7DIG{census_year[-2:]}": f"SA1_CODE{census_year[-2:]}"})
 
     ExistingSA1s = SA1_By_PP_Votes.iloc[:,1].drop_duplicates()
     Ghost_SA1s = ExistingSA1s.loc[~(ExistingSA1s.isin(SA1_centroids[f'SA1_CODE{census_year[-2:]}'].tolist())) & (ExistingSA1s.astype(str).str.startswith(('1', '2', '5', '7'))),].sort_values().tolist()
@@ -279,8 +284,8 @@ def prepare_wide_dicts_for_MMHg(data_year, census_year, redistribution_type = 'r
 
 
 
-Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, PP_coords, SA1_centroids, SA1s_giver_div_dict, \
-            redistribution_SA1s_dict, redistribution_divs_set, old_divs_set = prepare_wide_dicts_for_MMHg(data_year, census_year, redistribution_type = 'omnipresent')
+Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict \
+        , redistribution_divs_set, old_divs_set = prepare_wide_dicts_for_MMHg(data_year, census_year, name_changes_year_dict, redistribution_type = redistribution_type)
 
 
 print("Got all dfs: time = ", time.time() - start)
@@ -818,4 +823,4 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
 
 new_div_list = new_seats_year_dict[data_year]
 abolished_div_list = abolished_divs_dict[data_year]
-perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, old_divs_set, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, census_year, new_div_list, abolished_div_list, redistribution_type = 'omnipresent')
+perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, old_divs_set, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, census_year, new_div_list, abolished_div_list, redistribution_type = redistribution_type)

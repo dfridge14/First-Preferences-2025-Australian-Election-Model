@@ -28,6 +28,8 @@ previous_data_year = str(int(data_year)-3)
 
 
 
+
+
 Omnipresent_parties_df_curr = pd.read_csv(f'{data_year}OmnipresentPartiesByPP.csv', index_col=None).drop('INFORMAL', axis = 1)
 Omnipresent_parties_df_last = pd.read_csv(f'{previous_data_year}OmnipresentPartiesByPP.csv', index_col=None).drop(['pp_id','INFORMAL'], axis=1)
 
@@ -203,7 +205,23 @@ Omnipresent_parties_full = Omnipresent_parties_full.loc[~(Omnipresent_parties_fu
 # remove those that have vote difference of over 100
 
 
-# rewrite both data sets as percentages
+def get_swings_from_merged_df(merged_df):
+    data_year_cols = merged_df.columns[-6:-3]
+    previous_year_cols = merged_df.columns[-3:]
+    merged_df[previous_year_cols] = merged_df[previous_year_cols].div(merged_df[previous_year_cols].sum(axis=1), axis=0)
+    merged_df[data_year_cols] = merged_df[data_year_cols].div(merged_df[data_year_cols].sum(axis=1), axis=0)
+
+    swing_df = merged_df.copy()
+    swing_df[data_year_cols] = (swing_df[data_year_cols].values - swing_df[previous_year_cols].values)*100
+
+    swing_df.rename(columns = {f'COAL_{data_year}':'COAL_swing', f'ALP_{data_year}':'ALP_swing'}, inplace=True)
+    swing_df = swing_df[['div_nm','COAL_swing','ALP_swing']].sort_values(by='div_nm')
+
+    return swing_df
+
+
+Omnipresent_parties_swings = get_swings_from_merged_df(Omnipresent_parties_full)
+# rewrite both data sets as percentages - MAKE SURE FUNCTION DOES EXACTLY THIS:
 data_year_cols = Omnipresent_parties_full.columns[-6:-3]
 previous_year_cols = Omnipresent_parties_full.columns[-3:]
 Omnipresent_parties_full[previous_year_cols] = Omnipresent_parties_full[previous_year_cols].div(Omnipresent_parties_full[previous_year_cols].sum(axis=1), axis=0)
@@ -215,10 +233,69 @@ Omnipresent_parties_swings[data_year_cols] = (Omnipresent_parties_full[data_year
 Omnipresent_parties_swings.rename(columns = {f'COAL_{data_year}':'COAL_swing', f'ALP_{data_year}':'ALP_swing'}, inplace=True)
 Omnipresent_parties_swings = Omnipresent_parties_swings[['div_nm','COAL_swing','ALP_swing']].sort_values(by='div_nm')
 
+###
 Omnipresent_parties_swings_melted = Omnipresent_parties_swings.melt(id_vars=['div_nm'], value_vars=['COAL_swing', 'ALP_swing'], var_name='party_swing', value_name='Swing')
-swing_set = Omnipresent_parties_swings_melted.groupby(['div_nm', 'party_swing'])['Swing'].apply(set).reset_index() 
+PP_swings = Omnipresent_parties_swings_melted.groupby(['div_nm', 'party_swing'])['Swing'].apply(set).reset_index() 
 
-# MAKE SURE THAT BY USING SET NO INFO IS DESTROYED - UNLIKELY!
+# MAKE SURE THAT BY USING SETS NO INFO IS DESTROYED - UNLIKELY!
+
+
+
+
+Electorate_3PPs_redistributed = pd.read_csv(f'{data_year}Electorate_3PPs_redistributed.csv', index_col=None).drop('INFORMAL', axis=1)
+
+Electorate_3PPs_curr = Omnipresent_parties_df_curr.groupby('div_nm', as_index=False).sum(numeric_only=True)
+Electorate_3PPs_curr = Electorate_3PPs_curr[['div_nm'] + Electorate_3PPs_curr.columns[-4:].tolist()]
+
+Electorate_3PPs_swings = Electorate_3PPs_curr.merge(Electorate_3PPs_redistributed, on = 'div_nm', suffixes=(f'_{data_year}',f'_{previous_data_year}'))
+
+Electorate_3PPs_swings = get_swings_from_merged_df(Electorate_3PPs_swings)
+
+
+
+
+# standardise PP swings!
+
+
+# get location shift and apply
+PP_sample_means = PP_swings.iloc[:,1:].apply(lambda x: x.explode()).stack().groupby(level=0).mean()
+location_shift = Electorate_3PPs_swings.iloc[:,1:] - PP_sample_means
+
+PP_swings.iloc[:,1:] = PP_swings.iloc[:,1:].applymap(lambda x, shift: (np.array(x) + shift).tolist(), shift=location_shift.values)
+
+
+
+sigma2_electorates = Electorate_3PPs_swings[['COAL_swing', 'ALP_swing']].var()
+
+# PP variances 2 alternatives:
+PP_sample_variances = PP_swings.iloc[:,1:].applymap(lambda x: pd.Series(x).var()).values.flatten()
+PP_sample_variances = PP_swings.iloc[:,1:].apply(lambda x: x.explode()).stack().groupby(level=0).var()
+
+# only COAL for now - actually get variance of all polling places!
+PP_swings_concatenated = np.concatenate(PP_swings['COAL_swing'].values)
+sigma2_sub_total = np.var(PP_swings_concatenated, ddof=1)  # ddof=1 ensures sample variance
+scaling_factor = np.sqrt(sigma2_electorates[0] / sigma2_sub_total)
+
+PP_swings['rescaled_sub_obs'] = PP_swings['COAL_swing'].apply(lambda lst: (np.array(lst) * scaling_factor).tolist())
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -259,7 +336,7 @@ def haversine(PP_Lat, PP_Long, SA1_Lat, SA1_Long): # written by chatgpt
 # mostly 1s, occasional 2. Only ~400 disscrepancies, goes a good way
 matches['pp_nm'].unique()
 Omnipresent_parties_merged.loc[(Omnipresent_parties_merged['ALP_2019'].isna()) & (Omnipresent_parties_merged['pp_nm']!='Other'),'pp_nm'].unique()
-Omnipresent_parties_merged.loc[Omnipresent_parties_merged['pp_nm'].isin(set(asd) & set(qwe)),]
+#Omnipresent_parties_merged.loc[Omnipresent_parties_merged['pp_nm'].isin(set(asd) & set(qwe)),]
 
 import pdb;pdb.set_trace()
 

@@ -3,13 +3,23 @@ import geopandas as gpd
 import geopy.distance
 import numpy as np
 import os
+from pathlib import Path
 
-os.chdir('C:\\Dania\\2024\\Australian Election')
 
-census_year = '2021'
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+os.chdir(base_dir)
+
+
+census_year = '2011'
 
 # Voting data required 2016->2021 Correspondence/Concordance : shapefile_path = 'SA1_2021_AUST_GDA2020.shp'
-shapefile_path = f'SA1_{census_year}_AUST_GDA2020.shp'
+if census_year == '2021':
+    shapefile_path = f'SA1_{census_year}_AUST_GDA2020.shp'
+elif census_year == '2016':
+    shapefile_path = f'SA1_{census_year}_AUST_GDA2020.shp'
+elif census_year == '2011':
+    shapefile_path = f'SA1_{census_year}_AUST.shp'
+
 gdf_full = gpd.read_file(shapefile_path)
 
 # 
@@ -52,15 +62,21 @@ def compare_geometry_to_Australian_Albers():
 
 import pdb;pdb.set_trace()
 
-SA1_centroids_11dig = gdf.loc[:,['SA1_CODE21','Lat','Long']] 
+if census_year == '2011':
+    SA1_centroids_7dig = gdf.loc[:,[f'SA1_7DIG{census_year[-2:]}','Lat','Long']]
+else:
+    SA1_centroids_11dig = gdf.loc[:,[f'SA1_CODE{census_year[-2:]}','Lat','Long']] 
 
-SA1_centroids_7dig = SA1_centroids_11dig
-SA1_centroids_7dig.loc[:,'SA1_CODE21'] = SA1_centroids_7dig.loc[:,'SA1_CODE21'].astype(str).str[:1] + SA1_centroids_7dig.loc[:,'SA1_CODE21'].astype(str).str[5:]
-SA1_centroids_7dig.loc[:,'SA1_CODE21'] = SA1_centroids_7dig.loc[:,'SA1_CODE21'].astype(int)
-#print(SA1_centroids_7dig.loc[SA1_centroids_7dig["SA1_CODE21"] == 2117417,])
+    SA1_centroids_7dig = SA1_centroids_11dig
+    SA1_centroids_7dig.loc[:,f'SA1_CODE{census_year[-2:]}'] = SA1_centroids_7dig.loc[:,f'SA1_CODE{census_year[-2:]}'].astype(str).str[:1] + SA1_centroids_7dig.loc[:,f'SA1_CODE{census_year[-2:]}'].astype(str).str[5:]
+    SA1_centroids_7dig.loc[:,f'SA1_CODE{census_year[-2:]}'] = SA1_centroids_7dig.loc[:,f'SA1_CODE{census_year[-2:]}'].astype(int)
+    #print(SA1_centroids_7dig.loc[SA1_centroids_7dig["SA1_CODE21"] == 2117417,])
+
+import pdb;pdb.set_trace()
+
 
 # writes to csv file
-#SA1_centroids_7dig.to_csv(f'SA1_centroids_{census_year}.csv', index=False)
+SA1_centroids_7dig.to_csv(f'SA1_centroids_{census_year}.csv', index=False)
 
 
 

@@ -2,15 +2,21 @@ import pandas as pd
 import numpy as np
 import os, time
 import ast
+from pathlib import Path
 
 
-os.chdir('C:\\Dania\\2024\\Australian Election')
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+os.chdir(base_dir)
 
 INCUMBENT_ADVANTAGE = 4
 final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
+name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
+
 data_year = '2016'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 NONINCUMBENT_DISADVANTAGE =  INCUMBENT_ADVANTAGE/(FINAL_CANDIDATE_NO-1)
+
+
 
 
 
@@ -219,8 +225,12 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
 
 
 
-def create_DOP_By_PP_csvs(data_year):
+def create_DOP_By_PP_csvs(data_year, name_changes_year_dict):
     DOP_By_PP_year = pd.read_csv(f"{data_year}DOP_By_PP_full.csv", index_col=None).rename(columns={"DivisionNm": 'div_nm', 'PPId': 'pp_id', 'PPNm': 'pp_nm','CountNum': 'CountNumber',"CandidateId":"cand_id"})
+    
+    DOP_By_PP_year['div_nm'] = DOP_By_PP_year['div_nm'].replace(name_changes_year_dict[data_year]) # adjust for name changes
+
+
     DOP_By_PP_year  = DOP_By_PP_year[["div_nm","pp_id","pp_nm","CountNumber","BallotPosition","cand_id", "PartyAb","CalculationType", "CalculationValue"]]
 
     DOP_By_PP_year = DOP_By_PP_year.loc[~(DOP_By_PP_year['CalculationType'] == 'Transfer Percent'),]
@@ -285,7 +295,7 @@ def create_DOP_By_PP_csvs(data_year):
 
     return 1
 
-create_DOP_By_PP_csvs(data_year) # create csv file!
+create_DOP_By_PP_csvs(data_year, name_changes_year_dict) # create csv file!
 
 import pdb;pdb.set_trace()
 
