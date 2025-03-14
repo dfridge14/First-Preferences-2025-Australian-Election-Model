@@ -26,8 +26,119 @@ Type = 'Elec' # 'State'
 States_or_Electorates = 'States' if Type == 'State' else 'Electorates'
 
 
+
+
 data_dir = Path(f'C:\\Dania\\2024\\Australian Election\\ABS downloads for Similarity\\{States_or_Electorates}') if os.name == "nt" else Path.home() / f"Australian Election/ABS downloads for Similarity/{States_or_Electorates}"
 os.chdir(data_dir)
+
+
+
+
+
+
+
+
+
+
+def format_rows_electorates(yearElecChar_df, data_year):
+
+    yearElecChar_df = yearElecChar_df.iloc[1:-1,:]
+
+
+    if data_year == '2007':
+        yearElecChar_df.iloc[:,0] = yearElecChar_df.iloc[:,0].str.replace(r'\[.*?\]|\(.*?\)','',regex=True).str.strip() # remove extra brackets at end (and whitspace)
+    if data_year == '2011':
+        yearElecChar_df.iloc[:,0] = yearElecChar_df.iloc[:,0].str.split(',').str[0]
+
+    if data_year in ['2004','2007']:
+        yearElecChar_df = yearElecChar_df.loc[~yearElecChar_df.iloc[:,0].str.endswith('Not applicable'),] # 2004/7
+        yearElecChar_df = yearElecChar_df.loc[~yearElecChar_df.iloc[:,0].str.startswith('Not applicable'),] # 2004/7 TAS
+    else:
+        yearElecChar_df = yearElecChar_df[~yearElecChar_df.iloc[:,0].str.endswith(')')] # later years
+
+    yearElecChar_df = yearElecChar_df[~yearElecChar_df.iloc[:,0].str.startswith('No Usual Address')]
+
+    return yearElecChar_df
+
+def format_columns_electorates(yearElecChar_df, data_year, characteristic):
+    yearElecChar_df = yearElecChar_df.rename(columns={yearElecChar_df.columns[0]: "div_nm"})
+
+    if characteristic == 'Age':
+        yearElecChar_df = yearElecChar_df.iloc[:,:-1].rename(columns=lambda x: x.replace(" years", "") if " years" in x else x).rename( \
+                                                                                columns={'1 year':'1'})
+        
+    elif characteristic == 'HIED':
+        yearElecChar_df = yearElecChar_df.iloc[:,:-5]
+
+        if data_year in ['2004','2007']:
+            yearElecChar_df.columns = yearElecChar_df.columns.str.replace(',','')
+        else:
+            yearElecChar_df.columns = yearElecChar_df.columns.str.replace(',','').str.split(' ').str[0]
+
+    elif characteristic == 'MortgageRep':
+        yearElecChar_df = yearElecChar_df.iloc[:,:-4]
+
+        if data_year in ['2004','2007']:
+            yearElecChar_df.columns = yearElecChar_df.columns.str.replace(',','')
+        else:
+            yearElecChar_df.columns = yearElecChar_df.columns.str.replace(',','').str.split(' ').str[0]
+
+    elif characteristic == 'Rent':
+        yearElecChar_df = yearElecChar_df.iloc[:,:-4]
+
+
+    elif characteristic in ['Employment','Occupation']:
+        yearElecChar_df = yearElecChar_df.iloc[:,:-6]
+
+    elif characteristic == 'Religion':
+        yearElecChar_df = yearElecChar_df.iloc[:,:-5]
+
+        if data_year in ['2016','2021','2024']:
+            yearElecChar_df.rename(columns={yearElecChar_df.columns[-1]: "No Religion"}, inplace=True)
+
+    elif characteristic in ['BirthAustralia']:
+        yearElecChar_df = yearElecChar_df.iloc[:,:2]
+
+    elif characteristic == 'BirthCountry':
+        yearElecChar_df = yearElecChar_df.iloc[:,[0,-2]]    
+
+    elif characteristic in ['HouseholdSize']:
+        yearElecChar_df = yearElecChar_df.iloc[:,:-3]    
+
+        if data_year not in ['2004','2007']:
+            word_to_num = {"One": 1, "Two": 2, "Three": 3, "Four": 4, "Five": 5, "Six": 6, "Seven": 7, "Eight": 8, "Nine": 9, "Ten": 10}
+            yearElecChar_df.columns = [yearElecChar_df.columns[0]] + [word_to_num.get(col.split(' ')[0], col) for col in yearElecChar_df.columns[1:]]
+        else:
+            yearElecChar_df.columns = [yearElecChar_df.columns[0]] + [int(col.split(' ')[0]) for col in yearElecChar_df.columns[1:]]
+
+
+    yearElecChar_df = yearElecChar_df.sort_values(by='div_nm').reset_index(drop=True)
+
+    
+
+
+    return yearElecChar_df
+
+def format_elecorate_df(yearElecChar_df, data_year, characteristic):
+    yearElecChar_df = format_rows_electorates(yearElecChar_df, data_year)
+    yearElecChar_df = format_columns_electorates(yearElecChar_df, data_year, characteristic)
+    return yearElecChar_df
+
+
+census_years = ['2004','2007','2011','2016','2021','2024']
+
+
+#test
+#for data_year in census_years:
+#    characteristic = 'HouseholdSize'#
+#    yearElecChar_df = pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python')
+#    yearElecChar_df = format_rows_electorates(yearElecChar_df, data_year)
+#    yearElecChar_df = format_columns_electorates(yearElecChar_df, data_year, characteristic)
+
+
+
+
+
 
 NO_OF_STATES = 8
 NO_OF_ELECTORATES = {'2021':151,'2016':150,'2011':150,'2007':150,'2004':150}
@@ -125,7 +236,7 @@ def create_StateAb_dict():
     
     return StateAb_dict
 
-StateAb_dict = create_StateAb_dict()
+#StateAb_dict = create_StateAb_dict()
 
 
 def calculate_range_mean(range_str):
@@ -134,6 +245,158 @@ def calculate_range_mean(range_str):
     lower, upper = range_str.replace('$', '').split('-')
     # Convert to integers and calculate the mean
     return (int(lower) + int(upper)) / 2
+
+
+
+def get_characteristic_matrix(ser):
+    # series with div_nm as index
+    return 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY)  / (ser.max() - ser.min()).iloc[0])
+
+
+
+
+def get_characteristic_matrices_electorates(binary, census_years):
+
+
+    Median_Age_matrix_dict = {} # keys are census_years
+    Median_HIED_matrix_dict = {} # keys are census_years
+    Median_Mortgage_matrix_dict = {} # keys are census_years
+    Rent_Percent_matrix_dict = {} # keys are census_years
+    FT_Percent_matrix_dict = {} # keys are census_years
+    Prof_Percent_matrix_dict = {} # keys are census_years
+    NR_Percent_matrix_dict = {} # keys are census_years
+    Australian_Percent_matrix_dict = {} # keys are census_years
+    Mean_Hsize_matrix_dict = {} # keys are census_years
+
+
+
+    for data_year in census_years:
+
+        # 1. Median age
+        characteristic = 'Age'
+        Age_df = format_elecorate_df(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
+
+        # Apply median to each state
+        age_ints = Age_df.columns[1:-1].astype(int)
+        Age_df.loc[:,"Median_age"] = Age_df.iloc[:,1:].apply(lambda row: weighted_median(age_ints, row), axis=1)
+        Age_df = Age_df.iloc[:,[0,-1]]
+
+        similarity_matrix = get_characteristic_matrix(Age_df.set_index('div_nm'))
+        Median_Age_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=Age_df['div_nm'], columns=Age_df['div_nm'])
+        #scaled_characteristic = 0.2 + (Age_df - Age_df.min()) * (0.8 - 0.2) / (Age_df.max() - Age_df.min())
+
+        #import pdb;pdb.set_trace()
+
+
+
+        # 2. HIED Median (income)
+        characteristic = 'HIED'
+        HIED_df = format_elecorate_df(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
+    
+        HIED_df.loc[:,'Median_HIED'] =  HIED_df.iloc[:,1:].apply(lambda row: weighted_median_without_total(HIED_df.columns[1:], row), axis = 1)
+        HIED_df = HIED_df.iloc[:,[0,-1]]
+        HIED_df['Median_HIED'] = HIED_df['Median_HIED'].apply(calculate_range_mean)
+
+        similarity_matrix = get_characteristic_matrix(HIED_df.set_index('div_nm'))
+        Median_HIED_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=HIED_df['div_nm'], columns=HIED_df['div_nm'])
+
+        #import pdb;pdb.set_trace()
+
+
+
+    # 3. Median Morgage Repayment
+        characteristic = 'MortgageRep'
+        Mortgage_df = format_elecorate_df(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
+    
+        Mortgage_df.loc[:,'Median_Mortgage'] =  Mortgage_df.iloc[:,1:].apply(lambda row: weighted_median_without_total(Mortgage_df.columns[1:], row), axis = 1)
+        Mortgage_df = Mortgage_df.iloc[:,[0,-1]]
+        Mortgage_df['Median_Mortgage'] = Mortgage_df['Median_Mortgage'].apply(calculate_range_mean)
+
+        similarity_matrix = get_characteristic_matrix(Mortgage_df.set_index('div_nm'))
+        Median_Mortgage_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=Mortgage_df['div_nm'], columns=Mortgage_df['div_nm'])
+
+        #import pdb;pdb.set_trace()
+
+        
+    # 4. Rent Percent
+        characteristic = 'Rent'
+        Rent_df = format_elecorate_df(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
+
+        Rent_df.loc[:,'Rent%'] =  Rent_df.loc[:,'Rented']/Rent_df.iloc[:,1:].sum(axis=1)*100  # percentage of renteds out of valid responses
+        Rent_df = Rent_df.iloc[:,[0,-1]]
+
+        similarity_matrix = get_characteristic_matrix(Rent_df.set_index('div_nm'))
+        Rent_Percent_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=Rent_df['div_nm'], columns=Rent_df['div_nm'])
+
+        #import pdb;pdb.set_trace()
+        
+    # 5. Full time Percent
+        characteristic = 'Employment'
+        FT_df = format_elecorate_df(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
+
+        FT_df.loc[:,'FT%'] =  FT_df.loc[:,'Employed, worked full-time']/FT_df.iloc[:,1:].sum(axis=1)*100  # percentage of FTeds out of valid responses
+        FT_df = FT_df.iloc[:,[0,-1]]
+
+        similarity_matrix = get_characteristic_matrix(FT_df.set_index('div_nm'))
+        FT_Percent_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=FT_df['div_nm'], columns=FT_df['div_nm'])
+        
+        #import pdb;pdb.set_trace()
+
+    # 6. Professionals Percent
+        characteristic = 'Occupation'
+        Prof_df = format_elecorate_df(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
+
+        # correct for change in later censuses
+        Prof_df.loc[:,'Prof%'] =  Prof_df.loc[:,'Professionals']/Prof_df.iloc[:,1:].sum(axis=1)*100  # percentage of Profeds out of valid responses
+        Prof_df = Prof_df.iloc[:,[0,-1]]
+
+        similarity_matrix = get_characteristic_matrix(Prof_df.set_index('div_nm'))
+        Prof_Percent_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=Prof_df['div_nm'], columns=Prof_df['div_nm'])
+        
+        #import pdb;pdb.set_trace()
+
+    # 7. No Religion Percent
+        characteristic = 'Religion'
+        NR_df = format_elecorate_df(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
+
+        NR_df.loc[:,'NR%'] =  NR_df.loc[:,'No Religion']/NR_df.iloc[:,1:].sum(axis=1)*100  # percentage of NReds out of valid responses
+        NR_df = NR_df.iloc[:,[0,-1]]
+
+        similarity_matrix = get_characteristic_matrix(NR_df.set_index('div_nm'))
+        NR_Percent_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=NR_df['div_nm'], columns=NR_df['div_nm'])
+
+        #import pdb;pdb.set_trace()
+
+
+    # 8. Birthplace Percent
+        characteristic = 'BirthAustralia'
+        Australian_df = format_elecorate_df(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
+        characteristic = 'BirthCountry'
+        Birthplace_df = format_elecorate_df(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
+        
+        Australian_df.loc[:,'Australia'] = Australian_df.iloc[:,1]/ (Birthplace_df.loc[:,'Total'])*100 # include not_stated in here, as that is what 
+        Australian_df = Australian_df.iloc[:,[0,-1]]
+
+        similarity_matrix = get_characteristic_matrix(Australian_df.set_index('div_nm'))
+        Australian_Percent_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=Australian_df['div_nm'], columns=Australian_df['div_nm'])
+        
+        #import pdb;pdb.set_trace()
+
+        # 9. Mean Household Size
+        characteristic = 'HouseholdSize'
+        Hsize_df = format_elecorate_df(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
+
+        Hsize_df.loc[:,'Mean_HSize'] = (Hsize_df.iloc[:,1:] * Hsize_df.columns[1:].values).sum(axis=1) / Hsize_df.iloc[:,1:].sum(axis=1) # calculate mean!
+        Hsize_df = Hsize_df.iloc[:,[0,-1]]
+
+        similarity_matrix = get_characteristic_matrix(Hsize_df.set_index('div_nm'))
+        Mean_Hsize_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=Hsize_df['div_nm'], columns=Hsize_df['div_nm'])
+        #import pdb;pdb.set_trace()
+
+
+    list_of_similarity_matrix_dicts = [Median_Age_matrix_dict, Median_HIED_matrix_dict, Median_Mortgage_matrix_dict, Rent_Percent_matrix_dict, FT_Percent_matrix_dict, Prof_Percent_matrix_dict, NR_Percent_matrix_dict, Australian_Percent_matrix_dict, Mean_Hsize_matrix_dict]
+
+    return list_of_similarity_matrix_dicts
 
 
 def get_characteristic_matrices_states(binary):
@@ -422,16 +685,53 @@ def get_characteristic_matrices_states(binary):
 
     return list_of_similarity_matrix_dicts
 
-# 1. download and check all remaining 2011,2016,2021 censuses                                                       DONE
-# 2. For each election_year since 2004 (maybe 2001?) combine all characteristic matrices into similarity matrix     DONE
-# 3. Make a df to give to R for regression!
-
-list_of_similarity_matrix_dicts = get_characteristic_matrices_states(binary)
-
-#import pdb;pdb.set_trace()
 
 
-def make_similarity_matrix(list_of_similarity_matrix_dicts, election_years, election_year_to_census_year_dict):
+
+if Type == 'Elec':
+    list_of_similarity_matrix_dicts = get_characteristic_matrices_electorates(0,census_years)
+elif Type == 'State':
+    list_of_similarity_matrix_dicts = get_characteristic_matrices_states(binary)
+
+
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+os.chdir(base_dir)
+
+
+
+import pdb;pdb.set_trace()
+
+def similarity_linear_transformation(similarity_matrix, Redistribution_reversed):
+
+    # sort alphabetically for consistency
+    old_divs = np.sort(Redistribution_reversed['old_div'].unique())
+    new_divs = np.sort(Redistribution_reversed['new_div'].unique())
+
+
+    old_div_index = {name: i for i, name in enumerate(old_divs)}
+    new_div_index = {name: i for i, name in enumerate(new_divs)}
+
+    Redistribution_reversed["old_div_idx"] = Redistribution_reversed["old_div"].map(old_div_index)
+    Redistribution_reversed["new_div_idx"] = Redistribution_reversed["new_div"].map(new_div_index)
+
+    import pdb;pdb.set_trace()
+
+
+    R = np.zeros((len(Redistribution_reversed['new_div'].unique()), len(Redistribution_reversed['old_div'].unique())))
+    for _, row in Redistribution_reversed.iterrows():
+        R[int(row["new_div_idx"]), int(row["old_div_idx"])] = row["proportion"]
+
+    import pdb;pdb.set_trace()
+
+    # diagonal is no longer 1, but this is expected and not problematic, considering diagonal are never used for inference
+    transformed_matrix = R @ similarity_matrix @ R.T
+    transformed_matrix.columns = new_divs
+    transformed_matrix.index = new_divs
+
+    return transformed_matrix
+
+
+def make_similarity_matrix_states(list_of_similarity_matrix_dicts, election_years, election_year_to_census_year_dict):
     ### average all characteristic similarity matrices and allocate to census years
     similarity_matrix_dict = {}
 
@@ -447,7 +747,39 @@ def make_similarity_matrix(list_of_similarity_matrix_dicts, election_years, elec
 
     return similarity_matrix_dict
 
-similarity_matrix_dict = make_similarity_matrix(list_of_similarity_matrix_dicts, election_years, election_year_to_census_year_dict)
+def make_similarity_matrix_electorates(list_of_similarity_matrix_dicts, census_years, election_year_to_census_year_dict):
+    ### average all characteristic similarity matrices and allocate to census years
+    similarity_matrix_dict = {}
+    census_year_to_election_year_dict = {'2004':'2004','2007':'2007','2011':'2010','2016':'2016','2021':'2021','2024':'2024'}
+
+
+    for year in census_years:
+        matrix_dim = NO_OF_ELECTORATES[year]
+        election_year = census_year_to_election_year_dict[year]
+
+        similarity_matrix_dict[election_year] = np.zeros((matrix_dim,matrix_dim)) # correct size, then add 
+
+        for i in range(len(list_of_similarity_matrix_dicts)):
+
+            similarity_matrix_dict[election_year] += list_of_similarity_matrix_dicts[i][year] # add matrix for each of 9 characteristics
+
+        similarity_matrix_dict[election_year] /= len(list_of_similarity_matrix_dicts) # 9 characteristics - average
+
+    # get 2016 and 2019 election matrices through 2013-2016 and 2021-2018 data!
+    similarity_matrix_dict['2013'] = similarity_linear_transformation(similarity_matrix_dict['2010'], pd.read_csv('Correspondence_CED_2015_2012_Reversed.csv', index_col = None))
+    
+    similarity_matrix_dict['2019'] = similarity_linear_transformation(similarity_matrix_dict['2021'], pd.read_csv('Correspondence_CED_2018_2021.csv', index_col = None).rename(columns = {'div_nm_2018':'new_div','div_nm_2021':'old_div','RATIO_FROM_TO':'proportion'}))
+
+    import pdb;pdb.set_trace()
+
+
+    return similarity_matrix_dict
+
+
+if Type == 'State':
+    similarity_matrix_dict = make_similarity_matrix_states(list_of_similarity_matrix_dicts, election_years, election_year_to_census_year_dict)
+elif Type == 'Elec':
+    similarity_matrix_dict = make_similarity_matrix_electorates(list_of_similarity_matrix_dicts, census_years, election_year_to_census_year_dict)
 
 
 def create_TPP_swing_matrix(election_years_extended,binary):
@@ -628,6 +960,7 @@ import pdb;pdb.set_trace()
 
 
 
+    
 
 
 
@@ -643,19 +976,10 @@ def get_characteristic_matrices_electorates(binary):
     for data_year in census_years:
         NO_OF_ROWS = NO_OF_ELECTORATES[data_year]
 
-        print(data_year)
-
-        Age_df = pd.read_csv(f"{data_year}{Type}Age.csv", skiprows=9, skipfooter=8, engine='python')
-        Age_df = Age_df.iloc[1:,:-1].rename(columns=lambda x: x.replace(" years", "") if " years" in x else x).rename(columns={'1 year':'1','AGEP Age': 'div_nm','AGEP Age in Single Years':'StateAb'})
-        Age_df.iloc[:,0] = Age_df.iloc[:,0].str.replace(r'\[.*?\]|\(.*?\)','',regex=True).str.strip() # remove extra brackets at end
-        Age_df = Age_df.loc[~Age_df.iloc[:,0].str.endswith('Not applicable'),]
-
-
+        characteristic = 'Age'
+        Age_df = format_columns_electorates(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
 
         import pdb;pdb.set_trace()
-
-        if Type == 'State':
-            Age_df.iloc[:, 0] = Age_df.iloc[:, 0].replace(StateAb_dict)
         # Apply median to each state
         ages = Age_df.columns[1:-1].astype(int)
         Age_df.loc[:,"Median_age"] = Age_df.iloc[:,1:].apply(lambda row: weighted_median(ages, row), axis=1)
