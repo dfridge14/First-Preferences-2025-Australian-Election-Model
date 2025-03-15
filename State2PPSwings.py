@@ -173,7 +173,7 @@ else:
 binary = 0
 
 
-def state_by_state_matrix(characteristic_df, threshold):
+def state_by_state_matrix(characteristic_df, threshold = 0):
     ### characteristic_df must be an n * 2 df with 1st row corresponding to states or divisions, second row to characteristics
     n = len(characteristic_df)
     comparison_matrix = np.zeros((n, n), dtype=int)
@@ -235,8 +235,6 @@ def create_StateAb_dict():
         StateAb_dict[StateAb_df.iloc[i,1]] = StateAb_df.iloc[i,0]
     
     return StateAb_dict
-
-#StateAb_dict = create_StateAb_dict()
 
 
 def calculate_range_mean(range_str):
@@ -400,6 +398,8 @@ def get_characteristic_matrices_electorates(binary, census_years):
 
 
 def get_characteristic_matrices_states(binary):
+
+    StateAb_dict = create_StateAb_dict()
 
 
     # 1. median age
@@ -765,7 +765,7 @@ def make_similarity_matrix_electorates(list_of_similarity_matrix_dicts, census_y
 
         similarity_matrix_dict[election_year] /= len(list_of_similarity_matrix_dicts) # 9 characteristics - average
 
-    # get 2016 and 2019 election matrices through 2013-2016 and 2021-2018 data!
+    # get 2016 and 2019 election matrices through 2013-2016 and 2021-2018 data! Tested - correctly performs linear transformation!
     similarity_matrix_dict['2013'] = similarity_linear_transformation(similarity_matrix_dict['2010'], pd.read_csv('Correspondence_CED_2015_2012_Reversed.csv', index_col = None))
     
     similarity_matrix_dict['2019'] = similarity_linear_transformation(similarity_matrix_dict['2021'], pd.read_csv('Correspondence_CED_2018_2021.csv', index_col = None).rename(columns = {'div_nm_2018':'new_div','div_nm_2021':'old_div','RATIO_FROM_TO':'proportion'}))
@@ -780,6 +780,48 @@ if Type == 'State':
     similarity_matrix_dict = make_similarity_matrix_states(list_of_similarity_matrix_dicts, election_years, election_year_to_census_year_dict)
 elif Type == 'Elec':
     similarity_matrix_dict = make_similarity_matrix_electorates(list_of_similarity_matrix_dicts, census_years, election_year_to_census_year_dict)
+
+
+def create_State_match_matrix_dict(election_years):
+
+    State_match_matrix_dict = {}
+
+    for year in election_years:
+        div_to_state = pd.read_csv(f"{year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+        div_to_state = div_to_state.rename(columns={'DivisionNm':'div_nm'})[['div_nm','StateAb']]
+
+        import pdb;pdb.set_trace()
+
+        State_match_matrix_dict[year] = state_by_state_matrix(div_to_state)
+
+    import pdb;pdb.set_trace()
+
+    return State_match_matrix_dict
+
+
+def create_contest_similarity_matrix_dict(election_years):
+
+    contest_similarity_matrix_dict = {}
+
+
+    return contest_similarity_matrix_dict
+
+
+
+if Type == 'Elec':
+
+    State_match_matrix_dict = create_State_match_matrix_dict(election_years)
+
+elif Type == 'State':
+    # Eternal Proximity matrix
+    Proximity_matrix_dict = {}
+
+    Proximity_matrix = pd.read_csv("StateProximity.csv", index_col='StateAb').fillna(0).astype(int)
+    for year in election_years:
+        to_add = Proximity_matrix.copy()
+        to_add.loc[:,'Election_Year'] = year
+        Proximity_matrix_dict[year] = to_add
+
 
 
 def create_TPP_swing_matrix(election_years_extended,binary):
@@ -835,8 +877,6 @@ def create_TPP_swing_matrix(election_years_extended,binary):
     return TPP_swing_matrix_dict
 
 
-# TPP swing matrices
-TPP_swing_matrix_dict = create_TPP_swing_matrix(election_years_extended,binary)
 
 
 def make_Avg_TPP_Swing_matrix(TPP_swing_matrix_dict, election_years_extended):
@@ -856,18 +896,18 @@ def make_Avg_TPP_Swing_matrix(TPP_swing_matrix_dict, election_years_extended):
 
     return Avg_TPP_matrix_dict
 
-TPP_Swing_Avg_matrix_dict = make_Avg_TPP_Swing_matrix(TPP_swing_matrix_dict, election_years_extended)
+
+
+if Type == 'Elec':
+    Contest_similarity_dict = create_contest_similarity_matrix_dict(election_years)
+
+elif Type == 'State':
+    # TPP swing matrices
+    TPP_swing_matrix_dict = create_TPP_swing_matrix(election_years_extended,binary)
+    TPP_Swing_Avg_matrix_dict = make_Avg_TPP_Swing_matrix(TPP_swing_matrix_dict, election_years_extended)
 
 
 
-# Eternal Proximity matrix
-Proximity_matrix_dict = {}
-
-Proximity_matrix = pd.read_csv("StateProximity.csv", index_col='StateAb').fillna(0).astype(int)
-for year in election_years:
-    to_add = Proximity_matrix.copy()
-    to_add.loc[:,'Election_Year'] = year
-    Proximity_matrix_dict[year] = to_add
 
 
 
@@ -939,313 +979,3 @@ else:
     Regression_Format_df.to_csv("State_similarity_df_continuous.csv", index=False)
 
 import pdb;pdb.set_trace()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
-def get_characteristic_matrices_electorates(binary):
-
-
-    # 1. median age
-    Median_Age_matrix_dict = {} # keys are census_years
-    for data_year in census_years:
-        NO_OF_ROWS = NO_OF_ELECTORATES[data_year]
-
-        characteristic = 'Age'
-        Age_df = format_columns_electorates(pd.read_csv(f"{data_year}{Type}{characteristic}.csv", skiprows=9, skipfooter=8, engine='python'), data_year, characteristic)
-
-        import pdb;pdb.set_trace()
-        # Apply median to each state
-        ages = Age_df.columns[1:-1].astype(int)
-        Age_df.loc[:,"Median_age"] = Age_df.iloc[:,1:].apply(lambda row: weighted_median(ages, row), axis=1)
-        Age_df = Age_df.iloc[:NO_OF_ROWS,[0,-1]]
-        #Age_df.iloc[:,-1] = Age_df.iloc[:,-1].astype(int)
-
-        import pdb;pdb.set_trace()
-
-        #scaled_characteristic = 0.2 + (Age_df - Age_df.min()) * (0.8 - 0.2) / (Age_df.max() - Age_df.min())
-        ser = Age_df.set_index('StateAb')
-        similarity_matrix = 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY)  / (ser.max() - ser.min()).iloc[0])
-
-        #import pdb;pdb.set_trace()
-
-        if binary:
-            Median_Age_matrix_dict[data_year] = state_by_state_matrix(Age_df, MEDIAN_AGE_THRESHOLD)
-        else:
-            Median_Age_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=ser.index, columns=ser.index)
-
-
-    # 2. HIED Median (income)
-    Median_HIED_matrix_dict = {} # keys are census_years
-    for data_year in census_years:
-        HIED_df = pd.read_csv(f"{data_year}StateHIED.csv", skiprows=9, skipfooter=8, engine='python').iloc[1:NO_OF_STATES+1,:-5] # filter out not applicable columns
-        HIED_df.iloc[:, 0] = HIED_df.iloc[:, 0].replace(StateAb_dict)
-    
-        HIED_df.loc[:,'Median_HIED'] =  HIED_df.iloc[:,1:].apply(lambda row: weighted_median_without_total(HIED_df.columns[1:], row), axis = 1)
-        HIED_df = HIED_df.iloc[:,[0,-1]].rename(columns={HIED_df.columns[0]: "StateAb"})
-
-        ser = HIED_df.set_index('StateAb')
-        #import pdb;pdb.set_trace()
-
-        if data_year == '2006':
-            ser["Median_HIED"] = round(ser["Median_HIED"].str.replace(',','').apply(calculate_range_mean))
-        else:
-            ser.loc[:,"Median_HIED"] = ser.loc[:,"Median_HIED"].str.replace(',','').str.split(' ').str[0]
-            ser["Median_HIED"] = round(ser["Median_HIED"].apply(calculate_range_mean))
-
-        similarity_matrix = 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY) / (ser.max() - ser.min()).iloc[0])
-
-
-        if binary:
-            Median_HIED_matrix_dict[data_year] = state_by_state_matrix(HIED_df, 0)
-        else:
-            Median_HIED_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=ser.index, columns=ser.index)
-        #import pdb;pdb.set_trace()
-
-    # 3. Median Morgage Repayment
-    Median_Mortgage_matrix_dict = {} # keys are census_years
-    for data_year in census_years:
-        Mortgage_df = pd.read_csv(f"{data_year}StateMortgageRep.csv", skiprows=9, skipfooter=8, engine='python').iloc[1:NO_OF_STATES+1,:-4] # filter out not applicable columns
-        Mortgage_df.iloc[:, 0] = Mortgage_df.iloc[:, 0].replace(StateAb_dict)
-    
-        Mortgage_df.loc[:,'Median_Mortgage'] =  Mortgage_df.iloc[:,1:].apply(lambda row: weighted_median_without_total(Mortgage_df.columns[1:], row), axis = 1)
-        Mortgage_df = Mortgage_df.iloc[:,[0,-1]].rename(columns={Mortgage_df.columns[0]: "StateAb"})
-
-        ser = Mortgage_df.set_index('StateAb')
-
-        if data_year == '2006':
-            ser["Median_Mortgage"] = round(ser["Median_Mortgage"].str.replace(',','').apply(calculate_range_mean))
-        else:
-            ser.loc[:,"Median_Mortgage"] = ser.loc[:,"Median_Mortgage"].str.replace(',','').str.split(' ').str[0]
-            ser["Median_Mortgage"] = round(ser["Median_Mortgage"].apply(calculate_range_mean))
-
-        similarity_matrix = 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY) / (ser.max() - ser.min()).iloc[0])
-
-        #import pdb;pdb.set_trace()
-
-        if binary:
-            Median_Mortgage_matrix_dict[data_year] = state_by_state_matrix(Mortgage_df, 0)
-        else:
-            Median_Mortgage_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=ser.index, columns=ser.index)
-
-        
-        #import pdb;pdb.set_trace()
-
-    # 4. Rent Percent
-    Rent_Percent_matrix_dict = {} # keys are census_years
-    for data_year in census_years:
-        Rent_df = pd.read_csv(f"{data_year}StateRent.csv", skiprows=9, skipfooter=8, engine='python').iloc[1:NO_OF_STATES+1,:-4] # filter out not applicable columns - always 1 more than you think for some reason
-        Rent_df.iloc[:, 0] = Rent_df.iloc[:, 0].replace(StateAb_dict)
-
-        Rent_df.loc[:,'Rent%'] =  Rent_df.loc[:,'Rented']/Rent_df.iloc[:,1:].sum(axis=1)*100  # percentage of renteds out of valid responses
-        Rent_df = Rent_df.iloc[:,[0,-1]].rename(columns={Rent_df.columns[0]: "StateAb"})
-
-        ser = Rent_df.set_index('StateAb')
-
-        similarity_matrix = 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY) / (ser.max() - ser.min()).iloc[0])
-
-        #import pdb;pdb.set_trace()
-
-        if binary:
-            Rent_Percent_matrix_dict[data_year] = state_by_state_matrix(Rent_df, RENT_THRESHOLD)
-        else:
-            Rent_Percent_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=ser.index, columns=ser.index)
-
-        
-       
-        #import pdb;pdb.set_trace()
-        
-    # 5. Full time Percent
-    FT_Percent_matrix_dict = {} # keys are census_years
-    for data_year in census_years:
-        FT_df = pd.read_csv(f"{data_year}StateEmployment.csv", skiprows=9, skipfooter=8, engine='python').iloc[1:NO_OF_STATES+1,:-6] # filter out not applicable columns
-        FT_df.iloc[:, 0] = FT_df.iloc[:, 0].replace(StateAb_dict)
-
-        FT_df.loc[:,'FT%'] =  FT_df.loc[:,'Employed, worked full-time']/FT_df.iloc[:,1:].sum(axis=1)*100  # percentage of FTeds out of valid responses
-        FT_df = FT_df.iloc[:,[0,-1]].rename(columns={FT_df.columns[0]: "StateAb"})
-
-
-        ser = FT_df.set_index('StateAb')
-
-        similarity_matrix = 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY) / (ser.max() - ser.min()).iloc[0])
-
-        #import pdb;pdb.set_trace()
-
-        if binary:
-            FT_Percent_matrix_dict[data_year] = state_by_state_matrix(FT_df, FT_THRESHOLD)
-        else:
-            FT_Percent_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=ser.index, columns=ser.index)
-
-
-        
-        #import pdb;pdb.set_trace()
-
-    # 6. Professionals Percent
-    Prof_Percent_matrix_dict = {} # keys are census_years
-    for data_year in census_years:
-        Prof_df = pd.read_csv(f"{data_year}StateOccupation.csv", skiprows=9, skipfooter=8, engine='python').iloc[1:NO_OF_STATES+1,:-6] # filter out not applicable columns
-        Prof_df.iloc[:, 0] = Prof_df.iloc[:, 0].replace(StateAb_dict)
-
-        # correct for change in later censuses
-        Prof_df.loc[:,'Prof%'] =  Prof_df.loc[:,'Professionals']/Prof_df.iloc[:,1:].sum(axis=1)*100  # percentage of Profeds out of valid responses
-        Prof_df = Prof_df.iloc[:,[0,-1]].rename(columns={Prof_df.columns[0]: "StateAb"})
-
-
-        ser = Prof_df.set_index('StateAb')
-
-        similarity_matrix = 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY) / (ser.max() - ser.min()).iloc[0])
-
-        #import pdb;pdb.set_trace()
-
-        if binary:
-            Prof_Percent_matrix_dict[data_year] = state_by_state_matrix(Prof_df, PROFESSIONALS_THRESHOLD)
-        else:
-            Prof_Percent_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=ser.index, columns=ser.index)
-
-
-        
-        #import pdb;pdb.set_trace()
-
-    # 7. No Religion Percent
-    NR_Percent_matrix_dict = {} # keys are census_years
-    for data_year in census_years:
-        NR_df = pd.read_csv(f"{data_year}StateReligion.csv", skiprows=9, skipfooter=8, engine='python').iloc[1:NO_OF_STATES+1,:-4] # filter out not applicable columns
-        NR_df.iloc[:, 0] = NR_df.iloc[:, 0].replace(StateAb_dict)
-
-        # correct for change in later censuses
-        if data_year in ['2006','2011']:
-            NR_df.loc[:,'NR%'] =  NR_df.loc[:,'No Religion']/NR_df.iloc[:,1:].sum(axis=1)*100  # percentage of NReds out of valid responses
-        else:
-            NR_df = NR_df.iloc[:,:-1]
-            NR_df.loc[:,'NR%'] =  NR_df.iloc[:,-1]/NR_df.iloc[:,1:].sum(axis=1)*100  # percentage of NReds out of valid responses
-        
-        NR_df = NR_df.iloc[:,[0,-1]].rename(columns={NR_df.columns[0]: "StateAb"})
-
-
-        ser = NR_df.set_index('StateAb')
-
-        similarity_matrix = 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY) / (ser.max() - ser.min()).iloc[0])
-
-        #import pdb;pdb.set_trace()
-
-        if binary:
-            NR_Percent_matrix_dict[data_year] = state_by_state_matrix(NR_df, NR_THRESHOLD)
-        else:
-            NR_Percent_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=ser.index, columns=ser.index)
-
-        
-        #import pdb;pdb.set_trace()
-
-
-    # 8. Birthplace Percent
-    Australian_Percent_matrix_dict = {} # keys are census_years
-    for data_year in census_years:
-        Australian_df = pd.read_csv(f"{data_year}StateBirthAustralia.csv", skiprows=9, skipfooter=8, engine='python').iloc[1:NO_OF_STATES+1,:2] # only 2 cols - Australian Born freqs
-        Birthplace_df = pd.read_csv(f"{data_year}StateBirthCountry.csv", skiprows=9, skipfooter=8, engine='python').iloc[1:NO_OF_STATES+1,]
-        Australian_df.loc[:,'Australia'] = Australian_df.iloc[:,1]/ (Birthplace_df.loc[:,'Total'])*100 # include not_stated in here, as that is what 
-        Australian_df.iloc[:, 0] = Australian_df.iloc[:, 0].replace(StateAb_dict)
-
-        Australian_df = Australian_df.iloc[:,[0,2]]
-        Australian_df = Australian_df.iloc[:,[0,-1]].rename(columns={Australian_df.columns[0]: "StateAb"})
-
-
-        ser = Australian_df.set_index('StateAb')
-
-        similarity_matrix = 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY) / (ser.max() - ser.min()).iloc[0])
-
-        #import pdb;pdb.set_trace()
-
-        if binary:
-            Australian_Percent_matrix_dict[data_year] = state_by_state_matrix(Australian_df, AUS_THRESHOLD)
-        else:
-            Australian_Percent_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=ser.index, columns=ser.index)
-
-
-
-        
-        #import pdb;pdb.set_trace()
-
-    # 9. Mean Household Size
-    Mean_Hsize_matrix_dict = {} # keys are census_years
-    for data_year in census_years:
-        Hsize_df = pd.read_csv(f"{data_year}StateHouseholdSize.csv", skiprows=9, skipfooter=8, engine='python').iloc[1:NO_OF_STATES+1,:-2]
-
-        if data_year == '2006':
-            Hsize_df = Hsize_df.iloc[:,:-1]
-
-        #import pdb;pdb.set_trace()
-        sizes = Hsize_df.columns[1:].str.extract(r'(\d+)').astype(int).squeeze() # get only numeric parts of columns - remove 'person/s'
-        mean_size = (Hsize_df.iloc[:,1:] * sizes.values).sum(axis=1) / Hsize_df.iloc[:,1:].sum(axis=1)
-        Hsize_df.loc[:,'Mean_HSize'] = mean_size
-        Hsize_df.iloc[:, 0] = Hsize_df.iloc[:, 0].replace(StateAb_dict)
-
-        Hsize_df = Hsize_df.iloc[:,[0,-1]].rename(columns={Hsize_df.columns[0]: "StateAb"})
-
-        ser = Hsize_df.set_index('StateAb')
-
-        similarity_matrix = 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY) / (ser.max() - ser.min()).iloc[0])
-
-        #import pdb;pdb.set_trace()
-
-        if binary:
-            Mean_Hsize_matrix_dict[data_year] = state_by_state_matrix(Hsize_df, HSIZE_THRESHOLD)
-
-        else:
-            Mean_Hsize_matrix_dict[data_year] = pd.DataFrame(similarity_matrix, index=ser.index, columns=ser.index)
-
-
-
-
-        #import pdb;pdb.set_trace()
-
-    
-
-    # 10. Population
-    Population_matrix_dict = {}
-    State_populations = pd.read_csv("CensusPopulations.csv", skiprows=1) # columns are census years
-
-    for data_year in census_years:
-
-        ser = State_populations.loc[:,["StateAb",data_year]].set_index('StateAb')
-
-        pairwise_ratios = np.minimum(ser.values[:, None], ser.values).squeeze(axis=-1) / np.maximum(ser.values[:, None], ser.values).squeeze(axis=-1)
-
-        #import pdb;pdb.set_trace()
-
-        if binary:
-            Population_matrix_dict[data_year] = state_by_state_matrix_ratio(State_populations.loc[:,["StateAb",data_year]], POPULATION_RATIO)
-        else:
-            Population_matrix_dict[data_year] = pd.DataFrame(pairwise_ratios, index=ser.index, columns=ser.index)
-
-
-
-    list_of_similarity_matrix_dicts = [Median_Age_matrix_dict, Median_HIED_matrix_dict, Median_Mortgage_matrix_dict, Rent_Percent_matrix_dict, FT_Percent_matrix_dict, Prof_Percent_matrix_dict, NR_Percent_matrix_dict, Australian_Percent_matrix_dict, Mean_Hsize_matrix_dict, Population_matrix_dict]
-
-    return list_of_similarity_matrix_dicts
-
-
