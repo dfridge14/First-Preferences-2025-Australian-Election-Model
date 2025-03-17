@@ -39,8 +39,11 @@ start = time.time()
 
 FP_ID_COLUMNS = [3,4,5] # remove id columns
 START_OF_PREFS = 2 # Prefs begin on the 3th column (after div_nm,pp_nm) - deleted stateab to accomodate 2016 file
+BTL_ONLY_ELECTIONS = ['2007','2010','2013']
 
 NUM_OF_INDX_LETTERS = 4
+
+
 
 
 incumbent_advantage_dict = {5:4.68,4:4.5,3:6}
@@ -49,19 +52,15 @@ final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007
 
 
 is_redistribution = 0
-data_year = '2016'
+data_year = '2013'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 INCUMBENT_ADVANTAGE = incumbent_advantage_dict[FINAL_CANDIDATE_NO]
 
 NONINCUMBENT_DISADVANTAGE =  INCUMBENT_ADVANTAGE/(FINAL_CANDIDATE_NO-1)
 
 
-
-
-
-new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner']}
-# renaming is not yet updated to before 2016!!!!!!!!
-name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
+new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner','Gorton']}
+name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
 states_to_redistribute_dict = {'2022': ['NSW','VIC','WA','NT'],'2019': ['VIC','WA'],'2016':['ACT','NT','QLD','SA','TAS','VIC'],'2013':['ACT','NSW','WA'],'2010':['SA','VIC'],'2007':['NSW','NT','QLD','TAS','WA'],'2004':['ACT','NSW','QLD'],'2001':['QLD','SA','VIC']}
 
 
@@ -87,6 +86,7 @@ states_to_redistribute_dict = {'2022': ['NSW','VIC','WA','NT'],'2019': ['VIC','W
 # If div is in 1list,2list,3list & all for 4: allocate, aggregate and add to corresponding df to eventually write to csv.
 
 ######### Candidate Pairs stuff
+
 
 DOP_By_PP_Expand = pd.read_csv(f"{data_year}DOP_By_PP_Expand.csv", index_col=None)
 DOP_By_PP_Pref_Percent = pd.read_csv(f"{data_year}DOP_By_PP_Pref_Percent.csv", index_col=None)
@@ -406,9 +406,12 @@ def abbreviate_party_names(party_names_list, general_party_df):
                 party_abvs_list.append('FTCY')
             elif party == 'Australian Sex Party/Marijuana (HEMP) Party':
                 party_abvs_list.append('SXHM')
+            elif party == 'A.F.N.P.P.':
+                party_abvs_list.append('FNPP')
             else:
                 if general_party_df.loc[(general_party_df["PartyNm"] == party) | (general_party_df["RegisteredPartyAb"] == party),"PartyAb"].empty:
                     import pdb;pdb.set_trace()
+                    continue
                 party_abvs_list.append(general_party_df.loc[(general_party_df["PartyNm"] == party) | (general_party_df["RegisteredPartyAb"] == party),"PartyAb"].iloc[0])
         else:
             party_abvs_list.append('')
@@ -465,6 +468,18 @@ def get_2016_Senate_party_names(state, return_PartyAbs = False):
 
     return group_party_names
 
+def get_2007_2013_Senate_party_names(state):
+    First_prefs_senate = pd.read_csv(f'{data_year}SenateStateFirstPrefsByPollingPlace{state}.csv', skiprows = 1, skipfooter=1, index_col = None, engine = 'python').rename(columns={'DivisionNm':'div_nm','PollingPlaceID':'pp_id', 'PollingPlaceNm':'pp_nm','CandidateID':'cand_id','OrdinaryVotes':'Votes'})
+    SenateCandidates = First_prefs_senate[['Ticket','PartyNm']].drop_duplicates()
+
+    SenateCandidates['PartyNm'] = SenateCandidates['PartyNm'].replace('\x00', '', regex=True)
+
+    party_names_list = SenateCandidates.loc[~SenateCandidates['Ticket'].isin(['UG','ZZ']),'PartyNm'].drop_duplicates(ignore_index=True).tolist()
+
+    party_abvs = abbreviate_party_names(party_names_list, general_party_df)
+
+    return party_abvs
+
 
 def get_Senate_party_abvs_dict(data_year, div_to_state_dict, to_csv = False):
     # quickly extracts abvs from the senate without needing to read all of Formal Prefs
@@ -473,8 +488,18 @@ def get_Senate_party_abvs_dict(data_year, div_to_state_dict, to_csv = False):
     Formal_prefs_dict = {}
     states = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA']
 
+    if data_year in BTL_ONLY_ELECTIONS:
+        state_party_abvs_list = {}
+        for state in states:
+            state_party_abvs_list[state] = get_2007_2013_Senate_party_names(state)
+        
+        Senate_party_abvs_dict = {}
+        for div in div_to_state_dict.keys():
+            state = div_to_state_dict[div]
+            Senate_party_abvs_dict[div] = state_party_abvs_list[state]
+
     #### basic version to get the party names lists for cheap - read only 2 rows each!
-    if data_year == '2016':
+    elif data_year == '2016':
         state_party_abvs_list = {}
         for state in states:
             state_party_abvs_list[state] = get_2016_Senate_party_names(state, return_PartyAbs = True)
@@ -747,7 +772,11 @@ for state in states: # currently only 2016 onwards
     print(state)
     filename = f"{data_year}FormalPrefs{state}.csv"
 
-    if data_year == '2016':
+    if data_year in BTL_ONLY_ELECTIONS:
+        curr_Formal_prefs = pd.read_csv(f'{data_year}FormalPrefsSampledReduced{state}.csv', index_col = None)
+
+
+    elif data_year == '2016':
         curr_Formal_prefs = get_2016_Formal_Prefs(state)
 
         # convert to float 32
@@ -2802,13 +2831,14 @@ def amend_Formal_prefs_dict(Formal_prefs_dict, data_year, name_changes_year_dict
 
 def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, new_seats_list, name_changes_year_dict, div_to_state_dict, data_year, x=5):
     
-    Formal_prefs_dict = allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_party_df, Senate_party_abvs_dict)
+    if data_year not in BTL_ONLY_ELECTIONS:
+        Formal_prefs_dict = allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_party_df, Senate_party_abvs_dict)
 
     print("done", time.time() - start)
     # make list of senate parties for check if they match house ones
     Senate_parties_by_div =  pd.DataFrame(list(Senate_party_abvs_dict.items()), columns=["div_nm", "PartyAbList"])
     Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) # currently off
-    #import pdb;pdb.set_trace()
+    import pdb;pdb.set_trace()
 
     Incumbent_advantage = 0
     candidate_change_redistribution = 0

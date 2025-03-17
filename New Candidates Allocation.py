@@ -95,6 +95,9 @@ for year in election_years:
 import pdb;pdb.set_trace()
 
 all_parties = pd.read_csv('Grand_Party_Category_df_2004_2022.csv', index_col=None)
+all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['CLR'],'Ideo_Category':['ALP'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)
+all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['NGS'],'Ideo_Category':['Right'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)
+all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['ARTS'],'Ideo_Category':['Left'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)
 
 
 def find_house_not_in_previous_senate(House_parties_by_state_dict, Senate_parties_by_state_dict, year, state):
@@ -137,9 +140,8 @@ base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else 
 os.chdir(base_dir)
 
 
-new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner']}
-# renaming is not yet updated to before 2016!!!!!!!!
-name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
+new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner','Gorton']}
+name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
 states_to_redistribute_dict = {'2022': ['NSW','VIC','WA','NT'],'2019': ['VIC','WA'],'2016':['ACT','NT','QLD','SA','TAS','VIC'],'2013':['ACT','NSW','WA'],'2010':['SA','VIC'],'2007':['NSW','NT','QLD','TAS','WA'],'2004':['ACT','NSW','QLD'],'2001':['QLD','SA','VIC']}
 
 
@@ -383,26 +385,6 @@ def create_wide_DOP_dict(Div_DOP_dict, div_to_state_dict, DOP_type):
 
     return DOP_table_wide_dict
 
-
-data_year = '2013'
-
-# get state-to-div dict, adjusting for name changes
-div_to_state = pd.read_csv(f"{data_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
-div_to_state_dict = {name_changes_year_dict[data_year].get(div, div): div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
-
-# create wide format eliminaation_order_dict
-DOP_By_Division = pd.read_csv(f"{data_year}HouseDOPByDivision.csv", skiprows=1)
-DOP_By_Division.rename(columns={'DivisionNm': 'div_nm', 'CandidateID': 'cand_id'}, inplace=True)
-Div_DOP_dict = {div: group.drop(columns=['div_nm']) for div, group in DOP_By_Division[["div_nm","CountNumber","BallotPosition","cand_id", "PartyAb","CalculationType", "CalculationValue"]].groupby("div_nm")}
-
-Div_DOP_dict = {name_changes_year_dict[data_year].get(key, key): val for key, val in Div_DOP_dict.items()} # adjust for name changes
-
-Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, div_to_state_dict, DOP_type = "EliminationOrder")
-DOP_div_expand_dict = create_wide_DOP_dict(Div_DOP_dict, div_to_state_dict, DOP_type = "Expand")
-
-import pdb;pdb.set_trace()
-
-
 Ideo_Categories = ['Left','ALP','Centre','COAL','Right']
 all_parties_house = all_parties.loc[all_parties['Ideo_Category'].notna(),].iloc[:,:2].set_index('PartyAb') # excludes only senates, who don't yet have Ideology written
 party_category_dict = all_parties_house.to_dict()['Ideo_Category']
@@ -420,54 +402,159 @@ Right_parties = all_parties.loc[all_parties['Ideo_Category'] == 'Right','PartyAb
 Centre_parties = Centre_parties + ['IND'] # + ['NAFD']??? Or convert all NAFD to IND?
 
 
-Extra_polled_parties = {'2010':['GRN'],'2013':['GRN','PUP'],'2016':['GRN'],'2019':['GRN','ON','UAPP'],'2022':['GRN','ON','UAPP']}
-Polled_parties = COAL_parties + ALP_parties + Extra_polled_parties[data_year]
+Extra_polled_parties = {'2004':['DEM','GRN','HAN'],'2007':['GRN'],'2010':['GRN'],'2013':['GRN','PUP'],'2016':['GRN'],'2019':['GRN','ON','UAPP'],'2022':['GRN','ON','UAPP']}
+
+id_columns = ['Year', 'div_nm','State', 'Ideo_Category','Minor_Party','Num_parties']
+Ideology_Donation_df = pd.DataFrame(columns = id_columns + Ideo_Categories)     # later add state-by-state rundown
+
+    
+for data_year in ['2004','2007','2010','2013','2016','2019','2022']:
+
+    Polled_parties = COAL_parties + ALP_parties + Extra_polled_parties[data_year]
 
 
-Ideology_Donation_df = pd.DataFrame(columns = ['Year', 'div_nm','Ideo_Category','Minor_Party','Num_parties'] + Ideo_Categories)     # later add state-by-state rundown
+    # get state-to-div dict, adjusting for name changes
+    div_to_state = pd.read_csv(f"{data_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+    div_to_state_dict = {name_changes_year_dict[data_year].get(div, div): div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
+
+    # create wide format eliminaation_order_dict
+    DOP_By_Division = pd.read_csv(f"{data_year}HouseDOPByDivision.csv", skiprows=1)
+    DOP_By_Division.rename(columns={'DivisionNm': 'div_nm', 'CandidateID': 'cand_id'}, inplace=True)
+    Div_DOP_dict = {div: group.drop(columns=['div_nm']) for div, group in DOP_By_Division[["div_nm","CountNumber","BallotPosition","cand_id", "PartyAb","CalculationType", "CalculationValue"]].groupby("div_nm")}
+
+    Div_DOP_dict = {name_changes_year_dict[data_year].get(key, key): val for key, val in Div_DOP_dict.items()} # adjust for name changes
+
+    Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, div_to_state_dict, DOP_type = "EliminationOrder")
+    DOP_div_expand_dict = create_wide_DOP_dict(Div_DOP_dict, div_to_state_dict, DOP_type = "Expand")
+
+
+    for div in Elimination_order_dict.keys():
+        elim_order = Elimination_order_dict[div]
+        expand_df = DOP_div_expand_dict[div]
+
+        for i in reversed(range(3,len(elim_order))): # info not useful for top 3 parties? Or nonsense?
+            p = elim_order[i]
+            if (p not in (Polled_parties + ['IND'])) and not (p.startswith('IND')):
+                
+                if p not in party_category_dict.keys():
+                    print(p,div,elim_order, data_year)
+                    continue
+                Cat_p = party_category_dict[p]
+
+                # add expand values to row (average if needed)
+
+                # 1. get correct row of expand df
+                expand_row = expand_df.loc[expand_df['CountNumber'] == len(elim_order) - i,]
+
+                new_row = pd.DataFrame([{col: '' if col in id_columns else [] for col in id_columns + Ideo_Categories}])
+                new_row['Year'] = data_year
+                new_row['div_nm'] = div
+                new_row['State'] = div_to_state_dict[div]
+                new_row['Ideo_Category'] = Cat_p
+                new_row['Num_parties'] = (expand_row.iloc[:,1:] > 0).sum(axis=1).iloc[0] + 1 
+                new_row['Minor_Party'] = p
+
+                for don_p in expand_row.columns[1:]:
+
+                    expand_prop = expand_row[don_p].iloc[0]                    
+
+                    if expand_prop > 0 and not don_p.startswith('IND'): # don't infer from INDs - they come last!
+
+                        if don_p not in party_category_dict.keys():
+                            print(don_p,div,elim_order, data_year)
+                            continue
+
+                        new_row[party_category_dict[don_p]].iloc[0].append(expand_prop)
+                        
+                    #import pdb;pdb.set_trace()
+
+                Ideology_Donation_df = pd.concat([Ideology_Donation_df,new_row], ignore_index=True)
+        #import pdb;pdb.set_trace()
+
+    #import pdb;pdb.set_trace()
+
+Ideology_Donation_df.iloc[:, -5:] = Ideology_Donation_df.iloc[:, -5:].map(lambda x: round(sum(x) / len(x),6) if isinstance(x, list) and x else np.nan)
+import pdb;pdb.set_trace()
+
+Ideology_Donation_df.to_csv('Ideology_Donation_df.csv', index=False)
+
+df = Ideology_Donation_df.copy()
+
+# perform row by row - not sure how to apply in vectorised manner.
+
+def get_matching_average(row, df, Ideo_Categories, year_prev, div_match, num_match): # written by ChatGPT
+    # Filtering conditions:
+    if year_prev:
+        year_condition = df['Year'] == str(int(row['Year']) - 3)  # Year is 3 smaller than current row's Year
+    else:
+        year_condition = (df['Year'] != str(int(row['Year']) - 3)) & (df['Year'] != row['Year'])
+
+    div_condition = df['div_nm'] == row['div_nm'] if div_match else ((df['div_nm'] != row['div_nm']) & (df['State'] != row['State']))
+    num_condition = (np.abs(df['Num_parties'] - row['Num_parties']) <= 1) if num_match else (np.abs(df['Num_parties'] - row['Num_parties']) > 1)
+
+    matching_rows = df[year_condition & div_condition & num_condition & (df['Ideo_Category'] == row['Ideo_Category'])][Ideo_Categories]
+    
+    # If matching rows exist, return their average (excluding current row)
+    if len(matching_rows) > 0:
+        #import pdb;pdb.set_trace()
+
+        return matching_rows.mean()  # You can choose to apply this to other columns too
+    else:
+        return pd.Series(np.nan, index=Ideo_Categories)
+
+# previous year, same div/Num
+for num_match in [1,0]:
+    for div_match in [1,0]:
+        for year_prev in [1,0]:
+            X_num = f'_X{1 + 4*(1-num_match) + 2*(1 - div_match) + (1 - year_prev)}'  # label them as X_1...X_8 according to groupings
+
+            curr_match = df.apply(lambda row: get_matching_average(row, df, Ideo_Categories, year_prev, div_match, num_match), axis=1)
+            curr_match[X_num] = curr_match.count(axis=1)
+
+            df = df.join(curr_match, rsuffix = f'{X_num}')
+
+X_cols = ['_X1','_X2','_X3','_X4','_X5','_X6','_X7','_X8']
+X_weights = [1,0.5,0.5,0.25,0.125,0.0625,0.0625,0.03125] # ad-hoc weights, improve with model in future
+weight_df_ids = (df[X_cols]>0)*X_weights
+weight_df = weight_df_ids.div(weight_df_ids.sum(axis=1), axis=0)
+
+def explode_column(weight_df, col, Ideo_Categories):
+    exploded_df = pd.DataFrame()
+    cols = Ideo_Categories + ['']
+    for i in range(6):  # 6 new columns
+        exploded_df[f'{cols[i]}{col}'] = weight_df[col]
+    return exploded_df
 
 import pdb;pdb.set_trace()
 
-for div in Elimination_order_dict.keys():
-    elim_order = Elimination_order_dict[div]
-    expand_df = DOP_div_expand_dict[div]
+exploded_weight_dfs = []
+for col in weight_df.columns:
+    exploded_weight_dfs.append(explode_column(weight_df, col, Ideo_Categories))
+exploded_weight_df = pd.concat(exploded_weight_dfs, axis=1)
 
-    elim_order = ['IND' if x.startswith('IND') else x for x in elim_order]
-    expand_df.columns = expand_df.columns.where(~expand_df.columns.str.startswith("IND"), 'IND')
-
-    for i in reversed(range(3,len(elim_order))): # info not useful for top 3 parties? Or nonsense?
-        p = elim_order[i]
-        if p not in (Polled_parties + ['IND']):
-            
-
-            Cat_p = party_category_dict[p]
-
-            # add expand values to row (average if needed)
-
-            # 1. get correct row of expand df
-            expand_row = expand_df.loc[expand_df['CountNumber'] == len(elim_order) - i,]
-
-            new_row = pd.DataFrame([{col: '' if col in ['Year', 'div_nm','Ideo_Category','Minor_Party','Num_parties'] else [] for col in ['Year', 'div_nm','Ideo_Category','Minor_Party','Num_parties'] + Ideo_Categories}])
-            new_row['Year'] = data_year
-            new_row['div_nm'] = div
-            new_row['Ideo_Category'] = Cat_p
-            new_row['Num_parties'] = (expand_row.iloc[:,1:] > 0).sum(axis=1).iloc[0] + 1 
-            new_row['Minor_Party'] = p
-
-            for don_p in expand_row.columns[1:]:
-
-                expand_prop = expand_row[don_p].iloc[0]
-
-                if expand_prop > 0: # not yet excluded
-                    new_row[party_category_dict[don_p]].iloc[0].append(expand_prop)
-                    
-                #import pdb;pdb.set_trace()
-
-            Ideology_Donation_df = pd.concat([Ideology_Donation_df,new_row], ignore_index=True)
-    import pdb;pdb.set_trace()
-
-
-Ideology_Donation_df.iloc[:, -5:] = Ideology_Donation_df.iloc[:, -5:].applymap(lambda x: sum(x) / len(x) if isinstance(x, list) and x else 0)
 import pdb;pdb.set_trace()
 
-### Fix up 2 INDs!!! Aargh! Maybe treat INDS as separates, just adjust whenever indexing from party_cat_dict???
+weighted_proportions = df.iloc[:,11:] * exploded_weight_df
+weighted_proportions.columns = [col[:-3] for col in weighted_proportions.columns]
+final_proportions = weighted_proportions.T.groupby(weighted_proportions.columns).sum().T[Ideo_Categories] # df of 6 cols, last is ''
+
+import pdb;pdb.set_trace()
+
+true_proportions = Ideology_Donation_df.copy()
+true_proportions.iloc[:,-5:] -= final_proportions.iloc
+true_proportions.iloc[:,-5:].std()
+true_proportions.iloc[:,-5:].mean()
+
+Ideology_Donation_Estimate_df = Ideology_Donation_df.join(final_proportions, rsuffix = '_est')
+Ideology_Donation_Estimate_df.to_csv('Ideology_Donation_Estimate_df.csv', index=False)
+
+
+import pdb;pdb.set_trace()
+
+
+
+
+
+
+# develop weighting by year, div, state, num cands
+# 1 to same div last year; 0.5 to same div other year OR same state, last year

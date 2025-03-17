@@ -184,14 +184,23 @@ def sample_Formal_prefs(data_year,state):
             # Combine results
             final_sampled_df = pd.concat(sampled_dfs, ignore_index=True)
 
-            final_sampled_df.to_csv(f"{data_year}FormalPrefsSampledReduced{state}.csv", index=False)
+            #final_sampled_df.to_csv(f"{data_year}FormalPrefsSampledReduced{state}.csv", index=False)
 
     return final_sampled_df
 
 
 Formal_prefs = {}
+Party_names = pd.DataFrame(columns = ['State','div_nm','Ticket'])
+
 for state in states:
     Formal_prefs[state] = sample_Formal_prefs(data_year,state)
+
+    First_prefs_senate = pd.read_csv(f'{data_year}SenateStateFirstPrefsByPollingPlace{state}.csv', skiprows = 1, skipfooter=1, index_col = None, engine = 'python').rename(columns={'DivisionNm':'div_nm','PollingPlaceID':'pp_id', 'PollingPlaceNm':'pp_nm','CandidateID':'cand_id','OrdinaryVotes':'Votes'})
+    First_prefs_senate = First_prefs_senate.groupby(['div_nm','Ticket'], as_index=False)['Votes'].agg('sum')
+    First_prefs_senate['Ticket'] = First_prefs_senate['Ticket'].str.strip()
+    import pdb;pdb.set_trace()
+
+
 
 import pdb;pdb.set_trace()
 

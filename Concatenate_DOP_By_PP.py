@@ -1,12 +1,18 @@
 import pandas as pd
 import glob
 import os
+from pathlib import Path
 
-os.chdir('C:\\Dania\\2024\\Australian Election') 
 
-data_year = '2016'
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+os.chdir(base_dir)
 
-csv_files = glob.glob(f"C:/Dania/2024/Australian Election/DOP_By_PP_{data_year}/*.csv")
+
+data_year = '2013'
+
+directory = Path(f"C:/Dania/2024/Australian Election/DOP_By_PP_{data_year}") if os.name == "nt" else Path.home() / f"Australian Election/DOP_By_PP_{data_year}"
+
+csv_files = glob.glob(str(f"{directory}/*.csv"))
 DOP_By_PP = pd.concat((pd.read_csv(f, index_col = None, skiprows=1) for f in csv_files), ignore_index=True)
 
 import pdb;pdb.set_trace()
