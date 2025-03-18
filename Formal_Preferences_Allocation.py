@@ -52,7 +52,7 @@ final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007
 
 
 is_redistribution = 0
-data_year = '2013'
+data_year = '2007'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 INCUMBENT_ADVANTAGE = incumbent_advantage_dict[FINAL_CANDIDATE_NO]
 
@@ -64,7 +64,8 @@ name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman
 states_to_redistribute_dict = {'2022': ['NSW','VIC','WA','NT'],'2019': ['VIC','WA'],'2016':['ACT','NT','QLD','SA','TAS','VIC'],'2013':['ACT','NSW','WA'],'2010':['SA','VIC'],'2007':['NSW','NT','QLD','TAS','WA'],'2004':['ACT','NSW','QLD'],'2001':['QLD','SA','VIC']}
 
 
-#check_house_senate_discrepancies(data_year) # early check witthout needing to load Formal Preferences
+
+# check_house_senate_discrepancies(data_year, name_changes_year_dict) # early check without needing to load Formal Preferences - must add [data_year] to follow name_changes_year_dict if called here
 
 
 # Game plan:
@@ -938,7 +939,26 @@ def allocate_Formal_preferences_to_First_Preferences(Formal_prefs_dict, general_
 
     return Formal_prefs_dict
 
+def allocate_votes_2007_2013(df, allocation_set):
+    ### amended version of allocate_votes that accounts for the pre-formatted structure of sampled BTL Formal Preferences 
+    allocated_votes = pd.DataFrame(index=df.index, columns=['Vote'])
 
+    BTL_preferences = df[allocation_set]     # Filter the row to only include the candidates of interest
+    allocated_votes.loc[:,'Vote'], BTL_non_unique_min = find_earliest_preference_id(BTL_preferences)
+    duplicates = allocated_votes.loc[:,'Vote'].isna() & BTL_non_unique_min
+    duplicate_indices = duplicates.loc[duplicates].index # return indices where duplicates == True
+
+    return allocated_votes, duplicate_indices
+
+def allocate_votes_duplicates_2007_2013(df, allocation_set):
+        
+        BTL_dup_preferences = df[allocation_set]     # Filter the row to only include the candidates of interest
+        duplicate_votes_series = BTL_dup_preferences.apply(lambda row: list(row[row == row.min()].index), axis = 1)
+
+        if not duplicate_votes_series.empty:
+            import pdb;pdb.set_trace()
+
+        return duplicate_votes_series
 
 list1 = []
 list2 = []
@@ -964,7 +984,7 @@ Booth_name_pp_id['div_nm'] = Booth_name_pp_id['div_nm'].replace(name_changes_yea
 # Booth_name_pp_id = First_Prefs_by_PP_Complete.iloc[:,:3].drop_duplicates()
 
 
-def allocate_formal_preferences_to_allocation_set(Formal_prefs_div, allocation_set, by_pp_id = False, as_percent = True):
+def allocate_formal_preferences_to_allocation_set(data_year, Formal_prefs_div, allocation_set, by_pp_id = False, as_percent = True):
 
     Final_allocated_votes = pd.DataFrame(index=Formal_prefs_div.index, columns=allocation_set, data = 0.0) # df of allocated votes for each candidate, should preserve order of df
     Final_allocated_votes["First_Preferences"] = Formal_prefs_div["Vote"]
@@ -977,8 +997,14 @@ def allocate_formal_preferences_to_allocation_set(Formal_prefs_div, allocation_s
             Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party, party] = 1.0 # put in a 1 into the party column while preserving index
 
         else:
-            allocated_votes_subsection, duplicate_indices_subsection = allocate_votes(formal_subsection, allocation_set)
+            if data_year in BTL_ONLY_ELECTIONS:
+                allocated_votes_subsection, duplicate_indices_subsection = allocate_votes_2007_2013(formal_subsection, allocation_set)
+            else:
+                allocated_votes_subsection, duplicate_indices_subsection = allocate_votes(formal_subsection, allocation_set)
+
             Subsection_final_votes = Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party] # just working with this subsection
+
+            #import pdb;pdb.set_trace()
 
             # Add allocation preferences where clear
             mask = pd.get_dummies(allocated_votes_subsection.loc[allocated_votes_subsection["Vote"].notna(), "Vote"])
@@ -988,18 +1014,24 @@ def allocate_formal_preferences_to_allocation_set(Formal_prefs_div, allocation_s
             # Add duplicate preferences 
             duplicate_for_party_df = formal_subsection[formal_subsection.index.isin(duplicate_indices_subsection)].copy()
 
-            # iteratively add duplicate votes proportionate to # of cnadidates duplicated
-            duplicate_for_party_df["Vote"] = allocate_votes_duplicates(duplicate_for_party_df, allocation_set) # get series of candidates for each duplicate votes
-            
-            Subsection_final_votes = Subsection_final_votes.astype({col: "float64" for col in Subsection_final_votes.columns[:-1]})
+            # iteratively add duplicate votes proportionate to # of candidates duplicated - if there are any duplicates!
+            if not duplicate_for_party_df.empty:
+                if data_year in BTL_ONLY_ELECTIONS:
+                    duplicate_for_party_df["Vote"] = allocate_votes_duplicates_2007_2013(duplicate_for_party_df, allocation_set)
+                else:
+                    duplicate_for_party_df["Vote"] = allocate_votes_duplicates(duplicate_for_party_df, allocation_set) # get series of candidates for each duplicate votes
+                
+                Subsection_final_votes = Subsection_final_votes.astype({col: "float64" for col in Subsection_final_votes.columns[:-1]})
 
-            for row in duplicate_for_party_df.index:
-                duplicate_vote_list = duplicate_for_party_df.loc[duplicate_for_party_df.index == row,"Vote"].iloc[0] # iloc makes it a list
-                for vote in duplicate_vote_list:
-                    Subsection_final_votes.loc[Subsection_final_votes.index==row, vote] = 1/len(duplicate_vote_list)
+                for row in duplicate_for_party_df.index:
+                    duplicate_vote_list = duplicate_for_party_df.loc[duplicate_for_party_df.index == row,"Vote"].iloc[0] # iloc makes it a list
+                    for vote in duplicate_vote_list:
+                        Subsection_final_votes.loc[Subsection_final_votes.index==row, vote] = 1/len(duplicate_vote_list)
+
+            #import pdb;pdb.set_trace()
             
 
-            # handle remainingg nan values - assign votes proportional to how rest of their subsection voted
+            # handle remaining nan values - assign votes proportional to how rest of their subsection voted
             Subsection_final_votes = Subsection_final_votes.drop(columns=['First_Preferences'])
             Party_preferences_proportions = Subsection_final_votes.sum() / np.sum(Subsection_final_votes.sum()) # row of proportions
             mask = allocated_votes_subsection["Vote"].isna() & ~allocated_votes_subsection.index.isin(duplicate_indices_subsection)
@@ -1014,8 +1046,10 @@ def allocate_formal_preferences_to_allocation_set(Formal_prefs_div, allocation_s
             # Select numeric columns correctly
             numeric_columns = Final_allocated_votes.select_dtypes(include=['number']).columns  
 
-            # Convert the selected numeric columns to float (ensuring proper data types)
+            # Convert the selected numeric columns to float (ensuring proper data types) - CLEAN UP - THIS SHOULDN'T HAVE TO BE DONE EVERY TIME!!!
             Final_allocated_votes[numeric_columns] = Final_allocated_votes[numeric_columns].astype(float)
+
+            #import pdb;pdb.set_trace()
 
             Final_allocated_votes.loc[Final_allocated_votes["First_Preferences"] == party,Final_allocated_votes.columns[:-1]] = Subsection_final_votes.values # fill out full table
 
@@ -1051,7 +1085,6 @@ def allocate_formal_preferences_to_allocation_set(Formal_prefs_div, allocation_s
     return Final_allocated_votes_aggregated_df
 
 
-
 def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, application_dict, by_pp_id = False, as_percent = True):
     #### application_dict is one of 1,2,3 (incumbency_advantage),4
 
@@ -1071,7 +1104,7 @@ def allocate_Formal_prefs_by_1234(Formal_prefs_dict, Senate_party_abvs_dict, app
                 allocation_set.append(Formal_prefs_dict[div].columns[START_OF_PREFS:START_OF_PREFS+len(Senate_party_abvs_dict[div])][i])  # Append the corresponding group 'letter'
        
         # allocate to allocation_set (already converted to percentages!)
-        Final_allocated_pcts_aggregated_dict[div] = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[div], allocation_set, by_pp_id = False, as_percent = True)
+        Final_allocated_pcts_aggregated_dict[div] = allocate_formal_preferences_to_allocation_set(data_year, Formal_prefs_dict[div], allocation_set, by_pp_id = False, as_percent = True)
 
         #Final_allocated_pcts_aggregated_dict[div].iloc[:, 1+by_pp_id:] = Final_allocated_pcts_aggregated_dict[div].iloc[:, 1+by_pp_id:].div(Final_allocated_pcts_aggregated_dict[div].drop(columns=['div_nm','pp_id'], errors='ignore').sum(axis=1), axis=0)
 
@@ -1131,7 +1164,7 @@ def allocate_Formal_prefs_complex(Formal_prefs_dict, Senate_party_abvs_dict, red
             allocation_set = convert_partyab_to_senate_group_names(allocation_abvs_list, Formal_prefs_dict, Senate_party_abvs_dict, giver_div)
 
             # allocate to allocation_set and convert to percentages - BE CAREFUL TO DO IT PER ROW AND NOT TOTALLY
-            Final_allocated_pcts_aggregated = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[giver_div], allocation_set, by_pp_id = True, as_percent = True)
+            Final_allocated_pcts_aggregated = allocate_formal_preferences_to_allocation_set(data_year, Formal_prefs_dict[giver_div], allocation_set, by_pp_id = True, as_percent = True)
 
             c1_m_c2_dict[col_name] = Final_allocated_pcts_aggregated.iloc[:,1:].set_index("pp_id").sort_index()
 
@@ -1485,7 +1518,7 @@ def independent_redistribution_reduce(div, Formal_prefs_dict, DOP_By_PP_Expand_w
     allocation_set = convert_partyab_to_senate_group_names(senate_allocation_list, Formal_prefs_dict, Senate_party_abvs_dict, div)
 
     #import pdb;pdb.set_trace()
-    senate_votes = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[div], allocation_set, by_pp_id = True, as_percent = True).set_index('pp_id').sort_index().iloc[:,1:] # only data columns
+    senate_votes = allocate_formal_preferences_to_allocation_set(data_year, Formal_prefs_dict[div], allocation_set, by_pp_id = True, as_percent = True).set_index('pp_id').sort_index().iloc[:,1:] # only data columns
     senate_votes = senate_votes.div(senate_votes.sum(axis=1), axis=0)*100
     
     senate_votes.columns = senate_allocation_list
@@ -1574,7 +1607,7 @@ def independent_redistribution_expand(div, Formal_prefs_dict, DOP_div_expand_dic
     allocation_set = convert_partyab_to_senate_group_names(senate_allocation_list, Formal_prefs_dict, Senate_party_abvs_dict, div)
 
     #import pdb;pdb.set_trace()
-    senate_votes = allocate_formal_preferences_to_allocation_set(Formal_prefs_dict[div], allocation_set, by_pp_id = False, as_percent = True).iloc[:,1:] # only data columns
+    senate_votes = allocate_formal_preferences_to_allocation_set(data_year, Formal_prefs_dict[div], allocation_set, by_pp_id = False, as_percent = True).iloc[:,1:] # only data columns
     senate_votes = senate_votes.div(senate_votes.sum(axis=1), axis=0)*100
     
     senate_votes.columns = senate_allocation_list
@@ -2429,7 +2462,8 @@ def reduce_to_Omnipresent_parties(Formal_prefs_dict, Elimination_order_dict, Sen
 def check_house_senate_discrepancies(data_year, name_changes_year_dict):
 
     #directory = f"C:/Dania/2024/Australian Election/SenateVotesByPP{data_year}"
-    directory = Path(f"C:/Dania/2024/Australian Election/SenateVotesByPP{data_year}") if os.name == "nt" else Path.home() / f"Australian Election/SenateVotesByPP{data_year}"
+    if data_year not in BTL_ONLY_ELECTIONS:
+        directory = Path(f"C:/Dania/2024/Australian Election/SenateVotesByPP{data_year}") if os.name == "nt" else Path.home() / f"Australian Election/SenateVotesByPP{data_year}"
     #import pdb;pdb.set_trace()
 
     
@@ -2819,6 +2853,32 @@ def amend_Formal_prefs_dict(Formal_prefs_dict, data_year, name_changes_year_dict
             lender_FPs.loc[:,'pp_nm'] = borrower
             lender_FPs.loc[:,'div_nm'] = 'Werriwa'
             Formal_prefs_dict["Werriwa"] = pd.concat([Formal_prefs_dict["Werriwa"],lender_FPs], ignore_index=True)
+
+    elif data_year == '2013':
+
+        FP_div = Formal_prefs_dict['Canberra']
+        lender = 'Tuggeranong CANBERRA PPVC'
+        borrower = 'Tuggeranong FRASER PPVC'
+
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        lender_FPs.loc[:,'pp_nm'] = borrower
+        lender_FPs.loc[:,'div_nm'] = 'Fenner'
+        Formal_prefs_dict["Fener"] = pd.concat([Formal_prefs_dict["Fenner"],lender_FPs], ignore_index=True)
+
+    elif data_year == '2010':
+        FP_div = Formal_prefs_dict["Franklin"]
+        lender = 'Hobart FRANKLIN PPVC'
+        borrower = 'Divisional Office (PREPOLL)'
+
+        lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
+        lender_FPs.loc[:,'pp_nm'] = borrower
+        Formal_prefs_dict["Franklin"] = pd.concat([FP_div,lender_FPs], ignore_index=True)
+
+    # 2013:
+    # Only Tuggeranong FRASER PPVC (now Fenner); replace with Tuggeranong CANBERRA PPVC
+
+    # 2010:
+    # Franklin  Divisional Office (PREPOLL)            3           0.0        3.0        inf - arbitrarily replace with Hobart FRANKLIN PPVC
     
     #import pdb;pdb.set_trace()
 
@@ -2842,7 +2902,8 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
     Incumbent_advantage = 0
     candidate_change_redistribution = 0
-    electorate_similarity = 1
+    electorate_similarity = 0
+    new_candidates_allocation = 1
 
     if Incumbent_advantage:
 
@@ -2885,11 +2946,12 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
         Formal_prefs_dict = amend_Formal_prefs_dict(Formal_prefs_dict, data_year, name_changes_year_dict, all_states=True)
 
-
         Omnipresent_parties = ['LP','ALP','GRN'] # Only 3 because Palmer is not in NT Senate in 2022! Aargh
 
         transformed_votes = reduce_to_Omnipresent_parties(Formal_prefs_dict, Elimination_order_dict, Senate_parties_by_div, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, Incumbency_by_div, new_seats_list, Omnipresent_parties, name_changes_year_dict, div_to_state_dict, data_year)
 
+    if new_candidates_allocation:
+        1
 
     return Final_allocated_pcts_aggregated_dict, Final_x_HS_df
 

@@ -21,7 +21,7 @@ sys.excepthook = exception_handler
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-data_year = "2016"
+data_year = "2013"
 SA1_year_dict = {'2022':'2016','2019':'2016','2016':'2011','2013':'2011','2010':'2006'}
 
 
@@ -30,9 +30,31 @@ SA1_year_dict = {'2022':'2016','2019':'2016','2016':'2011','2013':'2011','2010':
 # xxxxFirstPrefsByPPComplete - long form df or FP votes per candidate per polling booth
 # xxxxVotesBySA1 - file of raw Votes By SA1 from the AEC
 
+def add_important_missing_coordinates(df, data_year):
+    # comprehensive for 2007-2022! These were worked out later in the script, but implemented here for clarity
+
+    if data_year == '2016':
+        df.loc[df['pp_id']==70857,['Lat','Long']] = -32.127916, 115.8557456
+        df.loc[df['pp_id']==65625,['Lat','Long']] = -34.06627, 150.815138
+
+    if data_year == '2013':
+        df.loc[(df['Lat'].isna()) & (df['Booth_type']!= 'Other'),['Lat','Long']] = -33.916867,151.0310
+
+    if data_year == '2010':
+        df.loc[df['pp_id']==58669,['Lat','Long']] = -33.731,151.00798
+        df.loc[df['pp_id']==58704,['Lat','Long']] = -27.9702, 153.414
+        df.loc[df['pp_id']==58782,['Lat','Long']] = -37.81635, 144.95701
+        df.loc[df['pp_id']==58803,['Lat','Long']] = -37.8103, 144.97
+        df.loc[df['pp_id']==58698,['Lat','Long']] = -28.0902, 153.451
+
+    import pdb;pdb.set_trace()
+
+
+    return df
 
 PP_data = pd.read_csv(f'{data_year}GeneralPollingPlaces.csv',skiprows=1, index_col = None)
 PP_data = PP_data.iloc[:,[2,3,4,5,-2,-1]].rename(columns={'DivisionNm': 'div_nm', "PollingPlaceID": "pp_id", "PollingPlaceTypeID": "pp_type", "PollingPlaceNm": "pp_nm", "Latitude": "Lat", "Longitude": "Long"})
+
 
 PPVC_ids = PP_data.loc[(PP_data["pp_type"]==5) & (~PP_data["pp_nm"].str.startswith("EAV")),"pp_id"].unique() # includes 22 with no votes
 PB_ids = PP_data.loc[PP_data["pp_type"]==1,"pp_id"].unique() # includes 6 with no votes
@@ -102,11 +124,11 @@ PP_data.loc[PP_data['Lat'].isna() & (PP_data['Booth_type']!='Other'),['Lat','Lon
 
 # check if remaining unlocated ones have any votes! Happens at the end using formatted FPbyPP
 
+PP_data = add_important_missing_coordinates(PP_data, data_year)
+
+
 
 import ipdb;ipdb.set_trace()
-
-
-# ensure all PB and PPVC have coordinates, if not, match with other iterations of the same pp
 
 
 
@@ -197,6 +219,29 @@ FP_By_PP_Complete = FP_By_PP_grouped.merge(FP_By_PP_merged.drop(columns=['votes'
 FP_By_PP_Complete.drop('BallotPosition', axis=1, inplace=True)
 import ipdb;ipdb.set_trace()
 
+# fix up any missing locations!
+if not FP_By_PP_Complete.loc[(FP_By_PP_Complete['Lat'].isna()) & (FP_By_PP_Complete['Booth_type']!= 'Other'),].empty:
+    print(FP_By_PP_Complete.loc[(FP_By_PP_Complete['Lat'].isna()) & (FP_By_PP_Complete['Booth_type']!= 'Other'),])
+
+    # initially used to detect missing PP coordinates! But now clearly redundant.
+
+    if data_year == '2016':
+        FP_By_PP_Complete.loc[FP_By_PP_Complete['pp_id']==70857,['Lat','Long']] = -32.127916, 115.8557456
+        FP_By_PP_Complete.loc[FP_By_PP_Complete['pp_id']==65625,['Lat','Long']] = -34.06627, 150.815138
+
+    if data_year == '2013':
+        FP_By_PP_Complete.loc[(FP_By_PP_Complete['Lat'].isna()) & (FP_By_PP_Complete['Booth_type']!= 'Other'),['Lat','Long']] = -33.916867,151.0310
+
+    if data_year == '2010':
+        FP_By_PP_Complete.loc[FP_By_PP_Complete['pp_id']==58669,['Lat','Long']] = -33.731,151.00798
+        FP_By_PP_Complete.loc[FP_By_PP_Complete['pp_id']==58704,['Lat','Long']] = -27.9702, 153.414
+        FP_By_PP_Complete.loc[FP_By_PP_Complete['pp_id']==58782,['Lat','Long']] = -37.81635, 144.95701
+        FP_By_PP_Complete.loc[FP_By_PP_Complete['pp_id']==58803,['Lat','Long']] = -37.8103, 144.97
+        FP_By_PP_Complete.loc[FP_By_PP_Complete['pp_id']==58698,['Lat','Long']] = -28.0902, 153.451
+
+
+
+    import ipdb;ipdb.set_trace()
 
 
 
@@ -209,10 +254,11 @@ FP_By_PP_Complete.to_csv(f'{data_year}FirstPrefsByPPComplete.csv', index = False
 
 SA1_By_PP_full = pd.read_csv(f"{data_year}VotesBySA1.csv")
 
-SA1_col_name = 'ccd_id' if data_year=='2022' else 'SA1_id'
+SA1_col_name = 'ccd_id' if data_year in ['2022','2013'] else 'SA1_id'
+last_col = "votes" if data_year != '2013' else 'count'
 
-SA1_By_PP = SA1_By_PP_full[["div_nm",SA1_col_name,"pp_id","votes"]]
-SA1_By_PP = SA1_By_PP.rename(columns={SA1_col_name: f'SA1_CODE{SA1_year_dict[data_year][-2:]}'})
+SA1_By_PP = SA1_By_PP_full[["div_nm",SA1_col_name,"pp_id",last_col]]
+SA1_By_PP = SA1_By_PP.rename(columns={SA1_col_name: f'SA1_CODE{SA1_year_dict[data_year][-2:]}', last_col:'votes'})
 
 # convert Other pp ids to 0
 SA1_By_PP_merged = SA1_By_PP.merge(PP_data[['pp_id','Booth_type']],on = 'pp_id',how='left')

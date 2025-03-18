@@ -154,7 +154,7 @@ def get_BTL_Prefs_First_Prefs(data_year):
 #get_BTL_Prefs_First_Prefs(data_year)
 
 def sample_rows(Ticket, Votes, div_nm, pp_id,pp_nm, shared_dict):
-    return shared_dict[Ticket].sample(n=Votes, replace=True).assign(First_Pref=Ticket, div_nm = div_nm,pp_id=pp_id,pp_nm=pp_nm)
+    return shared_dict[Ticket].sample(n=Votes, replace=True).assign(Vote=Ticket, div_nm = div_nm,pp_id=pp_id,pp_nm=pp_nm)
 
 def sample_Formal_prefs(data_year,state):
     BTL_first_prefs = pd.read_csv(f"{data_year}BTLFirstPrefs{state}.csv", index_col = None)
@@ -184,7 +184,11 @@ def sample_Formal_prefs(data_year,state):
             # Combine results
             final_sampled_df = pd.concat(sampled_dfs, ignore_index=True)
 
-            #final_sampled_df.to_csv(f"{data_year}FormalPrefsSampledReduced{state}.csv", index=False)
+            desired_order = ['div_nm', 'pp_nm'] + [col for col in final_sampled_df.columns if col not in ['div_nm', 'pp_id', 'pp_nm']]
+            final_sampled_df = final_sampled_df[desired_order]
+
+            final_sampled_df.to_csv(f"{data_year}FormalPrefsSampledReduced{state}.csv", index=False)
+            print("Done", state)
 
     return final_sampled_df
 
@@ -192,13 +196,19 @@ def sample_Formal_prefs(data_year,state):
 Formal_prefs = {}
 Party_names = pd.DataFrame(columns = ['State','div_nm','Ticket'])
 
+
+def get_2007_2013_Senate_party_names(state):
+    First_prefs_senate = pd.read_csv(f'{data_year}SenateStateFirstPrefsByPollingPlace{state}.csv', skiprows = 1, skipfooter=1, index_col = None, engine = 'python').rename(columns={'DivisionNm':'div_nm','PollingPlaceID':'pp_id', 'PollingPlaceNm':'pp_nm','CandidateID':'cand_id','OrdinaryVotes':'Votes'})
+    SenateCandidates = First_prefs_senate[['Ticket','PartyNm']].drop_duplicates()
+
+    party_names_list = SenateCandidates.loc[~SenateCandidates['Ticket'].isin(['UG','ZZ']),'PartyNm'].drop_duplicates(ignore_index=True).tolist()
+
 for state in states:
     Formal_prefs[state] = sample_Formal_prefs(data_year,state)
 
     First_prefs_senate = pd.read_csv(f'{data_year}SenateStateFirstPrefsByPollingPlace{state}.csv', skiprows = 1, skipfooter=1, index_col = None, engine = 'python').rename(columns={'DivisionNm':'div_nm','PollingPlaceID':'pp_id', 'PollingPlaceNm':'pp_nm','CandidateID':'cand_id','OrdinaryVotes':'Votes'})
     First_prefs_senate = First_prefs_senate.groupby(['div_nm','Ticket'], as_index=False)['Votes'].agg('sum')
     First_prefs_senate['Ticket'] = First_prefs_senate['Ticket'].str.strip()
-    import pdb;pdb.set_trace()
 
 
 

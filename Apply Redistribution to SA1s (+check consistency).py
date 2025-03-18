@@ -25,9 +25,9 @@ os.chdir(base_dir)
 MIN_OBSERVABLE_RATIO = 0.001 # If SA1 somehow has 1000 voters, 0.01*1000=1 vote - anything else will not be observed due to rounding errors
 
 SA1_year_dict = {'2025':'2021','2022':'2016','2019':'2016','2016':'2011','2013':'2011','2010':'2006'}
-Redistribution_SA1_year_dict = {'2022':'2021','2019':'2016','2016':'2011'}
+Redistribution_SA1_year_dict = {'2022':'2021','2019':'2016','2016':'2011','2013':'2011'}
 
-data_year = '2019'
+data_year = '2013'
 correspondence_years = [SA1_year_dict[data_year],SA1_year_dict[str(int(data_year)+3)]]
 
 # TO DO: 1. Make separate correspondence functions for each year - too few cases to generalise, especially since 2006--> 2001 is whole different structure!
@@ -93,6 +93,28 @@ def perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_old_new, SA1_By_P
     return SA1_By_PP_SA1_CODE16.groupby(['div_nm', 'SA1_CODE21','pp_id'], as_index=False)['votes'].sum() # aggregate split up SA1s and result correct SA1_By_PP
 
 
+def perform_CCD_Correspondence_to_SA1_By_PP(SA1_Correspondence_old_new, SA1_By_PP_CCD_CODE06):
+
+    # some CCD names are reused as SA1s, but all are changed!
+
+    # merge on CCD_CODE06 and cross-multiply votes
+    merged_CCD_SA1_By_PP = SA1_By_PP_CCD_CODE06.merge(SA1_Correspondence_old_new, on = 'CCD_CODE06',how = 'left') 
+
+    # There are 13 CCD values that don't match the correspondence file... Small vote numbers --> can ignore (lose 40 rows)
+    merged_CCD_SA1_By_PP.dropna(inplace=True)
+
+    merged_CCD_SA1_By_PP.loc[:,'weighted_votes'] = merged_CCD_SA1_By_PP['votes'] * merged_CCD_SA1_By_PP['RATIO_FROM_TO']
+    merged_CCD_SA1_By_PP.loc[:,'SA1_CODE11'] = merged_CCD_SA1_By_PP.loc[:,'SA1_CODE11'].astype(int)
+    SA1_By_PP_2013 = merged_CCD_SA1_By_PP.groupby(['div_nm','SA1_CODE11','pp_id'], as_index=False)['weighted_votes'].agg('sum')
+    SA1_By_PP_2013.loc[:,'weighted_votes'] = np.round(SA1_By_PP_2013.loc[:,'weighted_votes'])
+    # rounding errors introduced here will be fixed upon application of adjustment to true FPByPP Vote counts
+
+    SA1_By_PP_2013["SA1_CODE11"] = SA1_By_PP_2013["SA1_CODE11"].astype(int).copy() # fix for horrible case of datatype refusing to change from float to int
+    SA1_By_PP_2013["weighted_votes"] = SA1_By_PP_2013["weighted_votes"].astype(int).copy()
+
+    return SA1_By_PP_2013.rename(columns={'weighted_votes':'votes'})
+
+
 if data_year == '2022': # different edition of SA1s - need for correspondence
 
     start = time.time()
@@ -125,7 +147,19 @@ elif data_year in ['2016','2019']:
     #SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
     import pdb;pdb.set_trace()
 
+elif data_year == '2013':
+    CCD_SA1_Correspondence = pd.read_csv("CG_CD_2006_SA1_2011_Formatted.csv", index_col=None)
 
+    CCD_SA1_Correspondence.rename(columns={"CD_CODE_2006": "CCD_CODE06", "SA1_7DIGITCODE_2011":"SA1_CODE11", "RATIO":'RATIO_FROM_TO'}, inplace=True)
+
+    # expand SA1_By_PP_Complete to SA1_CODE21
+    SA1_By_PP_CCD_CODE06 = pd.read_csv(f"{data_year}SA1ByPPComplete.csv", index_col=None).rename(columns={'SA1_CODE11':'CCD_CODE06'})
+
+    SA1_By_PP_Votes_new = perform_CCD_Correspondence_to_SA1_By_PP(CCD_SA1_Correspondence, SA1_By_PP_CCD_CODE06) #[['div_nm','SA1_CODE11','pp_id','votes']]
+
+    import pdb;pdb.set_trace()
+
+    SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
 
 
 
@@ -150,7 +184,12 @@ def format_state_rdst_full(df,SA1_suffix):
 
 def format_state_rdst_full_without_enrol(df,SA1_suffix):
 
-    df = df.rename(columns={df.columns[0]: 'new_div',df.columns[1]: 'old_div', f'SA1 Code\n(20{SA1_suffix} SA1s)': f'SA1_CODE{SA1_suffix}'})
+    if f'SA1 Code\n(20{SA1_suffix} SA1s)' in df.columns:
+        SA1_col = f'SA1 Code\n(20{SA1_suffix} SA1s)'
+    elif 'SA1' in df.columns: # 2015 Redistributions
+        SA1_col = 'SA1'
+
+    df = df.rename(columns={df.columns[0]: 'new_div',df.columns[1]: 'old_div', SA1_col : f'SA1_CODE{SA1_suffix}'})
     df = df[[f'SA1_CODE{SA1_suffix}',"new_div","old_div"]].drop(df.index[-1]) # removes last misbehaving row
     #import pdb;pdb.set_trace()
 
@@ -223,11 +262,22 @@ elif data_year == '2016':
 
     Redistribution_SA1s = pd.concat(state_dfs_Redistribution, ignore_index=True)
 
+elif data_year == '2013':
+    states = ['ACT','NSW','WA']
+    state_dfs = [pd.read_csv(f"Redistribution2015{state}-by-SA2-and-SA1.csv", index_col=None) for state in states]
+
+    
+    # combine into one Redistributions df
+    state_dfs_Redistribution = [format_state_rdst_full_without_enrol(state_df, SA1_suffix) for state_df in state_dfs]
+
+    Redistribution_SA1s = pd.concat(state_dfs_Redistribution, ignore_index=True)
+
+
 
 
 
 # Rename old divisions prior to analysis, treating as the natural state; ignores the effect of renaming divisions!
-name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
+name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
 
 import pdb;pdb.set_trace()
 # remame old_div to new_div if there was a name change!
@@ -257,7 +307,7 @@ Redistribution_pair_SA1s = Redistribution_SA1s_changes.groupby(['old_div', 'new_
 Redistribution_pairs = Redistribution_pair_SA1s.iloc[:,:2]
 #Redistribution_pairs.to_csv(f"RedistributionPairs{str(int(data_year)+2)}.csv", index = False)
 
-#import pdb;pdb.set_trace()
+import pdb;pdb.set_trace()
 
 
 name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
