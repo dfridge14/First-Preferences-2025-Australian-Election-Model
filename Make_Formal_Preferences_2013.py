@@ -156,14 +156,30 @@ def get_BTL_Prefs_First_Prefs(data_year):
 def sample_rows(Ticket, Votes, div_nm, pp_id,pp_nm, shared_dict):
     return shared_dict[Ticket].sample(n=Votes, replace=True).assign(Vote=Ticket, div_nm = div_nm,pp_id=pp_id,pp_nm=pp_nm)
 
+def custom_sort(col):
+    return (len(col), col)  # Sort first by length, then alphabetically
+
+
 def sample_Formal_prefs(data_year,state):
     BTL_first_prefs = pd.read_csv(f"{data_year}BTLFirstPrefs{state}.csv", index_col = None)
     First_prefs_senate = pd.read_csv(f'{data_year}SenateStateFirstPrefsByPollingPlace{state}.csv', skiprows = 1, skipfooter=1, index_col = None, engine = 'python').rename(columns={'DivisionNm':'div_nm','PollingPlaceID':'pp_id', 'PollingPlaceNm':'pp_nm','CandidateID':'cand_id','OrdinaryVotes':'Votes'})
     First_prefs_senate = First_prefs_senate.groupby(['div_nm','pp_id','pp_nm','Ticket'], as_index=False)['Votes'].agg('sum')
     First_prefs_senate['Ticket'] = First_prefs_senate['Ticket'].str.strip()
-
     # Eliminate informal votes
     First_prefs_senate = First_prefs_senate.loc[First_prefs_senate['Ticket'] != 'ZZ']
+
+    # add 'Other' votes - APPP:
+    First_prefs_senate_APPP = pd.read_csv(f'{data_year}SenateFirstPrefsByDivisionByVoteType.csv', skiprows = 1,index_col = None).rename(columns={'DivisionNm':'div_nm'})
+    First_prefs_senate_APPP = First_prefs_senate_APPP.loc[First_prefs_senate_APPP['StateAb'] == state,][['div_nm','Ticket','AbsentVotes','ProvisionalVotes','PrePollVotes','PostalVotes']]
+    First_prefs_senate_APPP = First_prefs_senate_APPP.groupby(['div_nm','Ticket'], as_index=False)[['AbsentVotes','ProvisionalVotes','PrePollVotes','PostalVotes']].agg('sum')
+    First_prefs_senate_APPP.loc[:,'Votes'] = First_prefs_senate_APPP.iloc[:,2:].sum(axis=1)
+    First_prefs_senate_APPP.loc[:,'pp_nm'] = 'Other'
+    First_prefs_senate_APPP.loc[:,'pp_id'] = 0
+    First_prefs_senate_APPP = First_prefs_senate_APPP[['div_nm','pp_id','pp_nm','Ticket','Votes']]
+    
+    First_prefs_senate = pd.concat([First_prefs_senate,First_prefs_senate_APPP], ignore_index=True)
+    import pdb;pdb.set_trace()
+
 
     BTL_dict = {p:group.set_index('Vote') for p, group in BTL_first_prefs.groupby('Vote')}
 
@@ -184,7 +200,7 @@ def sample_Formal_prefs(data_year,state):
             # Combine results
             final_sampled_df = pd.concat(sampled_dfs, ignore_index=True)
 
-            desired_order = ['div_nm', 'pp_nm'] + [col for col in final_sampled_df.columns if col not in ['div_nm', 'pp_id', 'pp_nm']]
+            desired_order = ['div_nm', 'pp_nm'] + sorted([col for col in final_sampled_df.columns if col not in ['div_nm', 'pp_id', 'pp_nm']], key = custom_sort)
             final_sampled_df = final_sampled_df[desired_order]
 
             final_sampled_df.to_csv(f"{data_year}FormalPrefsSampledReduced{state}.csv", index=False)

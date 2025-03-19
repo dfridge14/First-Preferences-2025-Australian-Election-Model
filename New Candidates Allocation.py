@@ -502,7 +502,16 @@ def get_matching_average(row, df, Ideo_Categories, year_prev, div_match, num_mat
     else:
         return pd.Series(np.nan, index=Ideo_Categories)
 
-# previous year, same div/Num
+
+def explode_column(weight_df, col, Ideo_Categories):
+        exploded_df = pd.DataFrame()
+        cols = Ideo_Categories + ['']
+        for i in range(6):  # 6 new columns
+            exploded_df[f'{cols[i]}{col}'] = weight_df[col]
+        return exploded_df
+
+
+# add all 8 potential estimates for matching previous year, same div/Num
 for num_match in [1,0]:
     for div_match in [1,0]:
         for year_prev in [1,0]:
@@ -518,22 +527,13 @@ X_weights = [1,0.5,0.5,0.25,0.125,0.0625,0.0625,0.03125] # ad-hoc weights, impro
 weight_df_ids = (df[X_cols]>0)*X_weights
 weight_df = weight_df_ids.div(weight_df_ids.sum(axis=1), axis=0)
 
-def explode_column(weight_df, col, Ideo_Categories):
-    exploded_df = pd.DataFrame()
-    cols = Ideo_Categories + ['']
-    for i in range(6):  # 6 new columns
-        exploded_df[f'{cols[i]}{col}'] = weight_df[col]
-    return exploded_df
-
-import pdb;pdb.set_trace()
-
+# expand wegiht df to each set of 6 columns
 exploded_weight_dfs = []
 for col in weight_df.columns:
     exploded_weight_dfs.append(explode_column(weight_df, col, Ideo_Categories))
 exploded_weight_df = pd.concat(exploded_weight_dfs, axis=1)
 
-import pdb;pdb.set_trace()
-
+# apply weights
 weighted_proportions = df.iloc[:,11:] * exploded_weight_df
 weighted_proportions.columns = [col[:-3] for col in weighted_proportions.columns]
 final_proportions = weighted_proportions.T.groupby(weighted_proportions.columns).sum().T[Ideo_Categories] # df of 6 cols, last is ''
@@ -550,6 +550,46 @@ Ideology_Donation_Estimate_df.to_csv('Ideology_Donation_Estimate_df.csv', index=
 
 
 import pdb;pdb.set_trace()
+
+# make a function that performs Ideology_Donation_Estimate on given row!
+
+def estimate_donation_proportion(df, new_row):
+    ### inputs Ideology donation df and df new_row containing {year, div_nm, State, Ideo_category, Num_parties}
+
+
+    # add all 8 potential estimates for matching previous year, same div/Num
+    for num_match in [1,0]:
+        for div_match in [1,0]:
+            for year_prev in [1,0]:
+                X_num = f'_X{1 + 4*(1-num_match) + 2*(1 - div_match) + (1 - year_prev)}'  # label them as X_1...X_8 according to groupings
+
+                curr_match = new_row.apply(lambda row: get_matching_average(row, df, Ideo_Categories, year_prev, div_match, num_match), axis=1)
+                curr_match[X_num] = curr_match.count(axis=1)
+
+                new_row = new_row.join(curr_match, rsuffix = f'{X_num}')
+
+    X_cols = ['_X1','_X2','_X3','_X4','_X5','_X6','_X7','_X8']
+    X_weights = [1,0.5,0.5,0.25,0.125,0.0625,0.0625,0.03125] # ad-hoc weights, improve with model in future
+    weight_df_ids = (new_row[X_cols]>0)*X_weights
+    weight_df = weight_df_ids.div(weight_df_ids.sum(axis=1), axis=0)
+
+
+    # expand weight df to each set of 6 columns
+    exploded_weight_dfs = []
+    for col in weight_df.columns:
+        exploded_weight_dfs.append(explode_column(weight_df, col, Ideo_Categories))
+    exploded_weight_df = pd.concat(exploded_weight_dfs, axis=1)
+
+    # apply weights
+    start_weights_index = new_row.columns.get_loc('Num_parties') + 1
+    weighted_proportions = new_row.iloc[:,start_weights_index:] * exploded_weight_df
+    weighted_proportions.columns = [col[:-3] for col in weighted_proportions.columns]
+    estimated_row_proportions = weighted_proportions.T.groupby(weighted_proportions.columns).sum().T[Ideo_Categories] # df of 6 cols, last is ''
+
+
+
+    return estimated_row_proportions
+
 
 
 
