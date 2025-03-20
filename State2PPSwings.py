@@ -707,26 +707,22 @@ def similarity_linear_transformation(similarity_matrix, Redistribution_reversed)
     old_divs = np.sort(Redistribution_reversed['old_div'].unique())
     new_divs = np.sort(Redistribution_reversed['new_div'].unique())
 
-
     old_div_index = {name: i for i, name in enumerate(old_divs)}
     new_div_index = {name: i for i, name in enumerate(new_divs)}
 
     Redistribution_reversed["old_div_idx"] = Redistribution_reversed["old_div"].map(old_div_index)
     Redistribution_reversed["new_div_idx"] = Redistribution_reversed["new_div"].map(new_div_index)
 
-    import pdb;pdb.set_trace()
-
-
     R = np.zeros((len(Redistribution_reversed['new_div'].unique()), len(Redistribution_reversed['old_div'].unique())))
     for _, row in Redistribution_reversed.iterrows():
         R[int(row["new_div_idx"]), int(row["old_div_idx"])] = row["proportion"]
-
-    import pdb;pdb.set_trace()
 
     # diagonal is no longer 1, but this is expected and not problematic, considering diagonal are never used for inference
     transformed_matrix = R @ similarity_matrix @ R.T
     transformed_matrix.columns = new_divs
     transformed_matrix.index = new_divs
+
+    #import pdb;pdb.set_trace()
 
     return transformed_matrix
 
@@ -772,7 +768,6 @@ def make_similarity_matrix_electorates(list_of_similarity_matrix_dicts, census_y
 
     import pdb;pdb.set_trace()
 
-
     return similarity_matrix_dict
 
 
@@ -790,8 +785,6 @@ def create_State_match_matrix_dict(election_years):
         div_to_state = pd.read_csv(f"{year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
         div_to_state = div_to_state.rename(columns={'DivisionNm':'div_nm'})[['div_nm','StateAb']]
 
-        import pdb;pdb.set_trace()
-
         State_match_matrix_dict[year] = state_by_state_matrix(div_to_state)
 
     import pdb;pdb.set_trace()
@@ -800,8 +793,29 @@ def create_State_match_matrix_dict(election_years):
 
 
 def create_contest_similarity_matrix_dict(election_years):
+    # creates similarity matrix of contest type at the preceding election
+
+    # Rules:
+    # If non-classic contest, the specific pairing of non-classic (COAL combined) - Only available from 2010 onwards
+    # If classic, determine by winner party (LP != NP, but LNP = LNQ = LP & NP; CLP = LP & NP) - use HouseMembersElected
 
     contest_similarity_matrix_dict = {}
+
+    for year in election_years:
+        previous_year = str(int(year)-3)
+
+        div_to_state = pd.read_csv(f"{previous_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+        div_to_state = div_to_state.rename(columns={'DivisionNm':'div_nm'})[['div_nm','StateAb']]
+
+
+        non_classic_divs = pd.read_csv(f"{previous_year}HouseNonClassicDivisions.csv", index_col=None).rename(columns = {'DivisionNm': 'div_nm'})[['div_nm','PartyAb1','PartyAb2']]
+        # make KAP into IND, PUP into IND, NXT/XEN to IND, 
+        
+        # make 
+        
+        non_classic_divs.loc[:,'party_set'] = set(non_classic_divs.loc[:,'PartyAb1'], non_classic_divs.loc[:,'PartyAb2'])
+
+        State_match_matrix_dict[year] = state_by_state_matrix(div_to_state)
 
 
     return contest_similarity_matrix_dict

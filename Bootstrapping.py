@@ -323,13 +323,12 @@ for i in range(n_groups):
 
 import pdb;pdb.set_trace()
 
-from pynetcor import CorrelationMatrix
+from pynetcor.cor import corrcoef
 
-
-corr_matrix_calculator = CorrelationMatrix()
-
+# using 8 threads
+# Pearson correlations between `arr1` and itself
+cor_result = corrcoef(bootstrap_samples.T, threads=8)
 # Compute the correlation matrix
-correlation_matrix = corr_matrix_calculator.fit_transform(bootstrap_samples)
 
 correlation_df = pd.DataFrame(correlation_matrix, columns=PP_swings_standardised['div_nm'].unique(), index=PP_swings_standardised['div_nm'].unique())
 
