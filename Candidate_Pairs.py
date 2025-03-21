@@ -13,7 +13,7 @@ final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007
 name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
 
 
-data_year = '2007'
+data_year = '2022'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 NONINCUMBENT_DISADVANTAGE =  INCUMBENT_ADVANTAGE/(FINAL_CANDIDATE_NO-1)
 
@@ -234,7 +234,7 @@ def create_DOP_By_PP_csvs(data_year, name_changes_year_dict):
 
     DOP_By_PP_year  = DOP_By_PP_year[["div_nm","pp_id","pp_nm","CountNumber","BallotPosition","cand_id", "PartyAb","CalculationType", "CalculationValue"]]
 
-    DOP_By_PP_year = DOP_By_PP_year.loc[~(DOP_By_PP_year['CalculationType'] == 'Transfer Percent'),]
+    #DOP_By_PP_year = DOP_By_PP_year.loc[~(DOP_By_PP_year['CalculationType'] == 'Transfer Percent'),]
     DOP_By_PP_year.loc[:,'PartyAb'] = DOP_By_PP_year.loc[:,'PartyAb'].fillna('IND') # fix Steve Khouw issue
 
     # convert relevant pp_nms to pp_id 0
@@ -242,37 +242,48 @@ def create_DOP_By_PP_csvs(data_year, name_changes_year_dict):
     # combine all the 'Other' ids - deal with %s carefully
     Other_booth_type_prefixes = ['Remote Mobile', 'Other Mobile','Special Hospital','EAV','ABSENT','PROVISIONAL','PRE_POLL','POSTAL']
 
+    # split DOP_By_PP_year by whether they are 'Other' categories
+    DOP_By_PP_year_formatted = DOP_By_PP_year.loc[~(DOP_By_PP_year.loc[:,"pp_nm"].astype(str).str.startswith(tuple(Other_booth_type_prefixes))),]
     Zero_ids = DOP_By_PP_year.loc[DOP_By_PP_year.loc[:,"pp_nm"].astype(str).str.startswith(tuple(Other_booth_type_prefixes)),]
     Zero_ids.loc[:,'pp_id'] = 0
     Zero_ids.loc[:,'pp_nm'] = 'Other'
 
-    grouped_zero_ids = Zero_ids.groupby(["div_nm","pp_id","pp_nm","CountNumber","BallotPosition","cand_id", "PartyAb","CalculationType"], as_index=False).agg("sum") # sum accurate for counts, fatal for %
     # fix Percent values
+    grouped_zero_ids = Zero_ids.groupby(["div_nm","pp_id","pp_nm","CountNumber","BallotPosition","cand_id", "PartyAb","CalculationType"], as_index=False).agg("sum") # sum accurate for counts, fatal for %
 
-    df_counts = grouped_zero_ids.loc[grouped_zero_ids["CalculationType"]=='Preference Count',].copy()
-    df_totals = df_counts.groupby(['div_nm', 'pp_id', 'CountNumber'], as_index=False)['CalculationValue'].sum() # sum of all counts
-    df_totals.rename(columns={'CalculationValue': 'TotalCount'}, inplace=True)
-    df_counts = df_counts.merge(df_totals, on=['div_nm', 'pp_id', 'CountNumber'])
-    df_counts['CalculationValue'] = round(df_counts['CalculationValue'] / df_counts['TotalCount'] * 100,2)  # Convert to percentage
-    df_counts['CalculationType'] = df_counts['CalculationType'].replace({
-        'Preference Count': 'Preference Percent',
-    })
-    df_counts.drop(columns=['TotalCount'], inplace=True)
+    for value_type in ['Preference','Transfer']:
 
-    # replace with correct percentages
-    idx = grouped_zero_ids[grouped_zero_ids["CalculationType"] == "Preference Percent"].index
-    grouped_zero_ids.loc[idx, :] = df_counts.values
+        df_counts = grouped_zero_ids.loc[grouped_zero_ids["CalculationType"]==f'{value_type} Count',].copy().reset_index(drop=True)
 
-    
+        if value_type == 'Transfer':
+            negative_df_counts = df_counts.loc[df_counts['CalculationValue']<0,'CalculationValue'].copy()
+            df_counts.loc[df_counts['CalculationValue']<0,'CalculationValue'] = 0.0 # ensure negative values do not affect summation!
+
+        df_totals = df_counts.groupby(['div_nm', 'pp_id', 'CountNumber'], as_index=False)['CalculationValue'].sum() # sum of all counts
+        df_totals.rename(columns={'CalculationValue': 'TotalCount'}, inplace=True)
+
+        df_counts = df_counts.merge(df_totals, on=['div_nm', 'pp_id', 'CountNumber'])
+        df_counts['CalculationValue'] = round(df_counts['CalculationValue'] / df_counts['TotalCount'] * 100,2)  # Convert to percentage
+        df_counts['CalculationType'] = df_counts['CalculationType'].replace({f'{value_type} Count': f'{value_type} Percent'})
+        df_counts.drop(columns=['TotalCount'], inplace=True)
+        
+        if value_type == 'Transfer':
+            df_counts.loc[:,'CalculationValue'] = df_counts.loc[:,'CalculationValue'].fillna(0)
+            df_counts.loc[df_counts.index.isin(negative_df_counts.index),'CalculationValue'] = -100 # replace negative percents with -100.00
+
+        # replace with correct percentages
+        idx = grouped_zero_ids[grouped_zero_ids["CalculationType"] == f"{value_type} Percent"].index
+        grouped_zero_ids.loc[idx, :] = df_counts.values
+
 
     # Sort to match original structure
-
-    DOP_By_PP_year_formatted = DOP_By_PP_year.loc[~(DOP_By_PP_year.loc[:,"pp_nm"].astype(str).str.startswith(tuple(Other_booth_type_prefixes))),]
-    DOP_By_PP_year_formatted = pd.concat([DOP_By_PP_year_formatted, grouped_zero_ids], ignore_index=True)
+    DOP_By_PP_year_formatted = pd.concat([DOP_By_PP_year_formatted, grouped_zero_ids], ignore_index=True) # add grouped_zero_ids to the df
     DOP_By_PP_year_formatted.sort_values(by=["div_nm", "pp_id", "CountNumber", "BallotPosition"], inplace=True)
     
 
     #DOP_By_PP_year_formatted = DOP_By_PP_year_formatted.sort_values(["div_nm", "pp_id"], kind="stable") # sort: group all div_nm and pp_nm together
+
+
 
     # calculate proportions using pivot into df for Expanding!
     pivot_df = DOP_By_PP_year_formatted.pivot(index=[col for col in DOP_By_PP_year_formatted.columns if col not in ["CalculationType", "CalculationValue"]], 
@@ -282,16 +293,19 @@ def create_DOP_By_PP_csvs(data_year, name_changes_year_dict):
     pivot_df["Proportion Transferred"] = pivot_df["Proportion Transferred"].replace([-np.inf], -1) # -1 corresponds to candidate donating their votes
 
 
-    pivot_df = pivot_df.drop(["Preference Count",'Preference Percent','Transfer Count'], axis=1)
+    pivot_df = pivot_df.drop(["Preference Count",'Preference Percent','Transfer Count','Transfer Percent'], axis=1)
     pivot_df.rename(columns = {"Proportion Transferred":'CalculationValue'}, inplace=True)
     DOP_By_PP_Expand = pivot_df.reset_index()
     DOP_By_PP_Expand.columns.name = None # reset columns index name from 'CalculationType'
     DOP_By_PP_Expand = DOP_By_PP_Expand.drop("BallotPosition", axis = 1)
 
     DOP_By_PP_Pref_Percent = DOP_By_PP_year_formatted.loc[DOP_By_PP_year_formatted["CalculationType"]=="Preference Percent",].drop(["CalculationType","BallotPosition"], axis=1)
+    DOP_By_PP_Reduce = DOP_By_PP_year_formatted.loc[DOP_By_PP_year_formatted["CalculationType"]=="Transfer Percent",].drop(["CalculationType","BallotPosition"], axis=1)
+    DOP_By_PP_Reduce.loc[:,'CalculationValue'] = DOP_By_PP_Reduce.loc[:,'CalculationValue'] / 100
     import pdb;pdb.set_trace()
 
     DOP_By_PP_Pref_Percent.to_csv(f"{data_year}DOP_By_PP_Pref_Percent.csv", index=False)
+    DOP_By_PP_Reduce.to_csv(f"{data_year}DOP_By_PP_Reduce.csv", index=False)
     DOP_By_PP_Expand.to_csv(f"{data_year}DOP_By_PP_Expand.csv", index=False)
 
     return 1
