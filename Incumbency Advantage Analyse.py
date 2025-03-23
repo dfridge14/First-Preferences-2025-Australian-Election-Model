@@ -13,28 +13,82 @@ Final_x_HS_df2022 = pd.read_csv(f"2022Final_{x}_HS_df.csv", index_col = None)
 Final_x_HS_df2019 = pd.read_csv(f"2019Final_{x}_HS_df.csv", index_col = None)
 Final_x_HS_df2016 = pd.read_csv(f"2016Final_{x}_HS_df.csv", index_col = None)
 
-# add year suffixes to differentiate division observation years
-Final_x_HS_df2022.loc[:,'div_nm'] = Final_x_HS_df2022.loc[:,'div_nm'] + '22'
-Final_x_HS_df2019.loc[:,'div_nm'] = Final_x_HS_df2019.loc[:,'div_nm'] + '19'
-Final_x_HS_df2016.loc[:,'div_nm'] = Final_x_HS_df2016.loc[:,'div_nm'] + '16'
+data_years = ['2022','2019','2016']
 
-for df in [Final_x_HS_df2022,Final_x_HS_df2019,Final_x_HS_df2016]:
-    df.loc[:,'PartyAb'] = df['copied_PartyAb'].values
-    df = df.drop('copied_PartyAb', axis = 1)
+combined_HS_df = pd.DataFrame(columns = ['div_nm', 'PartyAb', 'is_incumbent', 'is_historic_incumbent', 'elections_won','copied_PartyAb','House_Pct','Senate_Pct','Demographic','StateAb'])
 
-combined_HS_df = pd.concat([Final_x_HS_df2022, Final_x_HS_df2019,Final_x_HS_df2016], axis = 0)
+Final_x_HS_df_year_list = []
+
+for data_year in data_years:
+    Final_x_HS_df_year = pd.read_csv(f"{data_year}Final_{x}_HS_df.csv", index_col = None)
+    Demographic_Classification_State_df = pd.read_csv(f'{data_year}DemographicClassification.csv', index_col=None)
+
+    Final_x_HS_df_year = Final_x_HS_df_year.merge(Demographic_Classification_State_df, on = 'div_nm', how='left')
+    Final_x_HS_df_year.loc[:,'PartyAb'] = Final_x_HS_df_year['copied_PartyAb'].values
+    Final_x_HS_df_year = Final_x_HS_df_year.drop('copied_PartyAb', axis = 1)
+
+    # add year suffixes to differentiate division observation years
+    Final_x_HS_df_year.loc[:,'div_nm'] = Final_x_HS_df_year.loc[:,'div_nm'] + data_year[-2:]
+
+    Final_x_HS_df_year_list.append(Final_x_HS_df_year)
+
+combined_HS_df = pd.concat(Final_x_HS_df_year_list, ignore_index=True)
+
+import pdb;pdb.set_trace()
 
 
 
 # model just incumbent effects:
 # make CLP into LNP - in total get ALP/LP/LNP/Other (NP + GRN) 
-incumbent_df_for_R_model = combined_HS_df.loc[combined_HS_df['is_incumbent'] == 1,].copy().drop(['is_incumbent','is_historic_incumbent','copied_PartyAb'], axis = 1)
+incumbent_df_for_R_model = combined_HS_df.loc[combined_HS_df['is_incumbent'] == 1,].copy()[['div_nm','PartyAb','StateAb','Demographic','elections_won','House_Pct','Senate_Pct']]
 incumbent_df_for_R_model.loc[incumbent_df_for_R_model['PartyAb']=='CLP','PartyAb'] = 'LNP'
 incumbent_df_for_R_model.loc[~incumbent_df_for_R_model['PartyAb'].isin(['ALP','LP','LNP']),'PartyAb'] = 'Other'
 incumbent_df_for_R_model.rename(columns={'PartyAb':'PartyCat'},inplace=True)
+
+incumbent_df_for_R_model.loc[incumbent_df_for_R_model['div_nm']=='Monash16',['StateAb','Demographic']] = 'VIC','Rural'
+incumbent_df_for_R_model.loc[incumbent_df_for_R_model['div_nm']=='Spence16',['StateAb','Demographic']] = 'SA','Outer Metropolitan'
+
+incumbent_df_for_R_model.loc[:,'elections_won'] -= 1
+
 import pdb;pdb.set_trace()
 
 incumbent_df_for_R_model.to_csv('Incumbent_House_Senate_Final5_for_R.csv', index = False)
+
+
+
+def make_party_category_dict():
+
+    all_parties = pd.read_csv('Grand_Party_Category_df_2004_2022.csv', index_col=None)
+    all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['CLR'],'Ideo_Category':['ALP'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)
+    all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['NGS'],'Ideo_Category':['Right'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)
+    all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['ARTS'],'Ideo_Category':['Left'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)
+    all_parties_house = all_parties.loc[all_parties['Ideo_Category'].notna(),].iloc[:,:2].set_index('PartyAb') # excludes only senates, who don't yet have Ideology written
+    party_category_dict = all_parties_house.to_dict()['Ideo_Category']
+    party_category_dict['IND'] = 'Centre'
+    party_category_dict['COALLP'] = 'COAL'
+    party_category_dict['COALNP'] = 'COAL'
+
+    return party_category_dict
+
+
+party_category_dict = make_party_category_dict()
+
+# label each seat with its INC (ALP,LP,LNP,Other)
+incumbent_combined_HS_df = combined_HS_df.copy()
+incumbent_combined_HS_df.loc[incumbent_combined_HS_df['PartyAb']=='CLP','PartyAb'] = 'LNP'
+incumbent_combined_HS_df = incumbent_combined_HS_df.loc[incumbent_combined_HS_df['is_incumbent']==1,].groupby('div_nm')['PartyAb'].agg('first').rename('incumbent_party')
+incumbent_combined_HS_df.loc[~incumbent_combined_HS_df['incumbent_party'].isin(['ALP','LP','LNP']),'PartyAb'] = 'Other'
+
+incumbent_combined_HS_df.loc[incumbent_combined_HS_df['div_nm']=='Monash16',['StateAb','Demographic']] = 'VIC','Rural'
+incumbent_combined_HS_df.loc[incumbent_combined_HS_df['div_nm']=='Spence16',['StateAb','Demographic']] = 'SA','Outer Metropolitan'
+
+incumbent_combined_HS_df.loc[incumbent_combined_HS_df['is_incumbent']==1,'elections_won'] -= 1
+
+incumbent_combined_HS_df.loc[:,"Ideology"] = incumbent_combined_HS_df.loc[:,"PartyAb"].replace(party_category_dict)
+incumbent_combined_HS_df.loc[:,'Diff_Pct'] = incumbent_combined_HS_df.loc[:,'House_Pct'].values - incumbent_combined_HS_df.loc[:,'Diff_Pct'].values
+
+# group by the incumbent party
+incumbent_combined_HS_df.loc[incumbent_combined_HS_df['is_incumbent']==0,].groupby('incumbent_party')
 
 
 

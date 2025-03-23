@@ -606,7 +606,7 @@ if estimate_whole_df:
     import pdb;pdb.set_trace()
 
     true_proportions = Ideology_Donation_df.copy()
-    true_proportions.iloc[:,-5:] -= final_proportions.iloc
+    true_proportions.iloc[:,-5:] -= final_proportions
     true_proportions.iloc[:,-5:].std()
     true_proportions.iloc[:,-5:].mean()
 
