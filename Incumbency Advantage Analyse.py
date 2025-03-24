@@ -52,9 +52,12 @@ incumbent_df_for_R_model.loc[:,'elections_won'] -= 1
 
 import pdb;pdb.set_trace()
 
-incumbent_df_for_R_model.to_csv('Incumbent_House_Senate_Final5_for_R.csv', index = False)
+#incumbent_df_for_R_model.to_csv('Incumbent_House_Senate_Final5_for_R.csv', index = False)
 
-
+# Find average starting incumbency advantage (Inner Metropolitan and elections_won == 0)
+incumbent_df_for_R_model.loc[:,'Diff_Pct'] = incumbent_df_for_R_model.loc[:,'House_Pct'].values - incumbent_df_for_R_model.loc[:,'Senate_Pct'].values
+IND_average_advantage = incumbent_df_for_R_model.loc[(incumbent_df_for_R_model['elections_won']==0)& (incumbent_df_for_R_model['Demographic']=='Inner Metropolitan'),]['Diff_Pct'].mean()
+print('average startign incumbency advantage:', IND_average_advantage)
 
 def make_party_category_dict():
 
@@ -76,19 +79,38 @@ party_category_dict = make_party_category_dict()
 # label each seat with its INC (ALP,LP,LNP,Other)
 incumbent_combined_HS_df = combined_HS_df.copy()
 incumbent_combined_HS_df.loc[incumbent_combined_HS_df['PartyAb']=='CLP','PartyAb'] = 'LNP'
-incumbent_combined_HS_df = incumbent_combined_HS_df.loc[incumbent_combined_HS_df['is_incumbent']==1,].groupby('div_nm')['PartyAb'].agg('first').rename('incumbent_party')
-incumbent_combined_HS_df.loc[~incumbent_combined_HS_df['incumbent_party'].isin(['ALP','LP','LNP']),'PartyAb'] = 'Other'
+incumbent_party = incumbent_combined_HS_df.loc[incumbent_combined_HS_df['is_incumbent']==1,].groupby('div_nm')['PartyAb'].agg('sum').rename('incumbent_party')
+incumbent_combined_HS_df = incumbent_combined_HS_df.merge(incumbent_party, on = 'div_nm',how='left')
+
+# retain only incumbents (and remove double incumbent ALPLP in Cowan22)
+incumbent_combined_HS_df = incumbent_combined_HS_df.loc[~incumbent_combined_HS_df['incumbent_party'].isna(),]
+incumbent_combined_HS_df = incumbent_combined_HS_df.loc[~(incumbent_combined_HS_df['incumbent_party']=='ALPLP'),]
+incumbent_combined_HS_df = incumbent_combined_HS_df.loc[~(incumbent_combined_HS_df['div_nm']=='Mayo19'),]
+
+
+incumbent_combined_HS_df.loc[~incumbent_combined_HS_df['incumbent_party'].isin(['ALP','LP','LNP']),'incumbent_party'] = 'Other'
 
 incumbent_combined_HS_df.loc[incumbent_combined_HS_df['div_nm']=='Monash16',['StateAb','Demographic']] = 'VIC','Rural'
 incumbent_combined_HS_df.loc[incumbent_combined_HS_df['div_nm']=='Spence16',['StateAb','Demographic']] = 'SA','Outer Metropolitan'
+import pdb;pdb.set_trace()
 
-incumbent_combined_HS_df.loc[incumbent_combined_HS_df['is_incumbent']==1,'elections_won'] -= 1
+#incumbent_combined_HS_df.loc[incumbent_combined_HS_df['is_incumbent']==1,'elections_won'] -= 1
 
 incumbent_combined_HS_df.loc[:,"Ideology"] = incumbent_combined_HS_df.loc[:,"PartyAb"].replace(party_category_dict)
-incumbent_combined_HS_df.loc[:,'Diff_Pct'] = incumbent_combined_HS_df.loc[:,'House_Pct'].values - incumbent_combined_HS_df.loc[:,'Diff_Pct'].values
+incumbent_combined_HS_df.loc[:,'Diff_Pct'] = incumbent_combined_HS_df.loc[:,'House_Pct'].values - incumbent_combined_HS_df.loc[:,'Senate_Pct'].values
 
-# group by the incumbent party
-incumbent_combined_HS_df.loc[incumbent_combined_HS_df['is_incumbent']==0,].groupby('incumbent_party')
+non_incumbent_df = incumbent_combined_HS_df.loc[incumbent_combined_HS_df['is_incumbent']==0,]
+
+# group by the incumbent party and Ideology of minor party for estimate of weight
+non_incumbent_df.groupby(['incumbent_party','Ideology'], as_index=False)['Diff_Pct'].agg('mean')
+non_incumbent_df.groupby(['incumbent_party','Ideology'], as_index=False)['is_incumbent'].agg('count')
+
+non_incumbent_df = non_incumbent_df[['incumbent_party','Ideology','Diff_Pct']]
+
+#non_incumbent_df.to_csv('Non-incumbent_HS_for_R.csv', index=False)
+
+import pdb;pdb.set_trace()
+
 
 
 

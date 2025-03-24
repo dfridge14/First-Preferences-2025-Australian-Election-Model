@@ -21,7 +21,7 @@ sys.excepthook = exception_handler
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-data_year = "2016"
+data_year = "2022"
 
 incumbent_df = pd.read_csv("incumbent_df.csv")
 
@@ -169,7 +169,7 @@ Candidate_Incumbency['Year'] = Candidate_Incumbency['Year'].apply(lambda entry: 
 #Candidate_Incumbency.loc[:,"is_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: any(year in between_election_year_range for year in years) if years and isinstance(years, list) else np.nan) # true if recent incumbent
 Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency['Year'].apply(lambda years: not any(year in between_election_year_range for year in years) and any(year in before_last_election_year_range for year in years) if years and isinstance(years, list) else 0)
 Candidate_Incumbency.loc[:,"is_historic_incumbent"] = Candidate_Incumbency.loc[:,"is_historic_incumbent"].astype(int)
-import pdb;pdb.set_trace()
+#import pdb;pdb.set_trace()
 Candidate_Incumbency.loc[:,"elections_won"] = Candidate_Incumbency['Year'].apply(lambda x: count_earlier_years(x, data_year))
 
 
@@ -182,7 +182,8 @@ Candidate_Incumbency.loc[:,"elections_won"] = Candidate_Incumbency['Year'].apply
 
 def create_Incumbents_by_div(Candidate_Incumbency, data_year):
     ### creates df of incumbent party by division
-    Incumbents_by_div = Candidate_Incumbency.loc[Candidate_Incumbency['is_incumbent'] == 1,['div_nm','PartyAb']]
+    Incumbents_by_div = Candidate_Incumbency.loc[Candidate_Incumbency['is_incumbent'] == 1,['div_nm','PartyAb','elections_won']]
+    Incumbents_by_div.loc[:,'elections_won'] -= 1
     import pdb;pdb.set_trace()
 
     Incumbents_by_div.to_csv(f"{data_year}Incumbents.csv", index=False)
@@ -191,6 +192,7 @@ def create_Incumbents_by_div(Candidate_Incumbency, data_year):
 
 create_Incumbents_by_div(Candidate_Incumbency, data_year)
 
+import pdb;pdb.set_trace()
 
 
 Final_x_df = Final_x_df.merge(Candidate_Incumbency, on=Final_x_df.columns.tolist(), how='left')

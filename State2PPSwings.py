@@ -166,6 +166,7 @@ if Type == 'State':
     census_years = ['2006','2011','2016','2021']
 
 else:
+    election_years = ['2007','2010','2013','2016','2019','2022']
     election_year_to_census_year_dict = {'2004':'2004','2007':'2007','2010':'2011','2013':'2016','2016':'2016','2019':'2021','2022':'2021'}
     census_years = ['2004','2007','2011','2016','2021']
 
@@ -746,7 +747,7 @@ def make_similarity_matrix_states(list_of_similarity_matrix_dicts, election_year
 def make_similarity_matrix_electorates(list_of_similarity_matrix_dicts, census_years, election_year_to_census_year_dict):
     ### average all characteristic similarity matrices and allocate to census years
     similarity_matrix_dict = {}
-    census_year_to_election_year_dict = {'2004':'2004','2007':'2007','2011':'2010','2016':'2016','2021':'2021','2024':'2024'}
+    census_year_to_election_year_dict = {'2004':'2004','2007':'2007','2011':'2010','2016':'2016','2021':'2022','2024':'2025'}
 
 
     for year in census_years:
@@ -764,9 +765,8 @@ def make_similarity_matrix_electorates(list_of_similarity_matrix_dicts, census_y
     # get 2016 and 2019 election matrices through 2013-2016 and 2021-2018 data! Tested - correctly performs linear transformation!
     similarity_matrix_dict['2013'] = similarity_linear_transformation(similarity_matrix_dict['2010'], pd.read_csv('Correspondence_CED_2015_2012_Reversed.csv', index_col = None))
     
-    similarity_matrix_dict['2019'] = similarity_linear_transformation(similarity_matrix_dict['2021'], pd.read_csv('Correspondence_CED_2018_2021.csv', index_col = None).rename(columns = {'div_nm_2018':'new_div','div_nm_2021':'old_div','RATIO_FROM_TO':'proportion'}))
-
-    import pdb;pdb.set_trace()
+    similarity_matrix_dict['2019'] = similarity_linear_transformation(similarity_matrix_dict['2022'], pd.read_csv('Correspondence_CED_2018_2021.csv', index_col = None).rename(columns = {'div_nm_2018':'new_div','div_nm_2021':'old_div','RATIO_FROM_TO':'proportion'}))
+    #import pdb;pdb.set_trace()
 
     return similarity_matrix_dict
 
@@ -791,40 +791,24 @@ def create_State_match_matrix_dict(election_years):
 
     return State_match_matrix_dict
 
+def create_Demographic_match_matrix(election_years):
 
-def create_contest_similarity_matrix_dict(election_years):
-    # creates similarity matrix of contest type at the preceding election
-
-    # Rules:
-    # If non-classic contest, the specific pairing of non-classic (COAL combined) - Only available from 2010 onwards
-    # If classic, determine by winner party (LP != NP, but LNP = LNQ = LP & NP; CLP = LP & NP) - use HouseMembersElected
-
-    contest_similarity_matrix_dict = {}
+    
+    Demographic_match_matrix_dict = {}
 
     for year in election_years:
-        previous_year = str(int(year)-3)
+        Demographic = pd.read_csv(f"{year}DemographicClassification.csv", index_col=None)[['div_nm','Demographic']]
+        Demographic_match_matrix_dict[year] = state_by_state_matrix(Demographic)
 
-        div_to_state = pd.read_csv(f"{previous_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
-        div_to_state = div_to_state.rename(columns={'DivisionNm':'div_nm'})[['div_nm','StateAb']]
+    import pdb;pdb.set_trace()
 
-
-        non_classic_divs = pd.read_csv(f"{previous_year}HouseNonClassicDivisions.csv", index_col=None).rename(columns = {'DivisionNm': 'div_nm'})[['div_nm','PartyAb1','PartyAb2']]
-        # make KAP into IND, PUP into IND, NXT/XEN to IND, 
-        
-        # make 
-        
-        non_classic_divs.loc[:,'party_set'] = set(non_classic_divs.loc[:,'PartyAb1'], non_classic_divs.loc[:,'PartyAb2'])
-
-        State_match_matrix_dict[year] = state_by_state_matrix(div_to_state)
-
-
-    return contest_similarity_matrix_dict
-
+    return Demographic_match_matrix_dict
 
 
 if Type == 'Elec':
 
     State_match_matrix_dict = create_State_match_matrix_dict(election_years)
+    Demographic_match_matrix_dict = create_Demographic_match_matrix(election_years)
 
 elif Type == 'State':
     # Eternal Proximity matrix
@@ -911,9 +895,48 @@ def make_Avg_TPP_Swing_matrix(TPP_swing_matrix_dict, election_years_extended):
     return Avg_TPP_matrix_dict
 
 
+def create_TCP_type_match_matrix(election_years):
+    # creates similarity matrix of contest type at the preceding election
+
+    # Rules:
+    # If non-classic contest, the specific pairing of non-classic (COAL combined) - Only available from 2010 onwards
+    # If classic, determine by winner party (LP != NP, but LNP = LNQ = LP & NP; CLP = LP & NP) 
+
+    TCP_type_match_matrix_dict = {}
+
+    for year in election_years:
+        TCP = pd.read_csv(f"{year}HouseTCPByCandidateByVoteType.csv", skiprows=1, index_col=None)[['DivisionNm','PartyAb','Elected']].rename(columns={'DivisionNm':'div_nm'})
+        TCP['PartyAb'] = TCP['PartyAb'].replace({'KAP':'IND','XEN':'IND','NXT':'IND','PUP':'IND','CLP':'LNP','LNQ':'LNP'})
+        TCP_pivot = TCP.pivot(index='div_nm', columns='Elected', values='PartyAb').sort_index()
+        Main_party_list = ['ALP','LP','LNP']
+
+        import pdb;pdb.set_trace()
+
+        
+        TCP_pivot.loc[:,'TCP_pair'] = TCP_pivot.apply(lambda row: row['Y'] + '_' + row['N'] if ((row['Y'] in Main_party_list) & (row['N'] in Main_party_list)) else '_'.join(sorted(row)), axis=1)
+        TCP_pivot = TCP_pivot.reset_index()[['div_nm','TCP_pair']]
+
+        # LPALP; ALPLP; ALPLNP; LNPALP; ALPNP; GRNALP; INDALP; INDCOAL
+        # convert KAP, XEN to IND; CLP to LNP
+        # subtle similarities - consider later!
+        # ALP-LP vs LP- ALP ; 0.5
+        # ALP-LP vs ALP-NP ; 0.5
+        # ALP-LP vs CLP/LNP/NP-ALP ; 0.25
+        # ALP-LP vs IND-ALP ; 0.25
+        # ALP-LP vs IND-LP ; 0.5
+
+        TCP_type_match_matrix_dict[year] = state_by_state_matrix(TCP_pivot)
+
+    import pdb;pdb.set_trace()
+
+    return TCP_type_match_matrix_dict
+
+
+
 
 if Type == 'Elec':
-    Contest_similarity_dict = create_contest_similarity_matrix_dict(election_years)
+    TCP_type_similarity_dict = create_TCP_type_match_matrix(election_years)
+
 
 elif Type == 'State':
     # TPP swing matrices
@@ -939,12 +962,22 @@ def dict_to_long_df(matrix_dict, dict_name):
 #dict_to_long_df(similarity_matrix_dict, "Similarity")
 
 # Combine all dictionaries into one DataFrame
-Similarity_df = pd.concat([
-    dict_to_long_df(similarity_matrix_dict, "Similarity"),
-    dict_to_long_df(TPP_Swing_Avg_matrix_dict, "TPPSwing"),
-    dict_to_long_df(Proximity_matrix_dict,'Adjacency')
-], ignore_index=True)
+if Type == 'State':
+    Similarity_df = pd.concat([
+        dict_to_long_df(similarity_matrix_dict, "Similarity"),
+        dict_to_long_df(TPP_Swing_Avg_matrix_dict, "TPPSwing"),
+        dict_to_long_df(Proximity_matrix_dict,'Adjacency')
+    ], ignore_index=True)
+elif Type == 'Elec':
+    Similarity_df = pd.concat([
+        dict_to_long_df(similarity_matrix_dict, "Similarity"),
+        dict_to_long_df(TCP_type_similarity_dict, "TCPType"),
+        dict_to_long_df(State_match_matrix_dict,'State'),
+        dict_to_long_df(Demographic_match_matrix_dict,'Demographic')
 
+    ], ignore_index=True)
+
+import pdb;pdb.set_trace()
 
 
 def wide_to_long(df):
@@ -972,24 +1005,39 @@ def wide_to_long(df):
 
 
 # Assuming 'df' has states as column names and a 'row_index' column
-sample_correlation_matrix = pd.read_csv('State_Sample_Correlation_matrix.csv')
-sample_correlation_matrix.rename(columns={'Unnamed: 0': 'Row_Index'}, inplace=True)
-corr_df = pd.concat([sample_correlation_matrix.assign(Election_Year=year) for year in election_years], ignore_index=True)
-corr_df['Dict'] = 'Correlation'
+if Type == 'State':
+    sample_correlation_matrix = pd.read_csv('State_Sample_Correlation_matrix.csv')
+    sample_correlation_matrix.rename(columns={'Unnamed: 0': 'Row_Index'}, inplace=True)
+    corr_df = pd.concat([sample_correlation_matrix.assign(Election_Year=year) for year in election_years], ignore_index=True)
+    corr_df['Dict'] = 'Correlation'
 
-Regression_Format_df_wide = pd.concat([corr_df,Similarity_df], ignore_index=True)
+    Regression_Format_df_wide = pd.concat([corr_df,Similarity_df], ignore_index=True)
 
-Regression_Format_df = wide_to_long(Regression_Format_df_wide)
+    Regression_Format_df = wide_to_long(Regression_Format_df_wide)
 
-# remove duplicate state pairs!
-Regression_Format_df[['State1', 'State2']] = Regression_Format_df.apply(lambda row: pd.Series(sorted([row['State1'], row['State2']])), axis=1)
-Regression_Format_df = Regression_Format_df.drop_duplicates()
-#print(long_df.head())
+    # remove duplicate state pairs!
+    Regression_Format_df[['State1', 'State2']] = Regression_Format_df.apply(lambda row: pd.Series(sorted([row['State1'], row['State2']])), axis=1)
+    Regression_Format_df = Regression_Format_df.drop_duplicates()
+    #print(long_df.head())
 
 
-if binary:
-    Regression_Format_df.to_csv("State_similarity_df.csv", index=False)
+    if binary:
+        Regression_Format_df.to_csv("State_similarity_df.csv", index=False)
+    else:
+        Regression_Format_df.to_csv("State_similarity_df_continuous.csv", index=False)
+
 else:
-    Regression_Format_df.to_csv("State_similarity_df_continuous.csv", index=False)
+    # unfinished - try to replicate above for new situation!
+    import pdb;pdb.set_trace()
+
+    swings_relationship_matrix = pd.DataFrame() # read in swings...
+    swings_relationship_matrix['Dict'] = 'Correlation'
+    Regression_Format_df_wide = pd.concat([corr_df,Similarity_df], ignore_index=True)
+    Regression_Format_df = wide_to_long(Regression_Format_df_wide)
+    Regression_Format_df[['div1', 'div2']] = Regression_Format_df.apply(lambda row: pd.Series(sorted([row['div1'], row['div2']])), axis=1)
+    Regression_Format_df = Regression_Format_df.drop_duplicates()
+
+
+
 
 import pdb;pdb.set_trace()
