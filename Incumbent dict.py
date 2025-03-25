@@ -1,15 +1,20 @@
 import pandas as pd
 import numpy as np
 import os,time
+from pathlib import Path
 
 
-os.chdir('C:\\Dania\\2024\\Australian Election')
+
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+os.chdir(base_dir)
 
 start = time.time()
 
 election_years = ['1993','1996','1998','2001','2004','2007','2010','2013','2016','2019','2022']
 old_years = election_years[:4]
 elected = {}
+
+
 
 
 combined_df = pd.DataFrame(columns=["Surname","GivenNm","div_nm","PartyAb"])
@@ -21,7 +26,7 @@ for year in election_years: # currently only 2016 onwards
     if year in old_years:
         curr_year_elected = pd.read_csv(filename)
 
-        curr_year_elected = curr_year_elected.applymap(lambda x: x.strip() if isinstance(x, str) else x) # strip extra spaces in formatting
+        curr_year_elected = curr_year_elected.map(lambda x: x.strip() if isinstance(x, str) else x) # strip extra spaces in formatting
 
 
         # manual tweaks 1998 - sid sidebottom, Stuart St Clair, phil barresi || 1993 - bob horne, geoff prosser || 1996 Tony1 Smith and triple names
@@ -36,6 +41,12 @@ for year in election_years: # currently only 2016 onwards
             curr_year_elected.loc[curr_year_elected["Name"] == "Peter Sid Sidebottom","Name"] = "Sid Sidebottom"
             curr_year_elected.loc[curr_year_elected["Name"] == "Stuart St Clair","Name"] = "Stuart StClair"
             curr_year_elected.loc[curr_year_elected["Name"] == "Phillip Barresi","Name"] = "Phil Barresi"
+
+        if year == '2001':
+            curr_year_elected.loc[curr_year_elected["Name"] == "Sophie Panopoulos","Name"] = "Sophie Mirabella"
+
+
+
 
         # also manually tweaked apostrophe symbol in O'Byrne, Connor, Keefe from 1996-2001 for some reason
 
@@ -62,6 +73,8 @@ for year in election_years: # currently only 2016 onwards
         curr_year_elected = curr_year_elected[["Surname","GivenNm","DivisionNm","PartyAb"]].rename(columns = {"DivisionNm": "div_nm"})
         curr_year_elected["Year"] = year
 
+
+
     else:
         curr_year_elected = pd.read_csv(filename, skiprows=1)[["Surname","GivenNm","DivisionNm","PartyAb"]].rename(columns = {"DivisionNm": "div_nm"}) # only relevant columns
         
@@ -69,6 +82,13 @@ for year in election_years: # currently only 2016 onwards
         
         # make surname all capital - exception for Bert van Manen: VANMANEN
         curr_year_elected.loc[curr_year_elected["Surname"] == 'van MANEN',"Surname"] = "VAN MANEN"
+        curr_year_elected.loc[curr_year_elected["Surname"] == 'McCLELLAND',"Surname"] = "MCCLELLAND"
+        curr_year_elected.loc[curr_year_elected["Surname"] == 'McMULLAN',"Surname"] = "MCMULLAN"
+        curr_year_elected.loc[curr_year_elected["Surname"] == 'McARTHUR',"Surname"] = "MCARTHUR"
+        curr_year_elected.loc[curr_year_elected["Surname"] == 'PANOPOULOS',"Surname"] = "MIRABELLA"
+      
+
+
 
         # remove middle name!
         curr_year_elected.loc[curr_year_elected["GivenNm"].apply(lambda x: len(x.split(' ')) > 1),"GivenNm"] = curr_year_elected.loc[curr_year_elected["GivenNm"].apply(lambda x: len(x.split(' ')) > 1), "GivenNm"].apply(lambda x: x.split(' ')[0]) # only first name
@@ -98,6 +118,8 @@ incumbent_df = combined_df.groupby(['Surname','GivenNm']).agg(list).reset_index(
 
 pd.set_option('display.max_rows', None)
 print(incumbent_df)
+
+import pdb;pdb.set_trace()
 
 
 

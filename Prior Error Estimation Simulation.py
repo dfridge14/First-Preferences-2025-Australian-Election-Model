@@ -44,6 +44,31 @@ Actual_results.loc[Actual_results['PartyAb'].isna(),].fillna('IND')
 
 target = 'IND'
 
+Actual_results_dict = {}
+Fundamentals_results_dict = {}
+Fundamentals_estimate_dict = {}
+
+def group_into_Fundamentals_Categories(party_votes_shares_df, div):
+
+    ALP_cat = {'ALP','CLR'}
+    COAL_cat = {'LP','NP','CLP','LNP','LNQ'}
+    GRN_cat = {'GRN'}
+
+    Non_Other_sets = ALP_cat | COAL_cat | GRN_cat  # Union of all sets
+    Other_cols = set(party_votes_shares_df.columns) - Non_Other_sets  # Columns in none of the sets
+
+    # Compute the sums
+    sum1 = party_votes_shares_df[ALP_cat.intersection(party_votes_shares_df.columns)].sum(axis=1).iloc[0]
+    sum2 = party_votes_shares_df[COAL_cat.intersection(party_votes_shares_df.columns)].sum(axis=1).iloc[0]
+    sum3 = party_votes_shares_df[GRN_cat.intersection(party_votes_shares_df.columns)].sum(axis=1).iloc[0]
+    sum4 = party_votes_shares_df[Other_cols].sum(axis=1).iloc[0]
+
+    Fundamentals_grouped_df = pd.DataFrame([{'ALP':sum1,'COAL':sum2,'GRN':sum3,'Other':sum4}], index=div)
+
+    return Fundamentals_grouped_df
+
+
+
 for div in Actual_results['div_nm'].unique():
     div_results = Actual_results.loc[Actual_results['div_nm'] == div,]
 
@@ -55,6 +80,20 @@ for div in Actual_results['div_nm'].unique():
 
     import pdb;pdb.set_trace()
     Actual_results.loc[Actual_results['div_nm'] == div,'PartyAb'] = adjusted_party_names
+
+    Actual_results_dict[div] = div_results.pivot(index='div_nm', columns='PartyAb', values='CalculationValue')
+    Fundamentals_results_dict[div] = group_into_Fundamentals_Categories(Actual_results_dict[div], div)
+    Fundamentals_estimate_dict[div] = group_into_Fundamentals_Categories(Prior_Estimates_dict[div], div)
+
+
+
+Fundamentals_dict = {}
+# GRN, ALP+CLR, COAL+all the others, Other! - sum each category!
+
+
+for div in 
+
+
 
 
 

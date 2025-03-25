@@ -32,7 +32,7 @@ name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman
 
 FINAL_CAND_NO = final_cand_no_dict[data_year]
 
-INTERESTED_NO_CANDS = 5
+INTERESTED_NO_CANDS = 4
 
 
 # Next task - add 2 columns to Top 5 DOP in each electorate: was elected last year (or byelection???) 
@@ -114,7 +114,9 @@ for div in Div_DOP_dict.keys():
 
     # add to candidates_df - only relevant columns
     Candidates_By_Division_df = pd.concat([Candidates_By_Division_df, DOP_table_vote_pcts_long.loc[DOP_table_vote_pcts_long["CountNumber"]==0,["div_nm","PartyAb","Surname", "GivenNm","HistoricElected"]]], ignore_index=True) 
-    Candidates_By_Division_df.loc[(Candidates_By_Division_df["div_nm"] == "La Trobe") & (Candidates_By_Division_df["PartyAb"] == "ALP"),["Surname", "GivenNm"]] = 'KUMAR', 'Abhimanyu'  # manually add Abi Kumar's name correctly
+    
+    if data_year == '2022':
+        Candidates_By_Division_df.loc[(Candidates_By_Division_df["div_nm"] == "La Trobe") & (Candidates_By_Division_df["PartyAb"] == "ALP"),["Surname", "GivenNm"]] = 'KUMAR', 'Abhimanyu'  # manually add Abi Kumar's name correctly
 
 
     DOP_table_vote_pcts_long = DOP_table_vote_pcts_long[["CountNumber","PartyAb","CalculationValue"]] # only values needed
@@ -154,6 +156,12 @@ Final_x_df.loc[(Final_x_df["Surname"]=="PROSSER")&(Final_x_df["GivenNm"]=="Geoff
 Final_x_df.loc[(Final_x_df["Surname"]=="SIDEBOTTOM")&(Final_x_df["GivenNm"]=="Peter"),"GivenNm"] = "Sid"
 Final_x_df.loc[(Final_x_df["Surname"]=="Horne")&(Final_x_df["GivenNm"]=="Robert"),"GivenNm"] = "Bob"
 Final_x_df.loc[(Final_x_df["Surname"]=="ST CLAIR")&(Final_x_df["GivenNm"]=="Stuart"),"Surname"] = "STCLAIR" # only relevant for 2001...?
+Final_x_df.loc[(Final_x_df["Surname"] == 'van MANEN') &(Final_x_df["GivenNm"]=="Bert"),"Surname"] = "VAN MANEN"
+# fix up the M(a)cs and Sophie-name-change-Mirabella
+Final_x_df.loc[(Final_x_df["Surname"] == 'McCLELLAND')&(Final_x_df["GivenNm"]=="Robert"),"Surname"] = "MCCLELLAND"
+Final_x_df.loc[(Final_x_df["Surname"] == 'McMULLAN')&(Final_x_df["GivenNm"]=="Bob"),"Surname"] = "MCMULLAN"
+Final_x_df.loc[(Final_x_df["Surname"] == 'McARTHUR')&(Final_x_df["GivenNm"]=="Stewart"),"Surname"] = "MCARTHUR"
+Final_x_df.loc[(Final_x_df["Surname"] == 'PANOPOULOS')&(Final_x_df["GivenNm"]=="Sophie"),"Surname"] = "MIRABELLA"
 # Tony1 SMITH irrelevant as before 2001!!!
 
 
@@ -177,13 +185,17 @@ Candidate_Incumbency.loc[:,"elections_won"] = Candidate_Incumbency['Year'].apply
 # add in number of years incumbent!!!
 # convert back to LP or NP in house!
 
-
+#import pdb;pdb.set_trace()
 
 
 def create_Incumbents_by_div(Candidate_Incumbency, data_year):
     ### creates df of incumbent party by division
     Incumbents_by_div = Candidate_Incumbency.loc[Candidate_Incumbency['is_incumbent'] == 1,['div_nm','PartyAb','elections_won']]
     Incumbents_by_div.loc[:,'elections_won'] -= 1
+    
+    if not Incumbents_by_div.loc[Incumbents_by_div['elections_won']<0,].empty:
+        print('disaster', Incumbents_by_div.loc[Incumbents_by_div['elections_won']<0,])
+        Incumbents_by_div.loc[Incumbents_by_div['elections_won']<0,'elections_won'] = 0
     import pdb;pdb.set_trace()
 
     Incumbents_by_div.to_csv(f"{data_year}Incumbents.csv", index=False)

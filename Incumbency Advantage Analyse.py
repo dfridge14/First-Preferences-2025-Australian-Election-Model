@@ -7,7 +7,7 @@ from pathlib import Path
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-x = 5
+x = 4
 
 Final_x_HS_df2022 = pd.read_csv(f"2022Final_{x}_HS_df.csv", index_col = None)
 Final_x_HS_df2019 = pd.read_csv(f"2019Final_{x}_HS_df.csv", index_col = None)
@@ -47,17 +47,26 @@ incumbent_df_for_R_model.rename(columns={'PartyAb':'PartyCat'},inplace=True)
 
 incumbent_df_for_R_model.loc[incumbent_df_for_R_model['div_nm']=='Monash16',['StateAb','Demographic']] = 'VIC','Rural'
 incumbent_df_for_R_model.loc[incumbent_df_for_R_model['div_nm']=='Spence16',['StateAb','Demographic']] = 'SA','Outer Metropolitan'
+incumbent_df_for_R_model.loc[incumbent_df_for_R_model['div_nm']=='Macnamara16',['StateAb','Demographic']] = 'VIC','Inner Metropolitan'
+incumbent_df_for_R_model.loc[incumbent_df_for_R_model['div_nm']=='Cooper16',['StateAb','Demographic']] = 'VIC','Inner Metropolitan'
 
 incumbent_df_for_R_model.loc[:,'elections_won'] -= 1
 
 import pdb;pdb.set_trace()
 
-#incumbent_df_for_R_model.to_csv('Incumbent_House_Senate_Final5_for_R.csv', index = False)
+incumbent_df_for_R_model.to_csv(f'Incumbent_House_Senate_Final{x}_for_R.csv', index = False)
 
 # Find average starting incumbency advantage (Inner Metropolitan and elections_won == 0)
 incumbent_df_for_R_model.loc[:,'Diff_Pct'] = incumbent_df_for_R_model.loc[:,'House_Pct'].values - incumbent_df_for_R_model.loc[:,'Senate_Pct'].values
 IND_average_advantage = incumbent_df_for_R_model.loc[(incumbent_df_for_R_model['elections_won']==0)& (incumbent_df_for_R_model['Demographic']=='Inner Metropolitan'),]['Diff_Pct'].mean()
-print('average startign incumbency advantage:', IND_average_advantage)
+print('average startign incumbency advantage: x =', x, IND_average_advantage)
+
+
+
+
+
+
+
 
 def make_party_category_dict():
 
@@ -111,12 +120,21 @@ non_incumbent_df = non_incumbent_df[['incumbent_party','Ideology','Diff_Pct']]
 
 import pdb;pdb.set_trace()
 
+# now get averages for IND incumbent:
+IND_Left = non_incumbent_df.loc[non_incumbent_df['Ideology']=='Left','Diff_Pct'].mean()
+IND_ALP = non_incumbent_df.loc[non_incumbent_df['Ideology']=='ALP','Diff_Pct'].mean()
+IND_Centre = non_incumbent_df.loc[non_incumbent_df['Ideology']=='Centre','Diff_Pct'].mean()
+IND_COAL = non_incumbent_df.loc[non_incumbent_df['Ideology']=='COAL','Diff_Pct'].mean()
+IND_Right = non_incumbent_df.loc[non_incumbent_df['Ideology']=='Right','Diff_Pct'].mean()
 
 
 
 
 
 
+
+
+import pdb;pdb.set_trace()
 
 
 
