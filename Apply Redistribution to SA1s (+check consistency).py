@@ -279,7 +279,7 @@ elif data_year == '2013':
 # Rename old divisions prior to analysis, treating as the natural state; ignores the effect of renaming divisions!
 name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
 
-import pdb;pdb.set_trace()
+#import pdb;pdb.set_trace()
 # remame old_div to new_div if there was a name change!
 if name_changes_year_dict[data_year]:
     Redistribution_SA1s.loc[Redistribution_SA1s['old_div'].isin(name_changes_year_dict[data_year].keys()),'old_div'] = Redistribution_SA1s['old_div'].map(name_changes_year_dict[data_year])
@@ -290,7 +290,7 @@ Redistribution_SA1s.loc[:,['new_div','old_div']] = Redistribution_SA1s.loc[:,['n
 
 Redistribution_SA1s_changes = Redistribution_SA1s.loc[Redistribution_SA1s['new_div']!=Redistribution_SA1s['old_div'],][[f'SA1_CODE{SA1_suffix}','new_div','old_div']]
 
-#import pdb;pdb.set_trace()
+import pdb;pdb.set_trace()
 
 
 #Redistribution_SA1s_changes.to_csv(f"Redistribution_SA1_changes{str(int(data_year)+2)}.csv", index=False)
@@ -311,7 +311,7 @@ import pdb;pdb.set_trace()
 
 
 name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
-abolished_divs = {'2016': set(['Port Adelaide']),'2019':set(['Stirling'])}
+abolished_divs = {'2022':set(['Higgins','North Sydney']), '2016': set(['Port Adelaide']),'2019':set(['Stirling']),'2013':set(['Charlton'])}
 
 
 def add_1_to_1_rows_non_abolished(Redistribution_pairs_year, old_year,new_year, abolished_divs):

@@ -48,7 +48,15 @@ Actual_results_dict = {}
 Fundamentals_results_dict = {}
 Fundamentals_estimate_dict = {}
 
+Prior_estimates_df = pd.read_csv(f"Fundamentals_Votes_Following_{data_year}.csv", index_col = None)
+
+Prior_estimates_dict = {
+    div: pd.DataFrame([group.set_index("PartyAb")["FP_Votes"].to_dict()])
+    for div, group in Prior_estimates_df.groupby("div_nm")
+}
+
 def group_into_Fundamentals_Categories(party_votes_shares_df, div):
+    # creates a structured data frame  with columns ALP,COAL,GRN,Other by combining all the votes of the respective categories
 
     ALP_cat = {'ALP','CLR'}
     COAL_cat = {'LP','NP','CLP','LNP','LNQ'}
@@ -67,6 +75,8 @@ def group_into_Fundamentals_Categories(party_votes_shares_df, div):
 
     return Fundamentals_grouped_df
 
+Fundamentals_results_list = []
+Fundamentals_estimate_list = []
 
 
 for div in Actual_results['div_nm'].unique():
@@ -82,18 +92,45 @@ for div in Actual_results['div_nm'].unique():
     Actual_results.loc[Actual_results['div_nm'] == div,'PartyAb'] = adjusted_party_names
 
     Actual_results_dict[div] = div_results.pivot(index='div_nm', columns='PartyAb', values='CalculationValue')
-    Fundamentals_results_dict[div] = group_into_Fundamentals_Categories(Actual_results_dict[div], div)
-    Fundamentals_estimate_dict[div] = group_into_Fundamentals_Categories(Prior_Estimates_dict[div], div)
+    #Fundamentals_results_dict[div] = group_into_Fundamentals_Categories(Actual_results_dict[div], div)
+    #Fundamentals_estimate_dict[div] = group_into_Fundamentals_Categories(Prior_estimates_dict[div], div)
+
+    Fundamentals_results_list.append(group_into_Fundamentals_Categories(Actual_results_dict[div], div))
+    Fundamentals_estimate_list.append(group_into_Fundamentals_Categories(Prior_estimates_dict[div], div))
 
 
 
-Fundamentals_dict = {}
-# GRN, ALP+CLR, COAL+all the others, Other! - sum each category!
+Fundamentals_results_df = pd.concat(Fundamentals_results_list)
+Fundamentals_estimate_df = pd.concat(Fundamentals_results_list)
+# Step 1: Compute Swing
+swing = Fundamentals_results_df - Fundamentals_estimate_df  # Swing is just the difference
+
+# Step 2: ALR Transformation (Drop last column 'D')
+ref_col = 'COAL'  # Reference category to remove
+alr_swing = np.log(swing.drop(columns=[ref_col]).div(swing[ref_col], axis=0))
+
+# Step 3: Compute Covariance Matrix
+cov_matrix = alr_swing.cov()
 
 
-for div in 
 
-
+def split_vote_share_dirichlet(total_vote_share, Others_proportions, alpha_scale=50, n_samples=1): # chatgpt written
+    """
+    Splits a given total vote share across m parties using a Dirichlet distribution.
+    
+    Parameters:
+    - total_vote_share (float): The total percentage of votes to split (e.g., 0.185 for 18.5%).
+    - proportions (list of float): A list of m proportions summing to 1 (used as mean proportions).
+    - alpha_scale (float): Scaling factor for the Dirichlet concentration parameter (higher = lower variance).
+    - n_samples (int): Number of samples to generate.
+    
+    Returns:
+    - np.ndarray: An array of shape (n_samples, m) with sampled vote shares.
+    """
+    assert np.isclose(sum(Others_proportions), 1), "Proportions must sum to 1."
+    alpha = np.array(Others_proportions) * alpha_scale  # Convert mean proportions into Dirichlet parameters
+    samples = np.random.dirichlet(alpha, size=n_samples) * total_vote_share
+    return samples
 
 
 

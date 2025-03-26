@@ -961,6 +961,9 @@ def dict_to_long_df(matrix_dict, dict_name):
 
 #dict_to_long_df(similarity_matrix_dict, "Similarity")
 
+import pdb;pdb.set_trace()
+# can't use div_nms as cols as they change - must use numbers???
+
 # Combine all dictionaries into one DataFrame
 if Type == 'State':
     Similarity_df = pd.concat([
