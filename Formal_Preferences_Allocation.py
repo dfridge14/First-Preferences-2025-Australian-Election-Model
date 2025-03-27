@@ -59,7 +59,7 @@ final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007
 
 
 is_redistribution = 0
-data_year = '2016'
+data_year = '2019'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 
 new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner','Gorton']}
@@ -1329,6 +1329,7 @@ def combine_coalition(all_votes_df):
     coalition_proportions = coalition_columns.div(coalition_columns.sum(axis=1), axis=0).replace([np.inf, -np.inf, np.nan], 0) # very unlikely to be 0
 
     # convert coalition columns to 'COAL'
+    all_votes_df = all_votes_df.copy()
     all_votes_df["COAL"] = all_votes_df["COALLP"] + all_votes_df["COALNP"]  # Sum the two columns
     all_votes_df = all_votes_df.drop(columns=["COALLP", "COALNP"])
 
@@ -1394,15 +1395,16 @@ def reduce_candidates_to_set_size(div, Reduce_dict_PP, reduced_c_size, by_pp_id 
 
     zero_columns = reduced_votes_by_PP.columns[(reduced_votes_by_PP.eq(0) | reduced_votes_by_PP.isna()).all()].tolist()
 
+
     reduced_votes_by_PP.loc[:,zero_columns] = reduced_votes_by_PP[zero_columns].astype(float) # avoids type warning for 2022 McEwen Casey/Nicholls
     reduced_votes_by_PP.loc[:,zero_columns] = np.nan # convert other cols to nan
     reduced_votes_by_PP = reduced_votes_by_PP.loc[:, ~reduced_votes_by_PP.iloc[0].isna()] # remove nan columns - don't need to store extra c1 candidates!
 
-    if (div in Coalition_double_divs) and combine_double_divs: # HOPEFULLY THIS WILL WORK EVEN IF ONLY 1 IN C1
+    if (div in Coalition_double_divs) and combine_double_divs and ('COALLP' in reduced_votes_by_PP.columns) and ('COALNP' in reduced_votes_by_PP.columns):
         #import pdb;pdb.set_trace()
         reduced_votes_by_PP = combine_coalition(reduced_votes_by_PP)[0] # finally, combine 'COALLP' and 'COALNP' into 'COAL'
     elif div in Coalition_double_divs:
-        reduced_votes_by_PP.rename(columns={'COALNP':'COAL', 'COALLP':'COAL'}, inplace=True)
+        reduced_votes_by_PP = reduced_votes_by_PP.copy().rename(columns={'COALNP':'COAL', 'COALLP':'COAL'})
 
     #import pdb;pdb.set_trace()
 
@@ -1416,17 +1418,20 @@ def expand_candidates_to_set_size(div, reduced_votes_by_PP, DOP_div_expand_dict,
 
     expanded_votes = reduced_votes_by_PP
 
+    # this should be measured only by whether 'COALLP' and 'COALNP' in columns of expanded_votes
     if (div in Coalition_double_divs) and combine_double_divs:
         #import pdb;pdb.set_trace()
-        c_size = max([list_div2.index('COALLP'),list_div2.index('COALNP')])+1 # makes sure that both COALLP and COALNP are there to be proportioned
-        coalition_proportions = combine_coalition(reduce_candidates_to_set_size(div, DOP_div_pref_percent_dict, c_size, by_pp_id=False))[1] # get coalition proportions of div2; DON'T PASS Coalition_double_divs SO IT RETURNS SEPARATED!!!
-        expanded_votes = separate_coalition(expanded_votes, coalition_proportions, by_pp_id=False) # split coalition into 2 again
+        if ('COAL' in expanded_votes.columns) and ('COALLP' in list_div2) and ('COALNP' in list_div2):
+            c_size = max([list_div2.index('COALLP'),list_div2.index('COALNP')])+1 # makes sure that both COALLP and COALNP are there to be proportioned
+            coalition_proportions = combine_coalition(reduce_candidates_to_set_size(div, DOP_div_pref_percent_dict, c_size, by_pp_id=False))[1] # get coalition proportions of div2; DON'T PASS Coalition_double_divs SO IT RETURNS SEPARATED!!!
+            expanded_votes = separate_coalition(expanded_votes, coalition_proportions, by_pp_id=False) # split coalition into 2 again
         #c_size += 1
         # I THINK THAT NEEDED TO ADD 1 TO C_SIZE, ASSUMING THAT C2 DOES NOT INCLUDE DUPLICATED COAL.
     elif div in Coalition_double_divs:
         # just rename the one that exists!
         import pdb;pdb.set_trace()
-        expanded_votes.rename(columns={'COAL':'COALLP','COAL':'COALNP'}, inplace=True) # IS THIS A MISTAKE?????????
+        if 'COAL' in expanded_votes.columns:
+            expanded_votes.rename(columns={'COAL':'COALLP','COAL':'COALNP'}, inplace=True) # IS THIS A MISTAKE?????????
         
 
     Final_Count_Number = wide_df_expand.iloc[-1,0] # CountNumber is column 0
@@ -1482,8 +1487,6 @@ def simple_redistribution(div1,div2,DOP_By_PP_Pref_Percent_wide_dict,DOP_div_exp
     #    else:
     #        reduced_votes_by_PP.rename(columns={'COAL':'COALNP'})
 
-    if (div1 == 'Bendigo') & (div2 == 'McEwen'):
-        import pdb;pdb.set_trace()
 
     if m < c2:
         expanded_votes_by_PP = expand_candidates_to_set_size(div2, reduced_votes_by_PP, DOP_div_expand_dict, DOP_div_pref_percent_dict, m, c2, list_div2, Coalition_double_divs, combine_double_divs)
@@ -1506,11 +1509,15 @@ def complex_redistribution(div1,div2, DOP_By_PP_Pref_Percent_wide_dict, complex_
 
 
     else: # need to construct reduced votes to c1 directly (no independent)
+
+
+
         m = len(complex_pair_row['m_list'])
         c1 = len(complex_pair_row['c1_list'])
         c2 = len(complex_pair_row['c2_list'])
 
         if (len(Coalition_double_divs) == 1) and (div1 in Coalition_double_divs):
+            # I DON'T THINK THIS WILL EVER HAVE COALNP/COALLP IN IT! REMOVED TO COAL BEFORE ENTERING COMPLEX_REDISTRIBUTION
             combine_double_divs = False if sum(p in complex_pair_row['c1_list'] for p in ['COALNP','COALNP']) == 1 else True # ONLY RELEVANT FOR LEN(combine_double_divs) == 1
 
         reduced_votes_by_PP = reduce_candidates_to_set_size(div1, DOP_By_PP_Pref_Percent_wide_dict, c1, by_pp_id, Coalition_double_divs, combine_double_divs, votes_to_reduce=votes_to_reduce) # want to reduce div1 to c1 candidates
@@ -1528,7 +1535,6 @@ def complex_redistribution(div1,div2, DOP_By_PP_Pref_Percent_wide_dict, complex_
     # apply First Preferences allocation
     allocated_votes_to_c2 = allocate_Formal_prefs_complex(Formal_prefs_dict, Senate_party_abvs_dict, reduced_votes_by_PP, complex_pair_row, by_pp_id = by_pp_id)
     
-
     #import pdb;pdb.set_trace()
 
     #I THINK THIS SECTION CAN JUST BE ELIMINATED - WANT OUTPUT OF COMPLEX TO BE COMBINED, WHICH IT ALREADY IS!!!
@@ -1674,6 +1680,9 @@ def adjust_c1_c2_for_incumbency_adv(div, expand_wide_dict, pref_percent_wide_dic
     ### extra column for pp_id if by_pp_id == True)
     # 1. get top 5 cands, 2. reverse incumb.advantage, 3. expand to full vote
 
+    JULIA_BANKS_INCUMBENCY_ADVANTAGE = 1.1915
+
+
     wide_df1 = pref_percent_wide_dict[div]
     wide_df_expand = expand_wide_dict[div] # same div here!
 
@@ -1688,8 +1697,7 @@ def adjust_c1_c2_for_incumbency_adv(div, expand_wide_dict, pref_percent_wide_dic
     # make zero columns into nan
     #zero_columns = reduced_votes_by_PP.iloc[0, 0 + by_pp_id:] == 0
     #zero_columns = zero_columns[zero_columns].index.tolist()
-    zero_columns = reduced_votes_by_PP.columns[0 + by_pp_id:][reduced_votes_by_PP.iloc[:,0 + by_pp_id:].eq(0).all()].tolist() # new version to ensure whole column is 0!
-
+    zero_columns = reduced_votes_by_PP.columns[0 + by_pp_id:][(reduced_votes_by_PP.iloc[:,0 + by_pp_id:].eq(0) | reduced_votes_by_PP.iloc[:,0 + by_pp_id:].isna()).all()].tolist() # new version to ensure whole column is 0!
 
     reduced_votes_by_PP.loc[:,zero_columns] = np.nan
     #reduced_votes_by_PP.iloc[:, 1:] = reduced_votes_by_PP.iloc[:, 1:].where(reduced_votes_by_PP.iloc[:, 1:] > 0)
@@ -1708,6 +1716,7 @@ def adjust_c1_c2_for_incumbency_adv(div, expand_wide_dict, pref_percent_wide_dic
 
     for _,  incumbent_row in Incumbency_by_div.loc[Incumbency_by_div['div_nm']==div,].iterrows(): # incumbent_row is a series
 
+
         party = incumbent_row['PartyAb']
 
 
@@ -1715,18 +1724,22 @@ def adjust_c1_c2_for_incumbency_adv(div, expand_wide_dict, pref_percent_wide_dic
         incumbent_years = incumbent_row['elections_won']
         INCUMBENT_ADVANTAGE, NONINCUMBENT_DISADVANTAGE_dict = get_incumbency_advantage(div, top_party_list, div_to_state_dict, party_category_dict, name_changes_year_dict, data_year, CURR_FINAL_CANDIDATE_NO, incumbent_party = party, incumbent_years = incumbent_years)
 
+        if (data_year == '2019') and (incumbent_row['div_nm']=='Flinders'): # this is the Julia Banks clause
+            scale_factor = JULIA_BANKS_INCUMBENCY_ADVANTAGE/INCUMBENT_ADVANTAGE
+            NONINCUMBENT_DISADVANTAGE_dict = {key: value * scale_factor for key, value in NONINCUMBENT_DISADVANTAGE_dict.items()}
+            INCUMBENT_ADVANTAGE = JULIA_BANKS_INCUMBENCY_ADVANTAGE
+
          # fix up any issues with LP/NP and INDs
         if (party in ['LP','NP']) & ((div_to_state_dict[div] in ['VIC','NSW']) | ((data_year == '2007') & (div_to_state_dict[div] == 'QLD'))):
             party = 'COAL' if 'COAL' in top_party_list else 'COAL' + party
 
+        if party.startswith('IND'):
+            import pdb;pdb.set_trace()         # CHECK TO MAKE SURE THE CORRECT NUMBERING OF INDX MAINTAINED
+            party = party + div # should be correct IND number (i.e. IND1) as Incumbents_by_div created using 2022 data
+
         if party not in top_party_list:
             print('A dark evil is causing unruliness', div, party, top_party_list)
             import pdb;pdb.set_trace()
-
-        if party.startswith('IND'):
-            import pdb;pdb.set_trace()         # CHECK TO MAKE SURE THE CORRECT NUMBERING OF INDX MAINTAINED!
-
-            party = party + div # should be correct IND number (i.e. IND1) as Incumbents_by_div created using 2022 data
 
         reduced_votes_by_PP[party] -= INCUMBENT_ADVANTAGE
         reduced_votes_by_PP.update(reduced_votes_by_PP[list(NONINCUMBENT_DISADVANTAGE_dict)].add(NONINCUMBENT_DISADVANTAGE_dict)) # adds correct disadvantage
@@ -1795,7 +1808,7 @@ def independent_redistribution_reduce(div, Formal_prefs_dict, DOP_By_PP_Expand_w
 
 
     # if 2 COAL parties i.e. duplicated columns (currently only NP/LP, but could be other coalitions!!!), combine their house votes
-    if (div in Coalition_double_divs) and combine_double_divs:
+    if (div in Coalition_double_divs) and combine_double_divs and ('COALLP' in house_votes.columns) and ('COALNP' in house_votes.columns):
         #house_votes, coalition_proportions = combine_coalition(house_votes)
         house_votes = combine_coalition(house_votes)[0]
         COMBINED_COALLP_NP = 1
@@ -1813,9 +1826,12 @@ def independent_redistribution_reduce(div, Formal_prefs_dict, DOP_By_PP_Expand_w
         #list_div1_FP_combined = list(dict.fromkeys(p if p not in ['COALLP', 'COALNP'] else 'COAL' for p in list_div1_FP))
         # convert to COAL and remove last instance of COAL
         list_div1_FP_combined = ['COAL' if p in ['COALLP', 'COALNP'] else p for p in list_div1_FP]
-        list_div1_FP_combined.reverse()
-        list_div1_FP_combined.remove('COAL')
-        list_div1_FP_combined.reverse()
+
+        # if there is only one COALLP/NP left, don't remove this!
+        if list_div1_FP_combined.count('COAL') > 1:
+            list_div1_FP_combined.reverse()
+            list_div1_FP_combined.remove('COAL')
+            list_div1_FP_combined.reverse()
 
         senate_allocation_list = list_div1_FP_combined
         list_div1_FP = list_div1_FP_combined
@@ -1916,7 +1932,7 @@ def independent_redistribution_expand(div, Formal_prefs_dict, DOP_div_expand_dic
 
     # if 2 COAL parties i.e. duplicated columns (currently only NP/LP, but could be other coalitions!!!), combine their house votes, or just rename to COAL if latter is irrelevant
     # alternatively, if both 'COALLP' and 'COALNP' in list, then
-    if (div in Coalition_double_divs) and (combine_double_divs or (('COALLP' in list_div2_FP) and ('COALNP' in list_div2_FP))):
+    if (div in Coalition_double_divs) and (('COALLP' in list_div2_FP) and ('COALNP' in list_div2_FP)):
         house_votes, coalition_proportions = combine_coalition(house_votes)
         COMBINED_COALLP_NP = 1
     elif div in Coalition_double_divs:
@@ -1964,7 +1980,7 @@ def independent_redistribution_expand(div, Formal_prefs_dict, DOP_div_expand_dic
     # add COALNP and COALLP back!
     if ('COALLP' in votes_to_expand.columns) and ('COALNP' in votes_to_expand.columns):
         donation_proportion = donation_proportion.assign(COALLP=donation_proportion['COAL'], COALNP=donation_proportion['COAL']).drop(columns=['COAL'])
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
 
 
 
@@ -1981,7 +1997,7 @@ def independent_redistribution_expand(div, Formal_prefs_dict, DOP_div_expand_dic
     redistribution_votes = votes_to_expand*(1 - donation_proportion.iloc[0]) # proportions remaining for the m parties
     redistribution_votes = pd.concat([redistribution_votes, receiving_percentages], axis = 1)
 
-    # if forcibly combined COALLP/COALNP, return it!
+    # if forcibly combined COALLP/COALNP, return it! - I don't think we need this - should be done by expand_to_cand_size anyway!
     if COMBINED_COALLP_NP and not (('COALLP' in redistribution_votes.columns) and ('COALNP' in redistribution_votes.columns)):
         coalition_proportions = pd.concat([coalition_proportions] * len(redistribution_votes), ignore_index=True)
         coalition_proportions.index = redistribution_votes.index
@@ -2060,6 +2076,9 @@ def transform_to_raw_votes(redistributed_votes, giver_div, name_changes_year_dic
     if redistributed_votes_raw.isna().any().any():
         print(giver_div, 'there are some nan cols')
         import pdb;pdb.set_trace()
+
+
+
 
 
     # adjust to get integer values for votes
@@ -2315,9 +2334,6 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Senate_parties_by_di
 
         div1, div2 = Redistribution_pairs_df.iloc[i].tolist() # get giver and receiver for pair i
 
-        #if div1 not in ['Banks','Barton','Batman','Bendigo']:
-        #    continue
-
         votes_to_reduce = votes_to_reduce_dict[div1] if votes_to_reduce_dict else pd.DataFrame()
 
         Senate_parties = Senate_parties_by_div.loc[Senate_parties_by_div['div_nm'] == div1,"PartyAbList"].iloc[0]
@@ -2360,8 +2376,6 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Senate_parties_by_di
                 Coalition_double_divs.append(div2)
 
 
-
-
         # IF ANY INDS ARE INVOLVED in DIV1, CALCULATE THIER LATENT VOTES STORED IN OTHER PARTIES
         if IND_VOTES_ONLY and any(item.startswith("IND") for item in list_div1):
 
@@ -2381,6 +2395,7 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Senate_parties_by_di
         set1,set2 = set(list_div1), set(list_div2)
         common = set1 & set2
         m = len(common) if not c2_dict else len(list_div2) # if new candidates, then list_div2 is this smallest minimum!
+
 
         # IF ONE OR BOTH DIVS ARE A COALITION_DOUBLE_DIV, CHECK IF IT'S SIMPLE AT HEART: EITHER ONE COAL IS AN EXTRA, OR WHEN COALS ARE COMBINED, IT IS SIMPLE
         first_COAL_simple, combined_COAL_simple, both_separate_COAL_simple, both_combined_COAL_simple, m_dd, list_div1_COAL_combined, list_div2_COAL_combined, list_div1_first_COAL, list_div2_first_COAL= check_Coalition_double_divs_for_simple_case(div1,div2,list_div1, list_div2, m, Coalition_double_divs, c2_dict)
@@ -2430,6 +2445,8 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Senate_parties_by_di
                     common = set(list_div1) & set(list_div2) # all COALs are as 'COAL'
                 elif len(Coalition_double_divs) == 2:
                     common = set(list_div1) & set(list_div2) 
+            else:
+                list_div1_preserved, list_div2_preserved = list_div1.copy(), list_div2.copy() # make sure that these exist!
         
             c1 = find_c1_c2(list_div1, common) # length of relevant subset of list_div1
             c2 = find_c1_c2(list_div2, common) if not c2_dict else len(list_div2)# length of relevant subset of list_div2
@@ -2507,7 +2524,7 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Senate_parties_by_di
 
 
                     if not ((div2 in new_seats_list) or c2_dict):
-                        redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, expand_dict_whole, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2) # expand from c2 to full (irrelevant whether there has been an independent update)
+                        redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, expand_dict_whole, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2_preserved) # expand from c2 to full (irrelevant whether there has been an independent update)
                     else:
                         redistributed_votes = reduced_votes
                 
@@ -2535,7 +2552,7 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Senate_parties_by_di
                         reduced_votes = independent_redistribution_expand(div2, Formal_prefs_dict, expand_dict_whole, DOP_div_pref_percent_dict, c2,Incumbency_by_div, div_to_state_dict, party_category_dict, name_changes_year_dict, FINAL_CANDIDATE_NO, data_year, list_div2_FP, votes_to_expand = reduced_votes, Coalition_double_divs = Coalition_double_divs, combine_double_divs = 1 - first_COAL_simple)
                     
                     if not ((div2 in new_seats_list) or c2_dict):
-                        redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, expand_dict_whole, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2, Coalition_double_divs = Coalition_double_divs, combine_double_divs = 1 - first_COAL_simple) # expand from c2 to full (irrelevant whether there has been an independent update)
+                        redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, expand_dict_whole, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2_preserved, Coalition_double_divs = Coalition_double_divs, combine_double_divs = 1 - first_COAL_simple) # expand from c2 to full (irrelevant whether there has been an independent update)
                     else:
                         redistributed_votes = reduced_votes
                     #elif first_COAL_simple: # CAN THIS EVER BE USEFUL, AS WE ARE ALREADY RESTRICTED TO C1- AND C2-? No, but in this case other COAL is in c1/c2-extras. Need to take care when expanding/reducing
@@ -2549,13 +2566,33 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Senate_parties_by_di
                 
                 # COMPLEX REDISTRIBUTION (PERHAPS WITH NON-SENATE/IND)
 
+                print("complex or independent complex",div1,div2) 
+                complexrd += 1 
+
+
+                # handle case where list_div1/2_FP has only single COALLP, but mlist/newcommon only has COAL (always)
+                if Coalition_double_divs:
+                    if ('COALLP' in list_div1_FP) ^ ('COALNP' in list_div1_FP):
+                        COAL_replaced_list1 = [p if p not in ['COALLP','COALNP'] else 'COAL' for p in list_div1_FP]
+                    else:
+                        COAL_replaced_list1 = list_div1_FP
+
+                    if ('COALLP' in list_div2_FP) ^ ('COALNP' in list_div2_FP):
+                        COAL_replaced_list2 = list_div2_FP
+                    else:
+                        COAL_replaced_list2 = [p if p not in ['COALLP','COALNP'] else 'COAL' for p in list_div2_FP]
+                else:
+                    COAL_replaced_list1,COAL_replaced_list2 = list_div1_FP,list_div2_FP
+
+
+
                 mlist = [x for x in newcommon]
-                list1 = mlist + [x for x in list_div1_FP if x not in newcommon] # order with first m parties, then remaining ci-m parties
-                list2 = mlist + [x for x in list_div2_FP if x not in newcommon]
+                list1 = mlist + [x for x in COAL_replaced_list1 if x not in newcommon] # order with first m parties, then remaining ci-m parties
+                list2 = mlist + [x for x in COAL_replaced_list2 if x not in newcommon]
 
-
+                # make sure that this is working efficiently:
                 if len(Coalition_double_divs) == 1: # LONG WAY TO ADD DOUBLE COALS INTO MLIST POSITION, SO THAT THEY WILL BE MERGED TO BE IDENTICAL TO MLIST!
-                    if div1 in Coalition_double_divs:
+                    if (div1 in Coalition_double_divs) and ('COALLP' in list_div1_FP) and ('COALNP' in list_div1_FP): # only need if both are in c1!
                        
                         hit_else = False  # Track if else clause is triggered
                         mlist_separated_COALS = []
@@ -2567,7 +2604,7 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Senate_parties_by_di
                                 hit_else = True  # Prevent further additions
 
                         list1 = mlist_separated_COALS + [x for x in list_div1_FP if x not in mlist_separated_COALS] # remainder
-                    else:
+                    elif (div2 in Coalition_double_divs) and ('COALLP' in list_div2_FP) and ('COALNP' in list_div2_FP):
 
                         hit_else = False  # Track if else clause is triggered
                         mlist_separated_COALS = []
@@ -2598,6 +2635,7 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Senate_parties_by_di
                 else:
                     #do_double_divs = [] if Coalition_double_divs and (div1 not in Coalition_double_divs) else Coalition_double_divs # Only non-empty if div1 is Coalition_double_divs
                     c2_redistributed_votes = complex_redistribution(div1,div2,Reduce_dict_PP, complex_pair_row, c1_votes = None, by_pp_id = by_pp_id, Coalition_double_divs = Coalition_double_divs, votes_to_reduce=votes_to_reduce)
+                
 
                 #import pdb;pdb.set_trace()
                 # expand from c2 onwards
@@ -2605,13 +2643,11 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Senate_parties_by_di
                     c2_redistributed_votes = independent_redistribution_expand(div2, Formal_prefs_dict, expand_dict_whole, DOP_div_pref_percent_dict, c2,Incumbency_by_div, div_to_state_dict, party_category_dict, name_changes_year_dict, FINAL_CANDIDATE_NO, data_year, list_div2_FP, votes_to_expand = c2_redistributed_votes, Coalition_double_divs = Coalition_double_divs)
                 
                 if not ((div2 in new_seats_list)or c2_dict):
-                    redistributed_votes = expand_candidates_to_set_size(div2, c2_redistributed_votes, expand_dict_whole, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2, Coalition_double_divs = Coalition_double_divs) # expand from c2 to full (irrelevant whether there has been an independent update)
+                    redistributed_votes = expand_candidates_to_set_size(div2, c2_redistributed_votes, expand_dict_whole, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2_preserved, Coalition_double_divs = Coalition_double_divs) # expand from c2 to full (irrelevant whether there has been an independent update)
                 else:
                     redistributed_votes = c2_redistributed_votes
 
-
-                print("complex or independent complex",div1,div2) 
-                complexrd += 1   
+  
 
         #import pdb;pdb.set_trace()
 
@@ -2837,7 +2873,7 @@ def reduce_to_Omnipresent_parties(Formal_prefs_dict, Senate_parties_by_div, list
                         reduced_votes = independent_redistribution_expand(div2, Formal_prefs_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2,Incumbency_by_div, div_to_state_dict, party_category_dict, name_changes_year_dict, FINAL_CANDIDATE_NO, data_year, list_div2_FP, votes_to_expand = reduced_votes)
 
                     if (not (div2 in new_seats_list)) and False: 
-                        redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2) # expand from c2 to full (irrelevant whether there has been an independent update)
+                        redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2_preserved) # expand from c2 to full (irrelevant whether there has been an independent update)
                     else:
                         redistributed_votes = reduced_votes
                 
@@ -2865,7 +2901,7 @@ def reduce_to_Omnipresent_parties(Formal_prefs_dict, Senate_parties_by_div, list
                         reduced_votes = independent_redistribution_expand(div2, Formal_prefs_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2,Incumbency_by_div, div_to_state_dict, party_category_dict, name_changes_year_dict, FINAL_CANDIDATE_NO, data_year, list_div2_FP, votes_to_expand = reduced_votes, Coalition_double_divs = Coalition_double_divs, combine_double_divs = 1 - first_COAL_simple)
                     
                     if (not (div2 in new_seats_list) and False): # never expand! 
-                        redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2, Coalition_double_divs = Coalition_double_divs, combine_double_divs = 1 - first_COAL_simple) # expand from c2 to full (irrelevant whether there has been an independent update)
+                        redistributed_votes = expand_candidates_to_set_size(div2, reduced_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2_preserved, Coalition_double_divs = Coalition_double_divs, combine_double_divs = 1 - first_COAL_simple) # expand from c2 to full (irrelevant whether there has been an independent update)
                     else:
                         redistributed_votes = reduced_votes
                     #elif first_COAL_simple: # CAN THIS EVER BE USEFUL, AS WE ARE ALREADY RESTRICTED TO C1- AND C2-? No, but in this case other COAL is in c1/c2-extras. Need to take care when expanding/reducing
@@ -2932,8 +2968,8 @@ def reduce_to_Omnipresent_parties(Formal_prefs_dict, Senate_parties_by_div, list
                 if non_senate_parties_div2:
                     c2_redistributed_votes = independent_redistribution_expand(div2, Formal_prefs_dict, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2,Incumbency_by_div, div_to_state_dict, party_category_dict, name_changes_year_dict, FINAL_CANDIDATE_NO, data_year, list_div2_FP, votes_to_expand = c2_redistributed_votes, Coalition_double_divs = Coalition_double_divs)
                 
-                if (not (div2 in new_seats_list)) and 0: # never expand!
-                    redistributed_votes = expand_candidates_to_set_size(div2, c2_redistributed_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2, Coalition_double_divs = Coalition_double_divs) # expand from c2 to full (irrelevant whether there has been an independent update)
+                if (not (div2 in new_seats_list)) and False: # never expand!
+                    redistributed_votes = expand_candidates_to_set_size(div2, c2_redistributed_votes, DOP_div_expand_dict, DOP_div_pref_percent_dict, c2, expanded_c_size = 'full', list_div2=list_div2_preserved, Coalition_double_divs = Coalition_double_divs) # expand from c2 to full (irrelevant whether there has been an independent update)
                 else:
                     redistributed_votes = c2_redistributed_votes
 
@@ -3366,7 +3402,7 @@ def amend_Formal_prefs_dict(Formal_prefs_dict, data_year, name_changes_year_dict
 
             # 5. Waverley KINGSFORD SMITH PPVC - Wentworth!!!
             FP_div = Formal_prefs_dict['Wentworth']
-            lender = 'Waverley WENTWORTH PPVC '
+            lender = 'Waverley WENTWORTH PPVC'
             borrower = 'Waverley KINGSFORD SMITH PPVC'
 
             lender_FPs = FP_div.loc[FP_div['pp_nm'] == lender,]
@@ -3522,11 +3558,14 @@ def incumbency_advantage_change(div, Elimination_order_dict, DOP_By_PP_Expand_wi
     # store 0-row indices so that they are replaced with 0
     zero_rows_pp_ids = Final_x_Pct.set_index('pp_id').index[Final_x_Pct.iloc[:, 1:].eq(0).all(axis=1)]
 
+
     # make zero columns into nan and ignore
-    zero_columns = Final_x_Pct.columns[0 + by_pp_id:][Final_x_Pct.iloc[:,0 + by_pp_id:].eq(0).all()].tolist() # new version to ensure whole column is 0!
+    zero_columns = Final_x_Pct.columns[0 + by_pp_id:][(Final_x_Pct.iloc[:,0 + by_pp_id:].eq(0) | Final_x_Pct.iloc[:,0 + by_pp_id:].isna()).all()].tolist() # new version to ensure whole column is 0!
     Final_x_Pct.loc[:,zero_columns] = np.nan
     Final_x_Pct = Final_x_Pct.sort_index()
     top_party_list = Final_x_Pct.columns[~Final_x_Pct.iloc[0].isna()].tolist()[0 + by_pp_id:]
+
+    
     
 
     curr_incumbent_row = Incumbency_by_div.loc[Incumbency_by_div['div_nm']==div,]
@@ -3757,6 +3796,8 @@ def split_into_c2_dict(Div_parties_next_dict, map_new_seats_to_old_seats):
         c2_dict[div] = party_list
         new_parties_dict[div] = new_party_list
 
+
+
     return c2_dict, new_parties_dict
 
 
@@ -3769,15 +3810,17 @@ def perform_Ideology_donation(Ideology_Donation_df, party_category_dict, First_P
 
     for div in new_parties_dict.keys():
 
+        non_IND_new_parties = new_parties_dict[div].copy()
+
         div_to_get_senate = map_new_seats_to_old_seats[div] if div in new_seats_list else div
 
-        if 'IND' in new_parties_dict[div]:
-            IND_dict[div] = ['IND']
-            new_parties_dict[div] = [p for p in new_parties_dict[div] if p != 'IND']
+        if 'IND' in non_IND_new_parties:
+            IND_in_div = ['IND']
+            non_IND_new_parties = [p for p in non_IND_new_parties if p != 'IND']
         else:
-            IND_dict[div] = []
+            IND_in_div = []
 
-        new_party_list = new_parties_dict[div] if party_type=='new' else IND_dict[div]
+        new_party_list = non_IND_new_parties if party_type=='new' else IND_in_div
         if new_party_list:
 
             num_parties = len(c2_dict[div]) + 1 + len(new_party_list) # ensure that if multiple extra candidates that they split the 'new' vote!
@@ -3973,7 +4016,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
                 curr_pair_PP_df = Initial_First_Prefs_By_PP_Complete_Redistributed[pair].drop('INFORMAL', axis = 1).set_index('pp_id')
 
                 for party in curr_pair_PP_df.columns: # re-add suffix for non-senate parties (including INDX!)
-                    if party not in Senate_party_abvs_dict[div]:
+                    if party not in Senate_party_abvs_dict[div] and party not in ['COALLP','COALNP']:
                         curr_pair_PP_df.rename(columns = {party: party + div}, inplace = True)
 
                 #import pdb;pdb.set_trace()
@@ -4087,13 +4130,16 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
             First_Prefs_By_PP_Complete_Redistributed = perform_Ideology_donation(Ideology_Donation_IND_df, party_category_dict, First_Prefs_By_PP_Complete_Redistributed, new_parties_dict, c2_dict, new_seats_list, div_to_state_dict, map_new_seats_to_old_seats, next_year, Ideo_Categories, party_type='IND')
 
             for pair in First_Prefs_By_PP_Complete_Redistributed.keys():
-                First_Prefs_By_PP_Complete_Redistributed[pair] = transform_to_raw_votes(First_Prefs_By_PP_Complete_Redistributed[pair], pair[0], name_changes_year_dict, data_year, IS_FINAL_TRANSFORMATION = True)
+                First_Prefs_By_PP_Complete_Redistributed[pair] = transform_to_raw_votes(First_Prefs_By_PP_Complete_Redistributed[pair], pair[0], name_changes_year_dict, data_year, IS_FINAL_TRANSFORMATION = True).reset_index()
 
 
 
             First_Prefs_By_PP_Complete_Allocated = {**Initial_First_Prefs_By_PP_Complete_Redistributed, **Transition_First_Prefs_By_PP_Complete_Redistributed, **First_Prefs_By_PP_Complete_Redistributed}
 
             #import pdb;pdb.set_trace()
+
+            print("done", time.time() - start)
+
 
 
             to_csv = 1

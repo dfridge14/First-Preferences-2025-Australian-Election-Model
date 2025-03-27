@@ -4,8 +4,12 @@ import numpy as np
 from itertools import product
 import os,time
 from datetime import datetime
+from pathlib import Path
 
-os.chdir("C:\\Dania\\ABS downloads")
+
+
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+os.chdir(base_dir)
 
 NO_ADDITIONAL_COLUMNS = 2 # Date, SS, UND (possibly also brand add in case of missing ss allocation) - removed UND!!!!!
 
@@ -113,8 +117,11 @@ def parse_date_range(date_str):
 
 
 election_year = '2022'
+
+
+
 if election_year == '2022':
-    Opinion_Polls_2022_National = pd.read_csv("2022ElectionPollFormatted.csv").iloc[:,:num_parties_per_election_year[election_year]+NO_ADDITIONAL_COLUMNS].dropna(how='all')
+    Opinion_Polls_2022_National = pd.read_csv(f"{election_year}ElectionPollFormatted.csv").iloc[:,:num_parties_per_election_year[election_year]+NO_ADDITIONAL_COLUMNS].dropna(how='all')
 
     # Convert date format to datetime.date
     dates = pd.Series(Opinion_Polls_2022_National.iloc[:,0])
@@ -136,7 +143,72 @@ if election_year == '2022':
     Poll_Swings_National = Opinion_Polls_2022_National.iloc[:-1,]
 
 
-    Poll_Swings_National.to_csv("2022PollSwingsNational.csv", index=False)
+    Poll_Swings_National.to_csv(f"NationalPollsforMGRW{election_year}.csv", index=False)
+
+
+if election_year == '2019':
+    Opinion_Polls_National = pd.read_csv(f"{election_year}ElectionPollFormatted.csv").iloc[:,:num_parties_per_election_year[election_year]+NO_ADDITIONAL_COLUMNS].dropna(how='all')
+
+    # Convert date format to datetime.date
+    dates = pd.Series(Opinion_Polls_National.iloc[:,0])
+
+
+    median_dates = pd.to_datetime(dates, errors='coerce')
+
+    last_election_date = datetime.strptime(Opinion_Polls_National.iloc[-1,0], "%d-%b-%y") 
+    days_since_election = (median_dates - last_election_date).dt.days
+
+    Opinion_Polls_National.iloc[:,0] = days_since_election
+    Opinion_Polls_National.rename(columns={"Date": "Days since last election"}) # not active yet
+
+    Opinion_Polls_National.iloc[:, 2:] = Opinion_Polls_National.iloc[:, 2:].apply(pd.to_numeric, errors='raise') # eliminate strings
+    Opinion_Polls_National.iloc[:, 2:] = Opinion_Polls_National.iloc[:, 2:].round(3)
+    Opinion_Polls_National.iloc[:,1] = Opinion_Polls_National.iloc[:,1].astype(int)  
+    Poll_Swings_National = Opinion_Polls_National.iloc[:-1,]
+
+    Poll_Swings_National = Poll_Swings_National.sort_values(by='Days since last election')
+
+
+    # make Other category - bring together KAP,ACP,XEN, Other
+
+    Insignificant_parties_2019 = ['XEN','KAP','ACP']
+    #Insignificant_parties_sum = Poll_Swings_National[Insignificant_parties_2019].sum(axis=1)
+    Poll_Swings_National = Poll_Swings_National.drop(Insignificant_parties_2019, axis=1)
+
+    Other_col = 1 - Poll_Swings_National[['COAL','ALP','GRN','ON']].sum(axis = 1)
+    Poll_Swings_National.loc[:,'OTH'] = Other_col
+
+    Poll_Swings_National.to_csv(f"NationalPollsforMGRW{election_year}.csv", index=False)
+
+
+
+if election_year == '2016':
+
+    Opinion_Polls_National = pd.read_csv(f"{election_year}ElectionPollFormatted.csv").iloc[:,:num_parties_per_election_year[election_year]+NO_ADDITIONAL_COLUMNS].dropna(how='all')
+
+    # Convert date format to datetime.date
+    dates = pd.Series(Opinion_Polls_National.iloc[:,0])
+    parsed_median_dates = dates.apply(parse_date_range) 
+
+    parsed_median_dates = pd.to_datetime(parsed_median_dates) # datetime objects
+
+    last_election_date = datetime.strptime(Opinion_Polls_National.iloc[-1,0], "%d-%b-%y") 
+    days_since_election = (parsed_median_dates - last_election_date).dt.days
+
+    Opinion_Polls_National.iloc[:,0] = days_since_election
+    Opinion_Polls_National.rename(columns={"Date": "Days since last election"}) # not active yet
+
+    Opinion_Polls_National.iloc[:, 2:] = Opinion_Polls_National.iloc[:, 2:].apply(pd.to_numeric, errors='raise') # eliminate strings
+    Opinion_Polls_National.iloc[:, 2:] = Opinion_Polls_National.iloc[:, 2:].round(3)
+    Opinion_Polls_National.iloc[:,1] = Opinion_Polls_National.iloc[:,1].astype(int)  
+    Poll_Swings_National = Opinion_Polls_National.iloc[:-1,]
+
+    Poll_Swings_National = Poll_Swings_National.sort_values(by='Days since last election')
+
+    Poll_Swings_National.to_csv(f"NationalPollsforMGRW{election_year}.csv", index=False)
+
+
+
 
 
     # Compute the median date

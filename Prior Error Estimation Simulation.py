@@ -6,6 +6,9 @@ import os
 import glob
 from pathlib import Path
 
+import numpy as np
+from scipy.stats import multivariate_normal, dirichlet
+
 
 
 # automatic error debugging
@@ -102,8 +105,10 @@ for div in Actual_results['div_nm'].unique():
 
 Fundamentals_results_df = pd.concat(Fundamentals_results_list)
 Fundamentals_estimate_df = pd.concat(Fundamentals_results_list)
-# Step 1: Compute Swing
-swing = Fundamentals_results_df - Fundamentals_estimate_df  # Swing is just the difference
+
+
+# Step 1: Compute Swing, as a proportion
+swing = Fundamentals_results_df.div(Fundamentals_results_df.sum(axis=1), axis=0) - Fundamentals_estimate_df.div(Fundamentals_estimate_df.sum(axis=1), axis=0)  # Swing is just the difference
 
 # Step 2: ALR Transformation (Drop last column 'D')
 ref_col = 'COAL'  # Reference category to remove
@@ -134,3 +139,45 @@ def split_vote_share_dirichlet(total_vote_share, Others_proportions, alpha_scale
 
 
 
+def alr_to_simplex(alr_samples): # chatgpt written
+    """Convert ALR-transformed samples back to simplex space."""
+    exp_values = np.exp(alr_samples)
+    denominator = 1 + np.sum(exp_values, axis=-1, keepdims=True)
+    base_category = 1 / denominator
+    return np.hstack([exp_values / denominator, base_category])
+
+def split_category_in_simplex(simplex_probs, split_index, num_splits, dirichlet_alpha): # chatgpt written
+    """Splits a category in probability space into `num_splits` subcategories using a Dirichlet distribution."""
+    category_to_split = simplex_probs[:, split_index]
+    split_proportions = dirichlet.rvs(dirichlet_alpha, size=len(simplex_probs))
+    new_split_probs = category_to_split[:, None] * split_proportions
+
+    # Construct new probability simplex
+    new_simplex_probs = np.delete(simplex_probs, split_index, axis=1)
+    new_simplex_probs = np.hstack([
+        new_simplex_probs[:, :split_index], 
+        new_split_probs, 
+        new_simplex_probs[:, split_index:]
+    ]) 
+    return new_simplex_probs
+
+
+
+
+
+# simulate from 750-dim covariance matrix:
+dim = 750  # Number of dimensions
+n_samples = 1000  # Number of samples
+
+# Example: Generate a random positive semi-definite covariance matrix
+np.random.seed(42)  # For reproducibility
+A = np.random.randn(dim, dim)
+cov_matrix = A @ A.T  # Ensure it's positive semi-definite
+
+# Example: Set mean vector (750-dimensional)
+mean_vector = np.random.randn(dim)
+
+# Sample from the MVN distribution
+samples = multivariate_normal.rvs(mean=mean_vector, cov=cov_matrix, size=n_samples)
+
+print(samples.shape)  # Should be (1000, 750)
