@@ -89,7 +89,7 @@ def parse_date_range(date_str):
             if second_start_date_split == [first_range_split[1]]: # no info about months i.e. ['18', '19']  --> only use first date!!!
                 start_date = first_start_date_split[0]
                 # still need month!!! - use second range to extract
-                second_range_split = second_range.split('–')
+                second_range_split = [part.strip() for part in second_range.split('–')]#second_range.split('–')
                 second_range_split_d1, second_range_split_d2 = second_range_split[0],second_range_split[1]
 
                 if second_range_split_d1.split(' ') == [second_range_split_d1]: # e.g. [25] --> move to d2! # remove space after comma
@@ -105,7 +105,7 @@ def parse_date_range(date_str):
         else: # ['28 Feb', '1 Mar'] --> extract just the first element
             
             start_date = first_range_split[0] + ' ' + year
-        
+
         start_date = datetime.strptime(start_date, "%d %b %Y") # format fully
 
     print(start_date,end_date)
@@ -116,7 +116,7 @@ def parse_date_range(date_str):
 
 
 
-election_year = '2022'
+election_year = '2019'
 
 
 
@@ -147,29 +147,36 @@ if election_year == '2022':
 
 
 if election_year == '2019':
-    Opinion_Polls_National = pd.read_csv(f"{election_year}ElectionPollFormatted.csv").iloc[:,:num_parties_per_election_year[election_year]+NO_ADDITIONAL_COLUMNS].dropna(how='all')
+    Opinion_Polls_National = pd.read_csv(f"{election_year}ElectionPollFormatted.csv").dropna(how='all')
 
     # Convert date format to datetime.date
     dates = pd.Series(Opinion_Polls_National.iloc[:,0])
 
 
     median_dates = pd.to_datetime(dates, errors='coerce')
+    import pdb;pdb.set_trace()
 
-    last_election_date = datetime.strptime(Opinion_Polls_National.iloc[-1,0], "%d-%b-%y") 
+
+    last_election_date = datetime.strptime(Opinion_Polls_National.iloc[-1,0], '%m/%d/%y') 
     days_since_election = (median_dates - last_election_date).dt.days
 
+    import pdb;pdb.set_trace()
+
+
     Opinion_Polls_National.iloc[:,0] = days_since_election
-    Opinion_Polls_National.rename(columns={"Date": "Days since last election"}) # not active yet
+    Opinion_Polls_National = Opinion_Polls_National.rename(columns={"Date": "Days since last election"}) # not active yet
 
     Opinion_Polls_National.iloc[:, 2:] = Opinion_Polls_National.iloc[:, 2:].apply(pd.to_numeric, errors='raise') # eliminate strings
     Opinion_Polls_National.iloc[:, 2:] = Opinion_Polls_National.iloc[:, 2:].round(3)
-    Opinion_Polls_National.iloc[:,1] = Opinion_Polls_National.iloc[:,1].astype(int)  
     Poll_Swings_National = Opinion_Polls_National.iloc[:-1,]
+    Poll_Swings_National['Sample size'] = Poll_Swings_National['Sample size'].astype(int)  
+
 
     Poll_Swings_National = Poll_Swings_National.sort_values(by='Days since last election')
 
 
     # make Other category - bring together KAP,ACP,XEN, Other
+    import pdb;pdb.set_trace()
 
     Insignificant_parties_2019 = ['XEN','KAP','ACP']
     #Insignificant_parties_sum = Poll_Swings_National[Insignificant_parties_2019].sum(axis=1)
@@ -186,6 +193,8 @@ if election_year == '2016':
 
     Opinion_Polls_National = pd.read_csv(f"{election_year}ElectionPollFormatted.csv").iloc[:,:num_parties_per_election_year[election_year]+NO_ADDITIONAL_COLUMNS].dropna(how='all')
 
+    import pdb;pdb.set_trace()
+
     # Convert date format to datetime.date
     dates = pd.Series(Opinion_Polls_National.iloc[:,0])
     parsed_median_dates = dates.apply(parse_date_range) 
@@ -195,15 +204,21 @@ if election_year == '2016':
     last_election_date = datetime.strptime(Opinion_Polls_National.iloc[-1,0], "%d-%b-%y") 
     days_since_election = (parsed_median_dates - last_election_date).dt.days
 
+    import pdb;pdb.set_trace()
+
+
     Opinion_Polls_National.iloc[:,0] = days_since_election
-    Opinion_Polls_National.rename(columns={"Date": "Days since last election"}) # not active yet
+    Opinion_Polls_National = Opinion_Polls_National.rename(columns={"Date": "Days since last election"}) # not active yet
 
     Opinion_Polls_National.iloc[:, 2:] = Opinion_Polls_National.iloc[:, 2:].apply(pd.to_numeric, errors='raise') # eliminate strings
     Opinion_Polls_National.iloc[:, 2:] = Opinion_Polls_National.iloc[:, 2:].round(3)
-    Opinion_Polls_National.iloc[:,1] = Opinion_Polls_National.iloc[:,1].astype(int)  
     Poll_Swings_National = Opinion_Polls_National.iloc[:-1,]
+    Poll_Swings_National['Sample size'] = Poll_Swings_National['Sample size'].astype(int)  
 
-    Poll_Swings_National = Poll_Swings_National.sort_values(by='Days since last election')
+
+    Poll_Swings_National = Poll_Swings_National.sort_values(by='Days since last election').reset_index(drop=True)
+    import pdb;pdb.set_trace()
+
 
     Poll_Swings_National.to_csv(f"NationalPollsforMGRW{election_year}.csv", index=False)
 

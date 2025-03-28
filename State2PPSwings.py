@@ -3,6 +3,7 @@ import numpy as np
 from itertools import product
 import os,time
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 
 
@@ -247,9 +248,16 @@ def calculate_range_mean(range_str):
 
 
 
-def get_characteristic_matrix(ser):
+def get_characteristic_matrix(ser, method = 'relative'):
     # series with div_nm as index
-    return 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY)  / (ser.max() - ser.min()).iloc[0])
+    if method == 'relative':
+        matrix = 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY)  / (ser.max() - ser.min()).iloc[0])
+    else:
+        diff = np.abs(ser.values[:, None] - ser.values)
+        log_diff = np.log(1 + diff)         # Step 2: Apply the log(1 + diff) transformation
+        max_log_diff = np.log(1 + np.max(diff))        # Step 3: Compute the maximum of the log-transformed differences
+        matrix = np.squeeze(1 - log_diff / max_log_diff)
+    return matrix
 
 
 
@@ -787,7 +795,7 @@ def create_State_match_matrix_dict(election_years):
 
         State_match_matrix_dict[year] = state_by_state_matrix(div_to_state)
 
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
     return State_match_matrix_dict
 
@@ -800,7 +808,7 @@ def create_Demographic_match_matrix(election_years):
         Demographic = pd.read_csv(f"{year}DemographicClassification.csv", index_col=None)[['div_nm','Demographic']]
         Demographic_match_matrix_dict[year] = state_by_state_matrix(Demographic)
 
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
     return Demographic_match_matrix_dict
 
@@ -910,7 +918,7 @@ def create_TCP_type_match_matrix(election_years):
         TCP_pivot = TCP.pivot(index='div_nm', columns='Elected', values='PartyAb').sort_index()
         Main_party_list = ['ALP','LP','LNP']
 
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
 
         
         TCP_pivot.loc[:,'TCP_pair'] = TCP_pivot.apply(lambda row: row['Y'] + '_' + row['N'] if ((row['Y'] in Main_party_list) & (row['N'] in Main_party_list)) else '_'.join(sorted(row)), axis=1)
@@ -927,7 +935,7 @@ def create_TCP_type_match_matrix(election_years):
 
         TCP_type_match_matrix_dict[year] = state_by_state_matrix(TCP_pivot)
 
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
     return TCP_type_match_matrix_dict
 
@@ -971,16 +979,16 @@ if Type == 'State':
         dict_to_long_df(TPP_Swing_Avg_matrix_dict, "TPPSwing"),
         dict_to_long_df(Proximity_matrix_dict,'Adjacency')
     ], ignore_index=True)
-elif Type == 'Elec':
-    Similarity_df = pd.concat([
-        dict_to_long_df(similarity_matrix_dict, "Similarity"),
-        dict_to_long_df(TCP_type_similarity_dict, "TCPType"),
-        dict_to_long_df(State_match_matrix_dict,'State'),
-        dict_to_long_df(Demographic_match_matrix_dict,'Demographic')
+#elif Type == 'Elec':
+    #Similarity_df = pd.concat([
+    #    dict_to_long_df(similarity_matrix_dict, "Similarity"),
+    #    dict_to_long_df(TCP_type_similarity_dict, "TCPType"),
+    #    dict_to_long_df(State_match_matrix_dict,'State'),
+    #    dict_to_long_df(Demographic_match_matrix_dict,'Demographic')#
+    #
+    #], ignore_index=True)
 
-    ], ignore_index=True)
-
-import pdb;pdb.set_trace()
+#import pdb;pdb.set_trace()
 
 
 def wide_to_long(df):
@@ -1005,6 +1013,24 @@ def wide_to_long(df):
     df_pivot = df_long.pivot_table(index=["State1", "State2", "Election_Year"],  columns="Dict", values="Value").reset_index()
 
     return df_pivot
+
+
+
+
+def get_swings_from_merged_df(merged_df):
+    data_year_cols = merged_df.columns[-6:-3]
+    previous_year_cols = merged_df.columns[-3:]
+    merged_df[previous_year_cols] = merged_df[previous_year_cols].div(merged_df[previous_year_cols].sum(axis=1), axis=0)
+    merged_df[data_year_cols] = merged_df[data_year_cols].div(merged_df[data_year_cols].sum(axis=1), axis=0)
+
+    swing_df = merged_df.copy()
+    swing_df[data_year_cols] = (swing_df[data_year_cols].values - swing_df[previous_year_cols].values)*100
+
+    swing_df.rename(columns = {f'COAL_{data_year}':'COAL_swing', f'ALP_{data_year}':'ALP_swing'}, inplace=True)
+    swing_df = swing_df[['div_nm','COAL_swing','ALP_swing']].sort_values(by='div_nm')
+
+    return swing_df
+
 
 
 # Assuming 'df' has states as column names and a 'row_index' column
@@ -1033,14 +1059,63 @@ else:
     # unfinished - try to replicate above for new situation!
     import pdb;pdb.set_trace()
 
-    swings_relationship_matrix = pd.DataFrame() # read in swings...
-    swings_relationship_matrix['Dict'] = 'Correlation'
-    Regression_Format_df_wide = pd.concat([corr_df,Similarity_df], ignore_index=True)
-    Regression_Format_df = wide_to_long(Regression_Format_df_wide)
-    Regression_Format_df[['div1', 'div2']] = Regression_Format_df.apply(lambda row: pd.Series(sorted([row['div1'], row['div2']])), axis=1)
-    Regression_Format_df = Regression_Format_df.drop_duplicates()
+    name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
+
+    Regression_list = []
+    for data_year in ['2016','2019','2022']:
+        previous_data_year = str(int(data_year) - 3)
+        Electorate_3PPs_redistributed = pd.read_csv(f'{previous_data_year}Electorate_3PPs_redistributed.csv', index_col=None)
+        Omnipresent_parties_df_curr = pd.read_csv(f'{data_year}OmnipresentPartiesByPP.csv', index_col=None).drop('INFORMAL', axis = 1)
+
+        import pdb;pdb.set_trace()
+
+        Electorate_3PPs_curr = Omnipresent_parties_df_curr.groupby('div_nm', as_index=False).sum(numeric_only=True)
+        Electorate_3PPs_curr = Electorate_3PPs_curr[['div_nm'] + Electorate_3PPs_curr.columns[-3:].tolist()]
+
+        # change name back to 2016 name!!!
+        reversed_name_changes = {v: k for k, v in name_changes_year_dict[data_year].items()}
+        Electorate_3PPs_curr.loc[:,'div_nm'] = Electorate_3PPs_curr['div_nm'].replace(reversed_name_changes)
 
 
+        import pdb;pdb.set_trace()
 
+        Electorate_3PPs_swings = Electorate_3PPs_curr.merge(Electorate_3PPs_redistributed, on = 'div_nm', suffixes=(f'_{data_year}',f'_{previous_data_year}'))
+        Electorate_3PPs_swings = get_swings_from_merged_df(Electorate_3PPs_swings)
 
+        # should give two columns of swings - each requires a distance-based measurement - between 0 and 1
+        COAL_swing_matrix = get_characteristic_matrix(Electorate_3PPs_swings[['div_nm','COAL_swing']].set_index('div_nm'), method = 'log') # skew is large: -2.054 for 2016
+        ALP_swing_matrix = get_characteristic_matrix(Electorate_3PPs_swings[['div_nm','ALP_swing']].set_index('div_nm'), method = 'log')
+        Swing_diff = (COAL_swing_matrix + ALP_swing_matrix) / 2 # average for better inference!
+
+        import pdb;pdb.set_trace()
+        plt.hist(COAL_swing_matrix, bins=10)
+        plt.show()
+        Swing_diff_matrix = pd.DataFrame(Swing_diff, index = Electorate_3PPs_swings['div_nm'], columns = Electorate_3PPs_swings['div_nm'])
+
+        
+        # Get the upper triangular indices (excluding the diagonal)
+        i, j = np.triu_indices(Swing_diff_matrix.shape[0], k=1)  # k=1 excludes the diagonal
+
+        index_names = Swing_diff_matrix.index
+        seat_i = [index_names[idx] for idx in i]
+        seat_j = [index_names[idx] for idx in j]
+
+        # Create a DataFrame
+        Regression_Format_df = pd.DataFrame({
+            'Response': Swing_diff[i, j],
+            'Similarity': similarity_matrix_dict[data_year].to_numpy()[i, j],
+            'TCP_type': TCP_type_similarity_dict[data_year].to_numpy()[i, j],
+            'State': State_match_matrix_dict[data_year].to_numpy()[i, j],
+            'Demographic': Demographic_match_matrix_dict[data_year].to_numpy()[i, j],
+            'Elec1': seat_i,  # Optional: to track which pairs are being compared
+            'Elec2': seat_j
+        })
+
+        import pdb;pdb.set_trace()
+        Regression_list.append(Regression_Format_df)
+
+    Regression_Format_df = pd.concat(Regression_list, ignore_index=True)
+    import pdb;pdb.set_trace()
+
+    Regression_Format_df.to_csv('Electorate_Similarity_for_R.csv', index=False)
 import pdb;pdb.set_trace()

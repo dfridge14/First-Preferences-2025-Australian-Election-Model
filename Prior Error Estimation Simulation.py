@@ -10,7 +10,6 @@ import numpy as np
 from scipy.stats import multivariate_normal, dirichlet
 
 
-
 # automatic error debugging
 import sys
 import pdb
@@ -31,91 +30,142 @@ os.chdir(base_dir)
 
 
 
+
+
 start = time.time()
 
-data_year = '2013' # predicting next year's election
-next_year = '2016'
-Actual_results = pd.read_csv(f"{next_year}HouseDOPByDivision.csv", index_col = None).rename(columns={'DivisionNm':'div_nm'})
-# COUntNUmber ==0, Pref Percent & decide on format - long or wide? Will generate swings for each, so wide is best
 
 
-# Need the following: dict of new_div: party_First_Pref_votes_in_alphabetical_order (separate INDXs and COALs)
-Actual_results = Actual_results.loc[(Actual_results['CountNumber']==0) & (Actual_results['CalculationType']=='Preference Percent'),['div_nm','PartyAb','CalculationValue']]
-Actual_results.loc[Actual_results['PartyAb'].isna(),].fillna('IND')
-# rename CLR to ALP
-# rename IND to INDX by order
+def get_prior_ALR_covariance(data_year):
+    next_year = str(int(data_year)+3)
+    Actual_results = pd.read_csv(f"{next_year}HouseDOPByDivision.csv", skiprows=1, index_col = None).rename(columns={'DivisionNm':'div_nm'})
+    # COUntNUmber ==0, Pref Percent & decide on format - long or wide? Will generate swings for each, so wide is best
 
-target = 'IND'
 
-Actual_results_dict = {}
-Fundamentals_results_dict = {}
-Fundamentals_estimate_dict = {}
+    # Need the following: dict of new_div: party_First_Pref_votes_in_alphabetical_order (separate INDXs and COALs)
+    Actual_results = Actual_results.loc[(Actual_results['CountNumber']==0) & (Actual_results['CalculationType']=='Preference Percent'),['div_nm','PartyAb','CalculationValue']]
+    Actual_results.loc[Actual_results['PartyAb'].isna(),].fillna('IND')
+    Actual_results.loc[Actual_results['PartyAb']=='GVIC','PartyAb'] = 'GRN'
+    Actual_results.loc[Actual_results['PartyAb']=='CLR','PartyAb'] = 'ALP'
 
-Prior_estimates_df = pd.read_csv(f"Fundamentals_Votes_Following_{data_year}.csv", index_col = None)
+    # rename IND to INDX by order
 
-Prior_estimates_dict = {
-    div: pd.DataFrame([group.set_index("PartyAb")["FP_Votes"].to_dict()])
-    for div, group in Prior_estimates_df.groupby("div_nm")
-}
+    target = 'IND'
 
-def group_into_Fundamentals_Categories(party_votes_shares_df, div):
-    # creates a structured data frame  with columns ALP,COAL,GRN,Other by combining all the votes of the respective categories
+    Actual_results_dict = {}
+    Fundamentals_results_dict = {}
+    Fundamentals_estimate_dict = {}
 
-    ALP_cat = {'ALP','CLR'}
-    COAL_cat = {'LP','NP','CLP','LNP','LNQ'}
-    GRN_cat = {'GRN'}
+    Prior_estimates_df = pd.read_csv(f"Fundamentals_Votes_For_{next_year}.csv", index_col = None)
 
-    Non_Other_sets = ALP_cat | COAL_cat | GRN_cat  # Union of all sets
-    Other_cols = set(party_votes_shares_df.columns) - Non_Other_sets  # Columns in none of the sets
+    Prior_estimates_dict = {
+        div: pd.DataFrame([group.set_index("PartyAb")["FP_Votes"].to_dict()])
+        for div, group in Prior_estimates_df.groupby("div_nm")
+    }
 
-    # Compute the sums
-    sum1 = party_votes_shares_df[ALP_cat.intersection(party_votes_shares_df.columns)].sum(axis=1).iloc[0]
-    sum2 = party_votes_shares_df[COAL_cat.intersection(party_votes_shares_df.columns)].sum(axis=1).iloc[0]
-    sum3 = party_votes_shares_df[GRN_cat.intersection(party_votes_shares_df.columns)].sum(axis=1).iloc[0]
-    sum4 = party_votes_shares_df[Other_cols].sum(axis=1).iloc[0]
+    def group_into_Fundamentals_Categories(party_votes_shares_df, div, is_Other = True):
+        # creates a structured data frame  with columns ALP,COAL,GRN,Other by combining all the votes of the respective categories
 
-    Fundamentals_grouped_df = pd.DataFrame([{'ALP':sum1,'COAL':sum2,'GRN':sum3,'Other':sum4}], index=div)
+        ALP_cat = {'ALP','CLR'}
+        COAL_cat = {'COAL','COALNP','COALLP','LP','NP','CLP','LNP','LNQ'}
+        GRN_cat = {'GRN'}
 
-    return Fundamentals_grouped_df
+        Non_Other_sets = ALP_cat | COAL_cat | GRN_cat  # Union of all sets
+        Other_cols = set(party_votes_shares_df.columns) - Non_Other_sets  # Columns in none of the sets
+
+        ALPs = ALP_cat.intersection(party_votes_shares_df.columns)
+        COALs = COAL_cat.intersection(party_votes_shares_df.columns)
+        GRNs = GRN_cat.intersection(party_votes_shares_df.columns)
+        OTHs = Other_cols
+
+        # Compute the sums
+        sum1 = party_votes_shares_df[list(next(iter(ALPs)) if len(ALPs) == 1 and isinstance(next(iter(ALPs)), set) else ALPs)].sum(axis=1).iloc[0]
+        sum2 = party_votes_shares_df[list(next(iter(COALs)) if len(COALs) == 1 and isinstance(next(iter(COALs)), set) else COALs)].sum(axis=1).iloc[0]
+        if is_Other:
+            sum3 = party_votes_shares_df[list(next(iter(GRNs)) if len(GRNs) == 1 and isinstance(next(iter(GRNs)), set) else GRNs)].sum(axis=1).iloc[0]
+            sum4 = party_votes_shares_df[list(next(iter(OTHs)) if len(OTHs) == 1 and isinstance(next(iter(OTHs)), set) else OTHs)].sum(axis=1).iloc[0]
+        else:
+            sum3 = party_votes_shares_df[list(next(iter(GRNs)) if len(GRNs) == 1 and isinstance(next(iter(GRNs)), set) else GRNs) + list(next(iter(OTHs)) if len(OTHs) == 1 and isinstance(next(iter(OTHs)), set) else OTHs)].sum(axis=1).iloc[0]
+
+        if is_Other:
+            Fundamentals_grouped_df = pd.DataFrame([{'ALP':sum1,'COAL':sum2,'GRN':sum3,'Other':sum4}], index=[div])
+        else:
+            Fundamentals_grouped_df = pd.DataFrame([{'ALP':sum1,'COAL':sum2,'Other':sum3}], index=[div])
+
+
+        return Fundamentals_grouped_df
+
+    Fundamentals_results_list = []
+    Fundamentals_estimate_list = []
+
+
+    for div in Actual_results['div_nm'].unique():
+        div_results = Actual_results.loc[Actual_results['div_nm'] == div,].copy()
+
+        div_results.loc[:,'Count'] = div_results.groupby('PartyAb').cumcount() + 1     # Count instances of the target string
+        # Replace duplicates of the target string with increasing strings IND1, IND2, IND3, ...
+        adjusted_party_names = div_results.apply(
+            lambda row: f"{row['PartyAb']}{row['Count']}" if row['PartyAb'] == target else row['PartyAb'], axis=1
+        ).reset_index(drop=True)
+
+        div_results_combined = div_results.groupby(['div_nm', 'PartyAb'], as_index=False)['CalculationValue'].sum()
+
+        Actual_results.loc[Actual_results['div_nm'] == div,'PartyAb'] = adjusted_party_names
+
+        Actual_results_dict[div] = div_results_combined.pivot(index='div_nm', columns='PartyAb', values='CalculationValue')
+        #Fundamentals_results_dict[div] = group_into_Fundamentals_Categories(Actual_results_dict[div], div)
+        #Fundamentals_estimate_dict[div] = group_into_Fundamentals_Categories(Prior_estimates_dict[div], div)
+
+        Fundamentals_results_list.append(group_into_Fundamentals_Categories(Actual_results_dict[div], div))
+        Fundamentals_estimate_list.append(group_into_Fundamentals_Categories(Prior_estimates_dict[div], div))
+
+
+
+    Fundamentals_results_df = pd.concat(Fundamentals_results_list)/100
+    Fundamentals_estimate_df = pd.concat(Fundamentals_estimate_list)
+
+    Fundamentals_results_df = Fundamentals_results_df[Fundamentals_results_df['Other'] != 0.0]
+    Fundamentals_estimate_df = Fundamentals_estimate_df[Fundamentals_estimate_df['Other'] != 0.0]
+
+    Fundamentals_results_df = Fundamentals_results_df.div(Fundamentals_results_df.sum(axis=1), axis=0)
+    Fundamentals_estimate_df = Fundamentals_estimate_df.div(Fundamentals_estimate_df.sum(axis=1), axis=0)  
+
+    return Fundamentals_results_df, Fundamentals_estimate_df
 
 Fundamentals_results_list = []
 Fundamentals_estimate_list = []
 
 
-for div in Actual_results['div_nm'].unique():
-    div_results = Actual_results.loc[Actual_results['div_nm'] == div,]
+for data_year in ['2013','2016','2019']:
+    Fundamentals_results_df,Fundamentals_estimate_df = get_prior_ALR_covariance(data_year)
+    Fundamentals_results_list.append(Fundamentals_results_df)
+    Fundamentals_estimate_list.append(Fundamentals_estimate_df)
 
-    div_results.loc[:,'Count'] = div_results.groupby('PartyAb').cumcount() + 1     # Count instances of the target string
-    # Replace duplicates of the target string with increasing strings IND1, IND2, IND3, ...
-    adjusted_party_names = div_results.loc[div_results["CountNumber"] == 0,].apply(
-        lambda row: f"{row['PartyAb']}{row['Count']}" if row['PartyAb'] == target else row['PartyAb'], axis=1
-    ).reset_index(drop=True)
+full_Fundamentals_results_df = pd.concat(Fundamentals_results_list)
+full_Fundamentals_estimate_df = pd.concat(Fundamentals_estimate_list)
 
-    import pdb;pdb.set_trace()
-    Actual_results.loc[Actual_results['div_nm'] == div,'PartyAb'] = adjusted_party_names
+# center the natural swings to avoid bias - we assume swings are generally unbiased - that we cannot predict direction 3 years prior!
+swings = full_Fundamentals_results_df - full_Fundamentals_estimate_df
+#swings_centered = (swings - swings.mean()).sum(axis=1)
+full_Fundamentals_estimate_df = full_Fundamentals_estimate_df + swings.mean()
 
-    Actual_results_dict[div] = div_results.pivot(index='div_nm', columns='PartyAb', values='CalculationValue')
-    #Fundamentals_results_dict[div] = group_into_Fundamentals_Categories(Actual_results_dict[div], div)
-    #Fundamentals_estimate_dict[div] = group_into_Fundamentals_Categories(Prior_estimates_dict[div], div)
-
-    Fundamentals_results_list.append(group_into_Fundamentals_Categories(Actual_results_dict[div], div))
-    Fundamentals_estimate_list.append(group_into_Fundamentals_Categories(Prior_estimates_dict[div], div))
+import pdb;pdb.set_trace()
 
 
-
-Fundamentals_results_df = pd.concat(Fundamentals_results_list)
-Fundamentals_estimate_df = pd.concat(Fundamentals_results_list)
-
-
-# Step 1: Compute Swing, as a proportion
-swing = Fundamentals_results_df.div(Fundamentals_results_df.sum(axis=1), axis=0) - Fundamentals_estimate_df.div(Fundamentals_estimate_df.sum(axis=1), axis=0)  # Swing is just the difference
-
-# Step 2: ALR Transformation (Drop last column 'D')
 ref_col = 'COAL'  # Reference category to remove
-alr_swing = np.log(swing.drop(columns=[ref_col]).div(swing[ref_col], axis=0))
 
-# Step 3: Compute Covariance Matrix
-cov_matrix = alr_swing.cov()
+results_alr = np.log(full_Fundamentals_results_df.drop(columns=[ref_col]).div(full_Fundamentals_results_df[ref_col], axis=0))
+estimate_alr = np.log(full_Fundamentals_estimate_df.drop(columns=[ref_col]).div(full_Fundamentals_estimate_df[ref_col], axis=0))
+alr_swing = results_alr - estimate_alr
+
+alr_swing_cov = alr_swing.cov()
+
+
+print(alr_swing.cov())
+print((full_Fundamentals_results_df - full_Fundamentals_estimate_df).mean()) # should be 0 due to centralisation adjustment
+
+import pdb;pdb.set_trace()
+
 
 
 
@@ -165,6 +215,13 @@ def split_category_in_simplex(simplex_probs, split_index, num_splits, dirichlet_
 
 
 
+
+
+import pdb;pdb.set_trace()
+
+
+
+
 # simulate from 750-dim covariance matrix:
 dim = 750  # Number of dimensions
 n_samples = 1000  # Number of samples
@@ -178,6 +235,6 @@ cov_matrix = A @ A.T  # Ensure it's positive semi-definite
 mean_vector = np.random.randn(dim)
 
 # Sample from the MVN distribution
-samples = multivariate_normal.rvs(mean=mean_vector, cov=cov_matrix, size=n_samples)
+samples = multivariate_normal.rvs(mean=mean_vector, cov=alr_swing_cov, size=n_samples)
 
 print(samples.shape)  # Should be (1000, 750)

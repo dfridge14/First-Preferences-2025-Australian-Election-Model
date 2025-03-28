@@ -22,9 +22,12 @@ sys.excepthook = exception_handler
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-census_year = "2011"
-data_year = "2013"
-redistribution_type = 'New Candidates'
+census_years_for_data_years = {'2022':'2021','2019':'2016','2016':'2011','2013':'2011'}
+
+
+data_year = "2022"
+census_year = census_years_for_data_years[data_year]
+redistribution_type = 'omnipresent'
 
 div_nm = "Melbourne"
 
@@ -46,8 +49,9 @@ def load_FPBPPRed_dict(data_year, redistribution_type):
     for filepath in glob.glob(f"{output_folder}/*.feather"):
         # Extract keys from filename
         parts = filepath.split("_")
-        key = (parts[1], parts[2].split(".")[0])  # Convert second part to int
-
+        key = (parts[-2], parts[-1].split(".")[0])  # Convert second part to int
+        
+    
         # Read the file back
         df_dict_reloaded[key] = pd.read_feather(filepath)
     
@@ -139,7 +143,11 @@ def rectify_div_SA1_votes(div, Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_di
         ### samples a vote from the set of SA1s for given pp_id proportional to their frequency, vote_difference times
 
         values = row[:-1].values
-        probs = values / values.sum()  # Normalize row to probabilities
+        if values.sum()>0:
+            probs = values / values.sum()  # Normalize row to probabilities
+        else:
+            probs = np.full(len(values), 1/len(values)) # if no vote - Dunif!
+
         labels = row[:-1].index  
         
         # Sample with replacement
@@ -235,6 +243,9 @@ def prepare_wide_dicts_for_MMHg(data_year, census_year, name_changes_year_dict, 
         df_3PP = pd.read_csv(f'{data_year}OmnipresentPartiesByPP.csv', index_col=None).drop('pp_nm', axis=1)
         # need to transform so that only old-new pairs get a key
         Redist_Div_First_Prefs_By_PP_dict_wide = {tuple(row): df_3PP[df_3PP['div_nm'] == row[0]].drop('div_nm', axis=1) for row in Redistribution_pairs.itertuples(index=False)}
+
+
+    #import pdb;pdb.set_trace()
 
     # unaltered First Preferences
     First_Prefs_by_PP_Complete = pd.read_csv(f'{data_year}FirstPrefsByPPComplete.csv', index_col=None)
@@ -652,7 +663,7 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
     # 1. Get total electorate votes from last election
     #if redistribution_type == 'redistribution':
     if redistribution_type == 'New Candidates':
-        Electorate_total_FP_dict = {remaining_div : Redist_Div_First_Prefs_By_PP_dict_wide[(remaining_div,remaining_div)].set_index('pp_id').sum() for remaining_div in [key for key in Redist_Div_First_Prefs_By_PP_dict_wide if key[0] == key[1]]}
+        Electorate_total_FP_dict = {remaining_div[0] : Redist_Div_First_Prefs_By_PP_dict_wide[remaining_div].set_index('pp_id').sum() for remaining_div in [key for key in Redist_Div_First_Prefs_By_PP_dict_wide if key[0] == key[1]]}
     else:
         Electorate_total_FP_dict = {div: Div_First_Prefs_By_PP_dict_wide[div].set_index('pp_id').sum() for div in Div_First_Prefs_By_PP_dict_wide.keys()}
     #elif redistribution_type == 'omnipresent':
@@ -669,6 +680,8 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
 
         Electorate_total_FP_dict[new_div] = pd.Series(0, index=standard_parties, dtype='int32')
 
+    Electorate_total_FP_dict = {k: v for k, v in Electorate_total_FP_dict.items() if k not in abolished_divs_dict[data_year]} # remove abolished divs!
+
 
     print(len(Electorate_total_FP_dict.keys()))
 
@@ -677,12 +690,13 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
 
     # 2. 
     mean = 1
-    for div in old_divs_set: 
+
+    for div in (old_divs_set - abolished_divs_dict[data_year]):
         print(div)
         if redistribution_type == 'redistribution':
             Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Div_First_Prefs_By_PP_dict_wide[div], census_year)
-        #elif redistribution_type == 'omnipresent':
-        #    Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Redist_Div_First_Prefs_By_PP_dict_wide[div], census_year)
+        elif redistribution_type == 'omnipresent':
+            Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Div_First_Prefs_By_PP_dict_wide[div], census_year)
         elif redistribution_type == 'New Candidates':
             # get the moving SA1s (from each old_div)
             curr_div_new_candidate_votes = Redist_Div_First_Prefs_By_PP_dict_wide[(div,div)]
@@ -750,22 +764,17 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
         # PartyAb ( drop INFORMAL)
         # Votes
 
-        long_df = (
-                    pd.concat(Electorate_total_FP_dict)
-                    .reset_index(level=1, drop=True)  # Remove the original row index
-                    .rename_axis("div_nm")  # Rename the dictionary key column
-                    .reset_index()
-                    .melt(id_vars=["div_nm"], var_name="PartyAb", value_name="FP_Votes")
-                    .reset_index(drop=True)
-                )
+        for div in Electorate_total_FP_dict:
+            Electorate_total_FP_dict[div] = Electorate_total_FP_dict[div].loc[~(Electorate_total_FP_dict[div].index=='INFORMAL')].div(Electorate_total_FP_dict[div].iloc[:-1].sum())
+
+        long_df = pd.concat(Electorate_total_FP_dict).reset_index().rename(columns={'level_0':'div_nm','level_1':'PartyAb',0:'FP_Votes'})
         long_df.loc[:,'Preceding_election'] = data_year
-        long_df = long_df[['Preceding_election','div_nm','PartyAb','FP_Votes']]
-        long_df = long_df.loc[~long_df['PartyAb']=='INFORMAL',]
+        long_df = long_df[['Preceding_election','div_nm','PartyAb','FP_Votes']].sort_values(by='div_nm')
 
         import pdb;pdb.set_trace()
 
 
-        long_df.to_csv(f"Fundamentals_Votes_Following_{data_year}.csv", index = False)
+        long_df.to_csv(f"Fundamentals_Votes_For_{str(int(data_year)+3)}.csv", index = False)
 
 
 
