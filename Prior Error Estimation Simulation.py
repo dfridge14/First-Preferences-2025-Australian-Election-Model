@@ -129,18 +129,16 @@ def get_prior_ALR_covariance(data_year):
     Fundamentals_results_df = pd.concat(Fundamentals_results_list)/100
     Fundamentals_estimate_df = pd.concat(Fundamentals_estimate_list)
 
-    import pdb; pdb.set_trace()
-
     # Gorton 2016 adjustment: add 0.001 from GRN to Other
     Fundamentals_results_df.loc[Fundamentals_results_df['Other'] == 0.0,['GRN','Other']] += (-0.001,0.001)
     Fundamentals_estimate_df.loc[Fundamentals_estimate_df['Other'] == 0.0,['GRN','Other']] += (-0.001,0.001)
 
 
-    Fundamentals_results_df = Fundamentals_results_df.div(Fundamentals_results_df.sum(axis=1), axis=0)
-    Fundamentals_estimate_df = Fundamentals_estimate_df.div(Fundamentals_estimate_df.sum(axis=1), axis=0)  
+    Fundamentals_results_df = Fundamentals_results_df.div(Fundamentals_results_df.sum(axis=1), axis=0).sort_index()
+    Fundamentals_estimate_df = Fundamentals_estimate_df.div(Fundamentals_estimate_df.sum(axis=1), axis=0).sort_index()  
 
-    Fundamentals_results_df.index = data_year +  Fundamentals_results_df.index
-    Fundamentals_estimate_df.index = data_year +  Fundamentals_estimate_df.index
+    Fundamentals_results_df.index = str(int(data_year)+3) +  Fundamentals_results_df.index
+    Fundamentals_estimate_df.index = str(int(data_year)+3) +  Fundamentals_estimate_df.index
 
 
     return Fundamentals_results_df, Fundamentals_estimate_df
@@ -179,9 +177,142 @@ print(alr_swing.cov())
 print((full_Fundamentals_results_df - full_Fundamentals_estimate_df).mean()) # should be 0 due to centralisation adjustment
 
 
-simulated_alr_swings = multivariate_normal.rvs(mean=np.zeros(alr_swing.shape[1]), cov=alr_swing_cov, size=451)
+#simulated_alr_swings = multivariate_normal.rvs(mean=np.zeros(alr_swing.shape[1]), cov=alr_swing_cov, size=451)
 
-predicted_alr = estimate_alr + simulated_alr_swings
+#predicted_alr = estimate_alr + simulated_alr_swings
+
+
+
+
+import numpy as np
+import scipy.linalg
+
+# Simulated inputs: Replace these with your actual data
+np.random.seed(42)
+
+# 3x3 ALR covariance matrix (estimate from data)
+ALR_cov = alr_swing_cov
+
+# 150x150 electorate correlation matrix (estimated from data)
+year = '2016'
+R_electorates = pd.read_csv(f"Electorate_Correlation_Matrix_{year}.csv", index_col = 0)
+
+
+def regularize_correlation_matrix(R, alpha=0.2, beta=0.3, min_eigen=0.5, max_eigen=10.0):
+    """
+    Regularizes a correlation matrix by:
+    - Shrinking eigenvalues to avoid extreme variance domination.
+    - Moving extreme correlations toward 0.5.
+    
+    Parameters:
+    - R (np.array): 150x150 correlation matrix.
+    - alpha (float): Strength of shrinkage toward identity.
+    - beta (float): Strength of push toward 0.5.
+    - min_eigen (float): Minimum eigenvalue threshold.
+    - max_eigen (float): Maximum eigenvalue threshold.
+
+    Returns:
+    - np.array: Regularized correlation matrix.
+    """
+    
+    # Eigen decomposition
+    eigvals, eigvecs = np.linalg.eigh(R)
+    
+    # Clip eigenvalues within reasonable bounds
+    eigvals = np.clip(eigvals, min_eigen, max_eigen)
+    
+    # Reconstruct the matrix
+    R_shrinked = eigvecs @ np.diag(eigvals) @ eigvecs.T
+    
+    # Shrink towards identity (reducing dominance of strong correlations)
+    R_regularized = (1 - alpha) * R_shrinked + alpha * np.eye(R.shape[0])
+    
+    # Push correlations toward 0.5 to avoid extremes
+    R_final = R_regularized + beta * (0.5 - R_regularized)
+    
+    # Ensure symmetry and valid range
+    R_final = np.clip((R_final + R_final.T) / 2, -1, 1)
+
+    np.fill_diagonal(R_final, 1.0)
+
+    return R_final
+
+# Example usage with your 150x150 matrix
+R_electorates_regularized = regularize_correlation_matrix(R_electorates)
+
+
+from scipy.linalg import eigh
+
+def adjust_alr_covariance(R_electorates, alr_swing_cov):
+    ### combines electorate correlation matrix and between-party covariance matrix into a block covariance matrix
+
+    # Compute effective eigenvalue as mean eigenvalue of R_electorates
+    eigenvalues = eigh(R_electorates, eigvals_only=True)
+    lambda_eff = np.mean(eigenvalues)
+
+    print('lambda', lambda_eff)
+    
+    # Adjust ALR covariance matrix
+    Sigma_ALR_adjusted = alr_swing_cov / lambda_eff
+    
+    # Compute full 450x450 covariance matrix
+    CovM_total = np.kron(R_electorates, Sigma_ALR_adjusted)
+
+    # Now we need to symmetrize the off-diagonal blocks
+    num_electorates = R_electorates.shape[0]
+    block_size = Sigma_ALR_adjusted.shape[0]  # This is 3, since Sigma is 3x3
+
+    # Iterate over off-diagonal blocks
+    for i in range(num_electorates):
+        for j in range(i + 1, num_electorates):  # Only need to process upper triangle
+            # Get the current blocks
+            block_ij = CovM_total[i*block_size:(i+1)*block_size, j*block_size:(j+1)*block_size]
+            block_ji = CovM_total[j*block_size:(j+1)*block_size, i*block_size:(i+1)*block_size]
+            
+            # Average the off-diagonal blocks to enforce symmetry
+            sym_block = 0.5 * (block_ij + block_ji)
+            
+            # Place the symmetrized blocks back into the covariance matrix
+            CovM_total[i*block_size:(i+1)*block_size, j*block_size:(j+1)*block_size] = sym_block
+            CovM_total[j*block_size:(j+1)*block_size, i*block_size:(i+1)*block_size] = sym_block.T
+    
+    return CovM_total
+
+
+
+
+
+import pdb;pdb.set_trace()
+
+
+# --- Independent Model (Block Diagonal 450x450) ---
+independent_cov = np.kron(np.eye(150), ALR_cov)  # Block diagonal (no cross-electorate correlation)
+independent_samples = np.random.multivariate_normal(np.zeros(450), independent_cov, size=10000)
+
+# --- Correlated Model (Kronecker Product 450x450) ---
+#kronecker_cov = np.kron(R_electorates_regularized, ALR_cov)  # Symmetric Kronecker product
+kronecker_cov = adjust_alr_covariance(R_electorates, alr_swing_cov)
+correlated_samples = np.random.multivariate_normal(np.zeros(450), kronecker_cov, size=10000)
+
+# Compute variances
+independent_variance = np.var(independent_samples, axis=0).reshape(150, 3).mean(axis=0)
+correlated_variance = np.var(correlated_samples, axis=0).reshape(150, 3).mean(axis=0)
+
+# Display results
+print("Variance of swings under different models:")
+print("Independent Model:", independent_variance)
+print("Correlated Model (Kronecker Product):", correlated_variance)
+
+# Ratio of variance reduction
+variance_ratio = correlated_variance / independent_variance
+print("Variance ratio (Correlated / Independent):", variance_ratio)
+
+
+
+
+
+
+
 
 
 
@@ -253,11 +384,11 @@ def split_category_in_simplex(simplex_probs, split_index, num_splits, dirichlet_
     ]) 
     return new_simplex_probs
 
-prior_prediction = alr_to_simplex_vectorized(predicted_alr, ref_col)[['ALP','COAL','GRN','Other']]
+#prior_prediction = alr_to_simplex_vectorized(predicted_alr, ref_col)[['ALP','COAL','GRN','Other']]
 
-def simulate_swings(alr_swing, alr_swing_cov, prior_prediction, num_simulations, dist, df_t):
+def simulate_swings(alr_swing, alr_swing_cov, estimate_alr, num_simulations, dist, df_t):
 
-    all_simulated_samples = np.zeros((num_simulations, prior_prediction.shape[0], prior_prediction.shape[1]))
+    all_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]))
     alr_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]))
 
     for i in range(num_simulations):
@@ -278,7 +409,56 @@ def simulate_swings(alr_swing, alr_swing_cov, prior_prediction, num_simulations,
         all_simulated_samples[i] = curr_prediction
         alr_simulated_samples[i] = predicted_alr
 
-    
+    prior_prediction /= 1000
+
+    simulated_variance = np.var(all_simulated_samples, axis=0)
+
+    # Compute the standard deviation as the square root of the variance
+    simulated_std_dev = np.sqrt(simulated_variance)
+
+    return prior_prediction, pd.DataFrame(simulated_std_dev, columns=full_Fundamentals_estimate_df.columns, index=full_Fundamentals_estimate_df.index), all_simulated_samples, alr_simulated_samples
+
+
+def simulate_correlated_swings(alr_swing, alr_swing_cov, num_simulations, dist, df_t):
+
+    all_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]))
+    alr_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]))
+
+    for i in range(num_simulations):
+
+        concatenated_predicted_alr = np.zeros((0, alr_swing.shape[1]))
+
+        for year in ['2016','2019','2022']:
+            R_electorates = pd.read_csv(f"Electorate_Correlation_Matrix_{year}.csv", index_col = 0)
+            Sigma_total = adjust_alr_covariance(R_electorates, alr_swing_cov)
+
+            
+
+
+
+            if dist == 't':
+                # Rescale covariance for the multivariate t-distribution
+                Cov_t_corrected = ((df_t - 2) / df_t) * Sigma_total  # Adjust scale matrix
+                # Simulate swings using the corrected covariance
+                simulated_alr_swings = multivariate_t.rvs(loc=np.zeros(Sigma_total.shape[0]), shape=Cov_t_corrected, df=df_t).reshape(R_electorates.shape[0], 3)
+            elif dist == 'Normal':
+                simulated_alr_swings = multivariate_normal.rvs(mean=np.zeros(Sigma_total.shape[0]), cov=Sigma_total).reshape(R_electorates.shape[0], 3)
+
+            import pdb;pdb.set_trace()
+
+
+            predicted_alr = pd.concat([estimate_alr.loc[estimate_alr.index.str.startswith(year),] + simulated_alr_swings]) # sum of two values
+
+            concatenated_predicted_alr = pd.concat([concatenated_predicted_alr, predicted_alr]) # add current year's values
+
+        curr_prediction = alr_to_simplex_vectorized(predicted_alr, ref_col)[['ALP','COAL','GRN','Other']]
+        prior_prediction += curr_prediction
+
+        all_simulated_samples[i] = curr_prediction
+        alr_simulated_samples[i] = predicted_alr
+
+    import pdb;pdb.set_trace()
+
 
     prior_prediction /= 1000
 
@@ -290,12 +470,19 @@ def simulate_swings(alr_swing, alr_swing_cov, prior_prediction, num_simulations,
     return prior_prediction, pd.DataFrame(simulated_std_dev, columns=full_Fundamentals_estimate_df.columns, index=full_Fundamentals_estimate_df.index), all_simulated_samples, alr_simulated_samples
 
 
+use_correlation = 1
+
 df_t = 5
 num_simulations = 1000
 
-t_means, t_stds, all_simulated_samples_t, alr_simulated_samples_t = simulate_swings(alr_swing, alr_swing_cov, prior_prediction, num_simulations, 't', df_t)
+if use_correlation:
+    t_means, t_stds, all_simulated_samples_t, alr_simulated_samples_t = simulate_correlated_swings(alr_swing, alr_swing_cov, num_simulations, 't', df_t)
 
-N_means, N_stds, all_simulated_samples_normal, alr_simulated_samples_normal = simulate_swings(alr_swing, alr_swing_cov, prior_prediction, num_simulations, 'Normal', df_t)
+    N_means, N_stds, all_simulated_samples_normal, alr_simulated_samples_normal = simulate_correlated_swings(alr_swing, alr_swing_cov, num_simulations, 'Normal', df_t)
+else:
+    t_means, t_stds, all_simulated_samples_t, alr_simulated_samples_t = simulate_swings(alr_swing, alr_swing_cov, estimate_alr, num_simulations, 't', df_t)
+
+    N_means, N_stds, all_simulated_samples_normal, alr_simulated_samples_normal = simulate_swings(alr_swing, alr_swing_cov, estimate_alr, num_simulations, 'Normal', df_t)
 
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -305,6 +492,8 @@ sns.kdeplot(alr_simulated_samples_t[:, 0], label="T-distribution", color="red", 
 plt.legend()
 plt.title("Comparison of Simulated Swings (ALR Component 1)")
 plt.show()
+
+
 
     
 
