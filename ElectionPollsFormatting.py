@@ -172,7 +172,7 @@ if election_year == '2019':
     Poll_Swings_National['Sample size'] = Poll_Swings_National['Sample size'].astype(int)  
 
 
-    Poll_Swings_National = Poll_Swings_National.sort_values(by='Days since last election')
+    Poll_Swings_National = Poll_Swings_National.sort_values(by='Days since last election').reset_index(drop=True)
 
 
     # make Other category - bring together KAP,ACP,XEN, Other
@@ -182,7 +182,7 @@ if election_year == '2019':
     #Insignificant_parties_sum = Poll_Swings_National[Insignificant_parties_2019].sum(axis=1)
     Poll_Swings_National = Poll_Swings_National.drop(Insignificant_parties_2019, axis=1)
 
-    Other_col = 1 - Poll_Swings_National[['COAL','ALP','GRN','ON']].sum(axis = 1)
+    Other_col = 1 - Poll_Swings_National[['COAL','ALP','GRN','ON','UAPP']].sum(axis = 1)
     Poll_Swings_National.loc[:,'OTH'] = Other_col
 
     Poll_Swings_National.to_csv(f"NationalPollsforMGRW{election_year}.csv", index=False)

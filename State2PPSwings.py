@@ -4,6 +4,7 @@ from itertools import product
 import os,time
 from pathlib import Path
 import matplotlib.pyplot as plt
+from scipy.stats import skew
 
 
 
@@ -142,7 +143,7 @@ census_years = ['2004','2007','2011','2016','2021','2024']
 
 
 NO_OF_STATES = 8
-NO_OF_ELECTORATES = {'2021':151,'2016':150,'2011':150,'2007':150,'2004':150}
+NO_OF_ELECTORATES = {'2024':150, '2021':151,'2016':150,'2011':150,'2007':150,'2004':150}
 
 MEDIAN_AGE_THRESHOLD = 1
 RENT_THRESHOLD = 2
@@ -157,20 +158,22 @@ TPP_ROLLING_AVERAGE_NO = 4
 
 MIN_SIMILARITY = 0
 
-election_years = ['2004','2007','2010','2013','2016','2019','2022']
+election_years = ['2004','2007','2010','2013','2016','2019','2022','2025']
 election_years_extended = ['1993','1996','1998','2001'] # for TPP rolling average
 election_years_extended.extend(election_years) # add older info
 
 
 if Type == 'State':
-    election_year_to_census_year_dict = {'2004':'2006','2007':'2006','2010':'2011','2013':'2011','2016':'2016','2019':'2016','2022':'2021'}
+    election_year_to_census_year_dict = {'2004':'2006','2007':'2006','2010':'2011','2013':'2011','2016':'2016','2019':'2016','2022':'2021','2025':'2021'}
     census_years = ['2006','2011','2016','2021']
 
 else:
-    election_years = ['2007','2010','2013','2016','2019','2022']
-    election_year_to_census_year_dict = {'2004':'2004','2007':'2007','2010':'2011','2013':'2016','2016':'2016','2019':'2021','2022':'2021'}
-    census_years = ['2004','2007','2011','2016','2021']
+    election_years = ['2007','2010','2013','2016','2019','2022','2025']
+    election_year_to_census_year_dict = {'2004':'2004','2007':'2007','2010':'2011','2013':'2016','2016':'2016','2019':'2021','2022':'2021','2025':'2024'}
+    census_years = ['2004','2007','2011','2016','2021','2024']
 
+name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
+abolished_divs = {'2022':set(['Higgins','North Sydney']), '2016': set(['Port Adelaide']),'2019':set(['Stirling']),'2013':set(['Charlton'])}
 
 binary = 0
 
@@ -248,15 +251,22 @@ def calculate_range_mean(range_str):
 
 
 
-def get_characteristic_matrix(ser, method = 'relative'):
+def get_characteristic_matrix(ser, method = 'power'):
     # series with div_nm as index
     if method == 'relative':
         matrix = 1 - (np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1) * (1-MIN_SIMILARITY)  / (ser.max() - ser.min()).iloc[0])
-    else:
-        diff = np.abs(ser.values[:, None] - ser.values)
+    elif method == 'log':
+        diff = np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1).astype(float)
         log_diff = np.log(1 + diff)         # Step 2: Apply the log(1 + diff) transformation
         max_log_diff = np.log(1 + np.max(diff))        # Step 3: Compute the maximum of the log-transformed differences
-        matrix = np.squeeze(1 - log_diff / max_log_diff)
+        matrix = 1 - log_diff / max_log_diff
+        diff = np.empty(diff.shape)
+    elif method == 'power':
+        p = 0.66
+        diff = np.abs(ser.values[:, None] - ser.values).squeeze(axis=-1).astype(float)
+        max_diff = np.max(diff)
+        matrix = 1 - (diff / max_diff) ** p  # Applying the power transformation
+
     return matrix
 
 
@@ -708,13 +718,19 @@ os.chdir(base_dir)
 
 
 
-import pdb;pdb.set_trace()
+#import pdb;pdb.set_trace()
 
 def similarity_linear_transformation(similarity_matrix, Redistribution_reversed):
+
+
+    Redistribution_reversed.loc[:,'new_div'] = Redistribution_reversed['new_div']
 
     # sort alphabetically for consistency
     old_divs = np.sort(Redistribution_reversed['old_div'].unique())
     new_divs = np.sort(Redistribution_reversed['new_div'].unique())
+
+    #import pdb;pdb.set_trace()
+
 
     old_div_index = {name: i for i, name in enumerate(old_divs)}
     new_div_index = {name: i for i, name in enumerate(new_divs)}
@@ -771,7 +787,9 @@ def make_similarity_matrix_electorates(list_of_similarity_matrix_dicts, census_y
         similarity_matrix_dict[election_year] /= len(list_of_similarity_matrix_dicts) # 9 characteristics - average
 
     # get 2016 and 2019 election matrices through 2013-2016 and 2021-2018 data! Tested - correctly performs linear transformation!
-    similarity_matrix_dict['2013'] = similarity_linear_transformation(similarity_matrix_dict['2010'], pd.read_csv('Correspondence_CED_2015_2012_Reversed.csv', index_col = None))
+
+    # this seems FAULTY! WHY 2015-2012???????????/ Shoud be 2012-2009???
+    similarity_matrix_dict['2013'] = similarity_linear_transformation(similarity_matrix_dict['2010'], pd.read_csv('Correspondence_CED_2012_2009_Reversed.csv', index_col = None))
     
     similarity_matrix_dict['2019'] = similarity_linear_transformation(similarity_matrix_dict['2022'], pd.read_csv('Correspondence_CED_2018_2021.csv', index_col = None).rename(columns = {'div_nm_2018':'new_div','div_nm_2021':'old_div','RATIO_FROM_TO':'proportion'}))
     #import pdb;pdb.set_trace()
@@ -790,8 +808,14 @@ def create_State_match_matrix_dict(election_years):
     State_match_matrix_dict = {}
 
     for year in election_years:
-        div_to_state = pd.read_csv(f"{year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
-        div_to_state = div_to_state.rename(columns={'DivisionNm':'div_nm'})[['div_nm','StateAb']]
+        if year == '2025':
+            div_to_state = pd.read_csv(f"{str(int(year)-3)}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+            div_to_state = div_to_state.loc[~(div_to_state['div_nm'].isin(['North Sydney','Higgins'])),]
+            div_to_state = pd.concat([div_to_state, pd.DataFrame({'div_nm':['Bullwinkel'],'StateAb':['WA']})], ignore_index=True).sort_values(by = 'div_nm')
+
+        else:
+            div_to_state = pd.read_csv(f"{year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+            div_to_state = div_to_state[['div_nm','StateAb']]
 
         State_match_matrix_dict[year] = state_by_state_matrix(div_to_state)
 
@@ -805,6 +829,8 @@ def create_Demographic_match_matrix(election_years):
     Demographic_match_matrix_dict = {}
 
     for year in election_years:
+        if year == '2025':
+            continue # unneccesary to add
         Demographic = pd.read_csv(f"{year}DemographicClassification.csv", index_col=None)[['div_nm','Demographic']]
         Demographic_match_matrix_dict[year] = state_by_state_matrix(Demographic)
 
@@ -913,6 +939,8 @@ def create_TCP_type_match_matrix(election_years):
     TCP_type_match_matrix_dict = {}
 
     for year in election_years:
+        if year == '2025':
+            continue # unneccesary to add
         TCP = pd.read_csv(f"{year}HouseTCPByCandidateByVoteType.csv", skiprows=1, index_col=None)[['DivisionNm','PartyAb','Elected']].rename(columns={'DivisionNm':'div_nm'})
         TCP['PartyAb'] = TCP['PartyAb'].replace({'KAP':'IND','XEN':'IND','NXT':'IND','PUP':'IND','CLP':'LNP','LNQ':'LNP'})
         TCP_pivot = TCP.pivot(index='div_nm', columns='Elected', values='PartyAb').sort_index()
@@ -939,11 +967,23 @@ def create_TCP_type_match_matrix(election_years):
 
     return TCP_type_match_matrix_dict
 
+def adjust_TCP_type_for_redistribution(TCP_type_previous_similarity_dict):
 
+    TCP_type_similarity_dict = {}
 
+    #for year in ['2016','2019','2022','2025']:
+
+    TCP_type_similarity_dict['2016'] = similarity_linear_transformation(TCP_type_previous_similarity_dict['2013'], pd.read_csv('Correspondence_CED_2015_2012_Reversed.csv', index_col = None))
+    TCP_type_similarity_dict['2019'] = similarity_linear_transformation(TCP_type_previous_similarity_dict['2016'], pd.read_csv('Correspondence_CED_2018_2015_Reversed.csv', index_col = None))
+    TCP_type_similarity_dict['2022'] = similarity_linear_transformation(TCP_type_previous_similarity_dict['2019'], pd.read_csv('Correspondence_CED_2021_2018_Reversed.csv', index_col = None))
+    TCP_type_similarity_dict['2025'] = similarity_linear_transformation(TCP_type_previous_similarity_dict['2022'], pd.read_csv('Correspondence_CED_2024_2021_Reversed.csv', index_col = None))
+
+    return TCP_type_similarity_dict
 
 if Type == 'Elec':
-    TCP_type_similarity_dict = create_TCP_type_match_matrix(election_years)
+    TCP_type_previous_similarity_dict = create_TCP_type_match_matrix(election_years)
+    
+    TCP_type_similarity_dict = adjust_TCP_type_for_redistribution(TCP_type_previous_similarity_dict)
 
 
 elif Type == 'State':
@@ -969,7 +1009,7 @@ def dict_to_long_df(matrix_dict, dict_name):
 
 #dict_to_long_df(similarity_matrix_dict, "Similarity")
 
-import pdb;pdb.set_trace()
+#import pdb;pdb.set_trace()
 # can't use div_nms as cols as they change - must use numbers???
 
 # Combine all dictionaries into one DataFrame
@@ -1057,9 +1097,8 @@ if Type == 'State':
 
 else:
     # unfinished - try to replicate above for new situation!
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
-    name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
 
     Regression_list = []
     for data_year in ['2016','2019','2022']:
@@ -1067,7 +1106,7 @@ else:
         Electorate_3PPs_redistributed = pd.read_csv(f'{previous_data_year}Electorate_3PPs_redistributed.csv', index_col=None)
         Omnipresent_parties_df_curr = pd.read_csv(f'{data_year}OmnipresentPartiesByPP.csv', index_col=None).drop('INFORMAL', axis = 1)
 
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
 
         Electorate_3PPs_curr = Omnipresent_parties_df_curr.groupby('div_nm', as_index=False).sum(numeric_only=True)
         Electorate_3PPs_curr = Electorate_3PPs_curr[['div_nm'] + Electorate_3PPs_curr.columns[-3:].tolist()]
@@ -1077,7 +1116,7 @@ else:
         Electorate_3PPs_curr.loc[:,'div_nm'] = Electorate_3PPs_curr['div_nm'].replace(reversed_name_changes)
 
 
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
 
         Electorate_3PPs_swings = Electorate_3PPs_curr.merge(Electorate_3PPs_redistributed, on = 'div_nm', suffixes=(f'_{data_year}',f'_{previous_data_year}'))
         Electorate_3PPs_swings = get_swings_from_merged_df(Electorate_3PPs_swings)
@@ -1087,9 +1126,13 @@ else:
         ALP_swing_matrix = get_characteristic_matrix(Electorate_3PPs_swings[['div_nm','ALP_swing']].set_index('div_nm'), method = 'log')
         Swing_diff = (COAL_swing_matrix + ALP_swing_matrix) / 2 # average for better inference!
 
+        # evaluate skews!
+        # pd.Series(similarity_matrix_dict[data_year].to_numpy().flatten().tolist()).skew()
+        # skew(Swing_diff.flatten())
+
         import pdb;pdb.set_trace()
-        plt.hist(COAL_swing_matrix, bins=10)
-        plt.show()
+        #plt.hist(COAL_swing_matrix, bins=10)
+        #plt.show()
         Swing_diff_matrix = pd.DataFrame(Swing_diff, index = Electorate_3PPs_swings['div_nm'], columns = Electorate_3PPs_swings['div_nm'])
 
         
@@ -1100,22 +1143,54 @@ else:
         seat_i = [index_names[idx] for idx in i]
         seat_j = [index_names[idx] for idx in j]
 
+
+
         # Create a DataFrame
         Regression_Format_df = pd.DataFrame({
             'Response': Swing_diff[i, j],
             'Similarity': similarity_matrix_dict[data_year].to_numpy()[i, j],
-            'TCP_type': TCP_type_similarity_dict[data_year].to_numpy()[i, j],
+            'TCP_type': TCP_type_similarity_dict[data_year].to_numpy()[i, j], # must use last year's TCP_type matrix!
             'State': State_match_matrix_dict[data_year].to_numpy()[i, j],
             'Demographic': Demographic_match_matrix_dict[data_year].to_numpy()[i, j],
             'Elec1': seat_i,  # Optional: to track which pairs are being compared
-            'Elec2': seat_j
+            'Elec2': seat_j,
+            'Year': data_year
         })
 
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
         Regression_list.append(Regression_Format_df)
 
     Regression_Format_df = pd.concat(Regression_list, ignore_index=True)
     import pdb;pdb.set_trace()
 
+    Regression_Format_df.loc[Regression_Format_df['Response']==0,]
+
     Regression_Format_df.to_csv('Electorate_Similarity_for_R.csv', index=False)
 import pdb;pdb.set_trace()
+
+
+Electorate_CovMs = {}
+
+# get CovMs
+# Similarity   TCP_type      State 
+# 0.70340553 0.20810119 0.08849328 
+w_Similarity, w_TCP_type, w_State =  0.70508958, 0.21283781, 0.08207261 
+for data_year in ['2016','2019','2022','2025']:
+    Electorate_CovM = w_Similarity * similarity_matrix_dict[data_year] + w_TCP_type * TCP_type_similarity_dict[data_year] + 0.08849328 * State_match_matrix_dict[data_year]
+    np.fill_diagonal(Electorate_CovM.to_numpy(), 1)
+    Electorate_CovM = pd.DataFrame(Electorate_CovM, index = Electorate_CovM.index, columns=Electorate_CovM.index)
+    Electorate_CovMs[data_year] = Electorate_CovM
+import pdb;pdb.set_trace()
+
+for data_year in ['2016','2019','2022','2025']:
+    Electorate_CovMs[data_year].to_csv(f"Electorate_Correlation_Matrix_{data_year}.csv")
+
+    
+
+
+
+
+
+
+
+
