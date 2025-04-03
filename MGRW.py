@@ -35,7 +35,7 @@ election_year = '2016'
 
 
 n_parties = 3
-num_polling_days = 100
+num_polling_days = 30
 
 # Bayesian Multivariate Gaussian Random Walk for Polling Data
 # Using Stan and Python (CmdStanPy for efficiency)
@@ -45,7 +45,8 @@ import matplotlib.pyplot as plt
 import arviz as az
 
 election_year = '2016'
-election_date_num = {'2016':1028}
+election_date_num = {'2013':1113, '2016':1028, '2019':1050, '2022':1099}
+
 
 # Step 1: Load Data (Placeholder, replace with actual data)
 # Columns: [day, sample_size, party_1, party_2, party_3, party_4]
@@ -391,15 +392,15 @@ def new_model_PyMC(T, N_obs, K, day, y_obs, Sigma_poll_obs_alr, alr_prior_poll_a
 
     with pm.Model() as model:
         # Mean drift
-        mu = pm.Normal("mu", 0, 0.1, shape=K)
-        init_dist = pm.MvNormal.dist(mu=alr_prior_poll_avg, cov=np.eye(K)*0.01)
+        mu = pm.Normal("mu", 0, 0.005, shape=K)
+        init_dist = pm.MvNormal.dist(mu=alr_prior_poll_avg, cov=np.eye(K)*0.02)
         
         # Random walk covariance
-        sigma_rw = pm.HalfNormal("sigma_rw", 0.1, shape=K)
+        sigma_rw = pm.HalfNormal("sigma_rw", 0.01, shape=K)
 
         # LKJ prior for full covariance matrix
         # LKJ prior for Cholesky factor of covariance matrix
-        L_rw = pm.LKJCholeskyCov("L_rw", n=K, eta=2, sd_dist=pm.HalfNormal.dist(0.1))
+        L_rw = pm.LKJCholeskyCov("L_rw", n=K, eta=2, sd_dist=pm.HalfNormal.dist(0.02))
 
         L_rw = L_rw[0]
 
@@ -416,7 +417,7 @@ def new_model_PyMC(T, N_obs, K, day, y_obs, Sigma_poll_obs_alr, alr_prior_poll_a
             pm.MvNormal(f"y_obs_{t}", mu=x[t-1], cov=Sigma_t, observed=y_combined[t])
         
         # Sampling
-        trace = pm.sample(2000, tune=1000, target_accept=0.99, chains=8, cores=8, init="jitter+adapt_diag")
+        trace = pm.sample(500, tune=500, target_accept=0.99, chains=8, cores=8, init="jitter+adapt_diag")
 
 
         import pdb;pdb.set_trace()
@@ -478,8 +479,6 @@ def new_model_PyMC(T, N_obs, K, day, y_obs, Sigma_poll_obs_alr, alr_prior_poll_a
         import pdb;pdb.set_trace()
 
 
-
-
     return 1
 
 T = num_polling_days
@@ -502,3 +501,9 @@ import pdb;pdb.set_trace()
 #Sigma_rw[2, 0] -0.001  0.001  -0.003    0.001        0.0      0.0     299.0     712.0   1.03
 #Sigma_rw[2, 1]  0.013  0.005   0.004    0.024        0.0      0.0    1116.0    2324.0   1.01
 #Sigma_rw[2, 2]  0.019  0.006   0.009    0.032        0.0      0.0     685.0    1405.0   1.01
+
+#(Pdb) az.summary(trace, var_names=["mu"])
+#        mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+#mu[0]  0.000  0.002  -0.004    0.005        0.0      0.0    2375.0    1909.0   1.02
+##mu[1] -0.001  0.017  -0.033    0.030        0.0      0.0    3943.0    6243.0   1.01
+#mu[2]  0.002  0.014  -0.025    0.027        0.0      0.0    3524.0    4968.0   1.00

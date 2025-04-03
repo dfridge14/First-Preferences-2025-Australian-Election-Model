@@ -29,7 +29,7 @@ Redistribution_SA1_year_dict = {'2025':'2021','2022':'2021','2019':'2016','2016'
 
 data_year = '2022'
 correspondence_years = [SA1_year_dict[data_year],SA1_year_dict[str(int(data_year)+3)]]
-data_year = '2025'
+data_year = '2013'
 
 
 name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
@@ -124,7 +124,7 @@ def reverse_new_old_correspondence(Correspondence_df, data_year):
     return Correspondence_df
 
 
-reverse_new_old_correspondence(format_old_new_correspondence(data_year, abolished_divs), data_year)
+#reverse_new_old_correspondence(format_old_new_correspondence(data_year, abolished_divs), data_year)
 
 
 def perform_SA1_Correspondence_to_SA1_By_PP(SA1_Correspondence_old_new, SA1_By_PP_SA1_CODE16):
@@ -253,7 +253,7 @@ elif data_year == '2013':
 
     import pdb;pdb.set_trace()
 
-    SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
+    #SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
 
 
 
@@ -530,6 +530,8 @@ def normalise_2015_2018_Correspondence(Correspondence_df):
 
     Correspondence_df = Correspondence_df[['old_div','new_div','ratio']].rename(columns={'ratio': 'RATIO_FROM_TO'})
 
+    # Correspondence_df.to_csv("Correspondence_CED_2012_2015.csv", index=False)
+
     return Correspondence_df
 
 
@@ -626,6 +628,10 @@ def convert_2016_2021_proportions_to_2015_2018(name_changes_year_dict, abolished
 
     return Correspondence_CED_2015_2018
 
+election_year = '2016'
+normalise_2015_2018_Correspondence(pd.read_csv(f'Correspondence_CED_{str(int(election_year)-1)}_{str(int(election_year)-4)}_Reversed.csv', index_col = None))
+
+import pdb;pdb.set_trace()
 
 reverse_new_old_correspondence(format_2018_2021_correspondence())
 reverse_new_old_correspondence(format_old_new_correspondence(data_year, abolished_divs))

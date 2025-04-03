@@ -58,8 +58,6 @@ def get_prior_ALR_covariance(data_year):
     target = 'IND'
 
     Actual_results_dict = {}
-    Fundamentals_results_dict = {}
-    Fundamentals_estimate_dict = {}
 
     Prior_estimates_df = pd.read_csv(f"Fundamentals_Votes_For_{next_year}.csv", index_col = None)
 
@@ -163,8 +161,7 @@ full_Fundamentals_estimate_df = full_Fundamentals_estimate_df + swings.mean()
 import pdb; pdb.set_trace()
 
 
-ref_col = 'COAL'  # Reference category to remove
-ref_val = full_Fundamentals_estimate_df.columns.get_loc(ref_col)
+ref_col = 'Other'  # Reference category to remove
 
 results_alr = np.log(full_Fundamentals_results_df.drop(columns=[ref_col]).div(full_Fundamentals_results_df[ref_col], axis=0))
 estimate_alr = np.log(full_Fundamentals_estimate_df.drop(columns=[ref_col]).div(full_Fundamentals_estimate_df[ref_col], axis=0))
@@ -196,6 +193,44 @@ ALR_cov = alr_swing_cov
 # 150x150 electorate correlation matrix (estimated from data)
 year = '2016'
 R_electorates = pd.read_csv(f"Electorate_Correlation_Matrix_{year}.csv", index_col = 0)
+
+
+def log_adjust_correlation(R, min_eigval=1e-5, max_eigval_quantile=0.99):
+    R_adj = np.log1p(R) / np.log(2)  # Elementwise log adjustment
+    # Ensure the diagonal remains exactly 1
+    np.fill_diagonal(R_adj, 1.0)
+
+    import pdb;pdb.set_trace()
+
+    
+    # Compute eigenvalues and eigenvectors
+    eigvals, eigvecs = np.linalg.eigh(R_adj)
+
+    # Fix small or negative eigenvalues
+    #eigvals[eigvals < 1e-6] = min_eigval  # Ensure positive definiteness
+
+    # Regularization: Cap the largest eigenvalues to prevent dominance
+    max_cap = np.quantile(eigvals, max_eigval_quantile)  # Find 99th percentile
+    eigvals[eigvals > max_cap] = 30  # Cap large eigenvalues
+
+    # Reconstruct adjusted correlation matrix
+    R_adj = eigvecs @ np.diag(eigvals) @ eigvecs.T
+
+    np.fill_diagonal(R_adj, 1.0)
+
+    
+    import pdb;pdb.set_trace()
+
+    
+    return R_adj
+
+# Apply transformation
+R_adjusted = log_adjust_correlation(R_electorates.values)
+
+
+
+
+
 
 
 def regularize_correlation_matrix(R, alpha=0.2, beta=0.3, min_eigen=0.5, max_eigen=10.0):
@@ -242,6 +277,7 @@ R_electorates_regularized = regularize_correlation_matrix(R_electorates)
 
 
 from scipy.linalg import eigh
+from scipy.linalg import sqrtm, inv
 
 def adjust_alr_covariance(R_electorates, alr_swing_cov):
     ### combines electorate correlation matrix and between-party covariance matrix into a block covariance matrix

@@ -3897,8 +3897,9 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
     Incumbent_advantage = 0
     candidate_change_redistribution = 0
-    electorate_similarity = 1
-    new_candidates_allocation = 0
+    electorate_similarity = 0
+    new_candidates_allocation = 1
+    ON_add = 1
 
 
     if Incumbent_advantage:
@@ -3961,11 +3962,19 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
             Div_parties_next_dict = {div: group['PartyAb'].tolist() for div, group in DOP_By_Division_next.groupby("div_nm")}
             Redistribution_pairs_df = pd.read_csv(f'RedistributionPairs{str(int(data_year)+2)}.csv', index_col = None)
 
+            # Clause when ON results are needed for polling swing comparisons in 2019&2022
+            if ON_add:
+                for div in Div_parties_next_dict.keys():
+                    if 'ON' not in Div_parties_next_dict[div]:
+                        Div_parties_next_dict[div].append('ON')
+                
+
             if new_seats_list:
                 new_seat_redistributions = Redistribution_pairs_df.loc[Redistribution_pairs_df['new_div'].isin(new_seats_list)]
                 new_seat_old_seat_series = new_seat_redistributions.set_index(new_seat_redistributions.columns[1])[new_seat_redistributions.columns[0]]
                 map_new_seats_to_old_seats = new_seat_old_seat_series.to_dict()
             c2_dict, new_parties_dict = split_into_c2_dict(Div_parties_next_dict, map_new_seats_to_old_seats)
+
 
             # Apply incumbency advantage effect!
 
@@ -4142,9 +4151,16 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
 
 
-            to_csv = 0
-            if to_csv:
+            to_csv = 1
+            if to_csv and not ON_add:
                 output_folder = f"feather New Candidates for {next_year}"
+                os.makedirs(output_folder, exist_ok=True)
+                for key, sub_df in First_Prefs_By_PP_Complete_Allocated.items():
+                    filename = f"{output_folder}/{next_year}_New_Candidates_{key[0]}_{key[1]}.feather"
+                    sub_df.reset_index(drop=True).to_feather(filename)
+
+            elif to_csv and ON_add:
+                output_folder = f"feather New Candidates ON_add for {next_year}"
                 os.makedirs(output_folder, exist_ok=True)
                 for key, sub_df in First_Prefs_By_PP_Complete_Allocated.items():
                     filename = f"{output_folder}/{next_year}_New_Candidates_{key[0]}_{key[1]}.feather"

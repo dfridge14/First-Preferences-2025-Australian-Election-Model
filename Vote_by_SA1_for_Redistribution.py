@@ -25,9 +25,10 @@ os.chdir(base_dir)
 census_years_for_data_years = {'2022':'2021','2019':'2016','2016':'2011','2013':'2011'}
 
 
-data_year = "2022"
+data_year = "2019"
 census_year = census_years_for_data_years[data_year]
-redistribution_type = 'omnipresent'
+redistribution_type = 'New Candidates'
+ON_add = True
 
 div_nm = "Melbourne"
 
@@ -42,9 +43,9 @@ abolished_divs_dict = {'2022':set(['Higgins','North Sydney']), '2016': set(['Por
 
 
 
-def load_FPBPPRed_dict(data_year, redistribution_type):
+def load_FPBPPRed_dict(data_year, redistribution_type, ON_add = False):
     df_dict_reloaded = {}
-    folder_name = f'Redistribution pairs {str(int(data_year)+2)}' if redistribution_type == 'redistribution' else f'New Candidates for {str(int(data_year)+3)}'
+    folder_name = f'Redistribution pairs {str(int(data_year)+2)}' if redistribution_type == 'redistribution' else f'New Candidates {'ON_add ' if ON_add else ''}for {str(int(data_year)+3)}'
     output_folder = f"feather {folder_name}"
     for filepath in glob.glob(f"{output_folder}/*.feather"):
         # Extract keys from filename
@@ -217,7 +218,7 @@ def rectify_div_SA1_votes(div, Div_SA1_By_PP_dict_wide, Div_First_Prefs_By_PP_di
 
 
 
-def prepare_wide_dicts_for_MMHg(data_year, census_year, name_changes_year_dict, redistribution_type = 'redistribution'):
+def prepare_wide_dicts_for_MMHg(data_year, census_year, name_changes_year_dict, redistribution_type = 'redistribution', ON_add = False):
 
     # create dictionary of SA1s for each giver_div
     Redistribution_SA1_changes = pd.read_csv(f"Redistribution_SA1_changes{str(int(data_year)+2)}.csv", index_col = None)
@@ -235,7 +236,7 @@ def prepare_wide_dicts_for_MMHg(data_year, census_year, name_changes_year_dict, 
 
     # obtain wide dfs for all relevant redistribution pairs
     if redistribution_type in ['redistribution','New Candidates']:
-        Redist_Div_First_Prefs_By_PP_dict_wide = load_FPBPPRed_dict(data_year, redistribution_type)
+        Redist_Div_First_Prefs_By_PP_dict_wide = load_FPBPPRed_dict(data_year, redistribution_type, ON_add)
 
     elif redistribution_type == 'omnipresent':
         # transform 3PP df into dictionary structure with tuples as keys
@@ -297,7 +298,7 @@ def prepare_wide_dicts_for_MMHg(data_year, census_year, name_changes_year_dict, 
 
 
 Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict \
-        , redistribution_divs_set, old_divs_set = prepare_wide_dicts_for_MMHg(data_year, census_year, name_changes_year_dict, redistribution_type = redistribution_type)
+        , redistribution_divs_set, old_divs_set = prepare_wide_dicts_for_MMHg(data_year, census_year, name_changes_year_dict, redistribution_type = redistribution_type, ON_add=ON_add)
 
 
 print("Got all dfs: time = ", time.time() - start)
@@ -658,7 +659,7 @@ print(time.time()-start)
 #print(Deakin_Aston_df.loc[Deakin_Aston_df.index.isin(Deakin_Aston_SA1s),])
 
 
-def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, old_divs_set, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, census_year, new_div_list, abolished_div_list, redistribution_type = 'redistribution'):
+def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, old_divs_set, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, census_year, new_div_list, abolished_div_list, redistribution_type = 'redistribution', ON_add = False):
 
     # 1. Get total electorate votes from last election
     #if redistribution_type == 'redistribution':
@@ -773,8 +774,7 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
 
         import pdb;pdb.set_trace()
 
-
-        long_df.to_csv(f"Fundamentals_Votes_For_{str(int(data_year)+3)}.csv", index = False)
+        long_df.to_csv(f"Fundamentals_Votes_{"ON_add_" if ON_add else ''}For_{str(int(data_year)+3)}.csv", index = False)
 
 
 
@@ -874,4 +874,4 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
 
 new_div_list = new_seats_year_dict[data_year]
 abolished_div_list = abolished_divs_dict[data_year]
-perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, old_divs_set, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, census_year, new_div_list, abolished_div_list, redistribution_type = redistribution_type)
+perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, old_divs_set, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, census_year, new_div_list, abolished_div_list, redistribution_type = redistribution_type, ON_add=ON_add)
