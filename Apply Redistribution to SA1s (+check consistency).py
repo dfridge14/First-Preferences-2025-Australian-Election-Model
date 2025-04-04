@@ -29,7 +29,6 @@ Redistribution_SA1_year_dict = {'2025':'2021','2022':'2021','2019':'2016','2016'
 
 data_year = '2022'
 correspondence_years = [SA1_year_dict[data_year],SA1_year_dict[str(int(data_year)+3)]]
-data_year = '2013'
 
 
 name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
@@ -96,6 +95,8 @@ def format_old_new_correspondence(data_year, abolished_divs):
     Correspondence_CED_old_new['RATIO_FROM_TO'] = Correspondence_CED_old_new.groupby(f'div_nm_{old_year}')['RATIO_FROM_TO'].transform(lambda x: x / x.sum()) # rescale to 1
     Correspondence_CED_old_new = Correspondence_CED_old_new.loc[~(Correspondence_CED_old_new[f'div_nm_{old_year}']=='Outside Australia'),]
 
+    Correspondence_CED_old_new.columns = ['old_div','new_div','RATIO_FROM_TO']
+
     import pdb;pdb.set_trace()
 
 
@@ -123,6 +124,8 @@ def reverse_new_old_correspondence(Correspondence_df, data_year):
 
     return Correspondence_df
 
+#format_old_new_correspondence(str(int(data_year)+3), abolished_divs)
+import pdb;pdb.set_trace()
 
 #reverse_new_old_correspondence(format_old_new_correspondence(data_year, abolished_divs), data_year)
 

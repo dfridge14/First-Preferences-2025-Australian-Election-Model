@@ -30,7 +30,7 @@ az.rcParams['plot.max_subplots'] = 100
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-election_year = '2019'
+election_year = '2022'
 SAMPLE_ERROR_SCALING_FACTOR = 2
 
 
@@ -102,9 +102,9 @@ def group_into_Categories(party_votes_shares_df, div, election_year, is_Other = 
 
 
 
-def get_Prior_estimates_df(election_year):
+def get_Prior_estimates_df(election_year, dont_add_ON = False):
 
-    if election_year == '2016':
+    if (election_year == '2016') | dont_add_ON:
         Prior_estimates_df = pd.read_csv(f"Fundamentals_Votes_For_{election_year}.csv", index_col = None) # ONLY WORKS FOR 2016 - FOR OTHER YEARS WILL REQUIRE Polling_Prior_Votes
     else:
         Prior_estimates_df = pd.read_csv(f"Fundamentals_Votes_ON_add_For_{election_year}.csv", index_col = None)
@@ -134,45 +134,52 @@ def remove_ON_back_to_its_country(Prior_estimates_df, Polling_estimates, electio
 
     Prior_estimates_ON_add_df = Prior_estimates_df
 
-    true_prior_estimates = pd.read_csv(f"Fundamentals_Votes_For_{election_year}.csv", index_col = None)
-
-    Prior_estimates_dict = {
-    div: pd.DataFrame([group.to_dict()])
-    for div, group in Prior_estimates_df.iterrows()
-    }
-
-    # get true prior estimates wide format
-    Prior_estimates_list = []
-    for div in Prior_estimates_dict.keys():
-        Prior_estimates_list.append(group_into_Categories(Prior_estimates_dict[div], div, election_year))
-
-    Prior_estimates_original_df = pd.concat(Prior_estimates_list)
+    true_prior_estimates_df = get_Prior_estimates_df(election_year, dont_add_ON = True).rename(columns={'Other':'OTH'})
 
     ON_transfer_percent = {}
 
     # transfer prior %s from ON to original_df parties
-    for div in Prior_estimates_dict.keys():
-        if Prior_estimates_original_df.loc[Prior_estimates_original_df['ON']==0,]:
-            curr_div_ON = Prior_estimates_ON_add_df.loc[Prior_estimates_ON_add_df['div_nm'] == div,]
-            curr_div_True = Prior_estimates_original_df.loc[Prior_estimates_original_df['div_nm'] == div,]
+    for div, proportions in true_prior_estimates_df.iterrows():
+        if proportions['ON']==0:
+            curr_div_ON = Prior_estimates_ON_add_df.loc[Prior_estimates_ON_add_df.index == div,]
+            curr_div_True = proportions.to_frame().T
 
-            transfer_proportions = (curr_div_True - curr_div_ON)/((curr_div_True - curr_div_ON).sum(axis=1)) # This should provide -1 for ON automatically!
+            transfer_proportions = (curr_div_True - curr_div_ON)/((curr_div_True - curr_div_ON).drop('ON', axis=1).sum(axis=1).iloc[0]) # This should provide -1 for ON automatically!
             ON_transfer_percent[div] = transfer_proportions
 
-            import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
     # distribute these ON votes to actual 
     for div in ON_transfer_percent.keys():
-        Polling_estimates.loc[Polling_estimates.index == div,] =  Polling_estimates.loc[Polling_estimates.index == div,'ON'][0] * ON_transfer_percent[div]
-        import pdb;pdb.set_trace()
+        new_row = (Polling_estimates.loc[div] + Polling_estimates.loc[div]['ON'] * ON_transfer_percent[div])
+        new_row['ON'] = 0.0
+        Polling_estimates.loc[div] =  new_row.iloc[0]
 
 
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
     return Polling_estimates
 
 
 Prior_estimates_df = get_Prior_estimates_df(election_year).rename(columns={'Other':'OTH'}) # adds ON to every seat if no ON (for 2019 and 2022)
+
+
+
+
+merged_totals = Prior_estimates_df.merge(new_vote_totals_states.set_index('div_nm')[['new_vote_totals']], left_index=True, right_index=True)
+weights = merged_totals['new_vote_totals']/merged_totals['new_vote_totals'].sum()
+National_prior = (merged_totals.iloc[:,:-1] * weights.values[:,None]).sum().to_frame().T
+
+merged_totals_states = Prior_estimates_df.merge(new_vote_totals_states.set_index('div_nm'), left_index=True, right_index=True)
+
+State_prior_df = pd.DataFrame(columns=Prior_estimates_df.columns)
+for state in merged_totals_states['StateAb'].unique():
+    merged_totals_curr_state = merged_totals_states.loc[merged_totals_states['StateAb']==state,].drop('StateAb', axis = 1) # no longer need StateAb
+    curr_weights = merged_totals_curr_state['new_vote_totals']/merged_totals_curr_state['new_vote_totals'].sum()
+    State_prior = (merged_totals_curr_state.iloc[:,:-1] * curr_weights.values[:,None]).sum().to_frame().T
+    State_prior_df = pd.concat([State_prior_df, State_prior], ignore_index=True)
+
+
 
 # add 0.001 to Gorton Other in 2016, or 0 others in 2019/2022 (use ON votes as they are higher --> less distortion)!
 if election_year == '2016':
@@ -185,10 +192,6 @@ day_of_interest = 80
 day_80_polling_avg =  pd.DataFrame([[0.0]*len(Prior_estimates_df.columns)], columns=Prior_estimates_df.columns)
 
 
-
-merged_totals = Prior_estimates_df.merge(new_vote_totals_states.set_index('div_nm')[['new_vote_totals']], left_index=True, right_index=True)
-weights = merged_totals['new_vote_totals']/merged_totals['new_vote_totals'].sum()
-National_prior = (merged_totals.iloc[:,:-1] * weights.values[:,None]).sum().to_frame().T
 
 
 
@@ -349,7 +352,8 @@ weighted_national_polling = (merged_totals_polling.iloc[:,:-1] * weights_polling
 import pdb;pdb.set_trace()
 
 if election_year == '2016':
-    Polling_estimates.loc[Polling_estimates.index=='Gorton',['GRN','OTH']] += (1,-1) * Polling_estimates.loc[Polling_estimates.index=='Gorton','OTH'][0]
+    Polling_estimates.loc[Polling_estimates.index=='Gorton',['GRN','OTH']] += np.array([1.0,-1.0]) * Polling_estimates.loc[Polling_estimates.index=='Gorton','OTH'].iloc[0]
+    Polling_estimates_from_National = Polling_estimates
     import pdb;pdb.set_trace()
 
 
@@ -363,6 +367,6 @@ if election_year in ['2019','2022']:
 
 
 import pdb;pdb.set_trace()
-# Polling_estimates.to_csv(f"National_Polling_Estimates_{election_year}_Day_{day_of_interest}.csv", index=True)
+# Polling_estimates_from_National.to_csv(f"National_Polling_Estimates_{election_year}_Day_{day_of_interest}.csv", index=True)
 
 import pdb;pdb.set_trace()

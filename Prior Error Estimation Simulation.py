@@ -41,6 +41,41 @@ start = time.time()
 
 
 
+
+def group_into_Fundamentals_Categories(party_votes_shares_df, div, is_Other = True):
+    # creates a structured data frame  with columns ALP,COAL,GRN,Other by combining all the votes of the respective categories
+
+    ALP_cat = {'ALP','CLR'}
+    COAL_cat = {'COAL','COALNP','COALLP','LP','NP','CLP','LNP','LNQ'}
+    GRN_cat = {'GRN'}
+
+    Non_Other_sets = ALP_cat | COAL_cat | GRN_cat  # Union of all sets
+    Other_cols = set(party_votes_shares_df.columns) - Non_Other_sets  # Columns in none of the sets
+
+    ALPs = ALP_cat.intersection(party_votes_shares_df.columns)
+    COALs = COAL_cat.intersection(party_votes_shares_df.columns)
+    GRNs = GRN_cat.intersection(party_votes_shares_df.columns)
+    OTHs = Other_cols
+
+    # Compute the sums
+    sum1 = party_votes_shares_df[list(next(iter(ALPs)) if len(ALPs) == 1 and isinstance(next(iter(ALPs)), set) else ALPs)].sum(axis=1).iloc[0]
+    sum2 = party_votes_shares_df[list(next(iter(COALs)) if len(COALs) == 1 and isinstance(next(iter(COALs)), set) else COALs)].sum(axis=1).iloc[0]
+    if is_Other:
+        sum3 = party_votes_shares_df[list(next(iter(GRNs)) if len(GRNs) == 1 and isinstance(next(iter(GRNs)), set) else GRNs)].sum(axis=1).iloc[0]
+        sum4 = party_votes_shares_df[list(next(iter(OTHs)) if len(OTHs) == 1 and isinstance(next(iter(OTHs)), set) else OTHs)].sum(axis=1).iloc[0]
+    else:
+        sum3 = party_votes_shares_df[list(next(iter(GRNs)) if len(GRNs) == 1 and isinstance(next(iter(GRNs)), set) else GRNs) + list(next(iter(OTHs)) if len(OTHs) == 1 and isinstance(next(iter(OTHs)), set) else OTHs)].sum(axis=1).iloc[0]
+
+    if is_Other:
+        Fundamentals_grouped_df = pd.DataFrame([{'ALP':sum1,'COAL':sum2,'GRN':sum3,'Other':sum4}], index=[div])
+    else:
+        Fundamentals_grouped_df = pd.DataFrame([{'ALP':sum1,'COAL':sum2,'Other':sum3}], index=[div])
+
+
+    return Fundamentals_grouped_df
+
+
+
 def get_prior_and_results_df(data_year):
     next_year = str(int(data_year)+3)
     Actual_results = pd.read_csv(f"{next_year}HouseDOPByDivision.csv", skiprows=1, index_col = None).rename(columns={'DivisionNm':'div_nm'})
@@ -65,38 +100,6 @@ def get_prior_and_results_df(data_year):
         div: pd.DataFrame([group.set_index("PartyAb")["FP_Votes"].to_dict()])
         for div, group in Prior_estimates_df.groupby("div_nm")
     }
-
-    def group_into_Fundamentals_Categories(party_votes_shares_df, div, is_Other = True):
-        # creates a structured data frame  with columns ALP,COAL,GRN,Other by combining all the votes of the respective categories
-
-        ALP_cat = {'ALP','CLR'}
-        COAL_cat = {'COAL','COALNP','COALLP','LP','NP','CLP','LNP','LNQ'}
-        GRN_cat = {'GRN'}
-
-        Non_Other_sets = ALP_cat | COAL_cat | GRN_cat  # Union of all sets
-        Other_cols = set(party_votes_shares_df.columns) - Non_Other_sets  # Columns in none of the sets
-
-        ALPs = ALP_cat.intersection(party_votes_shares_df.columns)
-        COALs = COAL_cat.intersection(party_votes_shares_df.columns)
-        GRNs = GRN_cat.intersection(party_votes_shares_df.columns)
-        OTHs = Other_cols
-
-        # Compute the sums
-        sum1 = party_votes_shares_df[list(next(iter(ALPs)) if len(ALPs) == 1 and isinstance(next(iter(ALPs)), set) else ALPs)].sum(axis=1).iloc[0]
-        sum2 = party_votes_shares_df[list(next(iter(COALs)) if len(COALs) == 1 and isinstance(next(iter(COALs)), set) else COALs)].sum(axis=1).iloc[0]
-        if is_Other:
-            sum3 = party_votes_shares_df[list(next(iter(GRNs)) if len(GRNs) == 1 and isinstance(next(iter(GRNs)), set) else GRNs)].sum(axis=1).iloc[0]
-            sum4 = party_votes_shares_df[list(next(iter(OTHs)) if len(OTHs) == 1 and isinstance(next(iter(OTHs)), set) else OTHs)].sum(axis=1).iloc[0]
-        else:
-            sum3 = party_votes_shares_df[list(next(iter(GRNs)) if len(GRNs) == 1 and isinstance(next(iter(GRNs)), set) else GRNs) + list(next(iter(OTHs)) if len(OTHs) == 1 and isinstance(next(iter(OTHs)), set) else OTHs)].sum(axis=1).iloc[0]
-
-        if is_Other:
-            Fundamentals_grouped_df = pd.DataFrame([{'ALP':sum1,'COAL':sum2,'GRN':sum3,'Other':sum4}], index=[div])
-        else:
-            Fundamentals_grouped_df = pd.DataFrame([{'ALP':sum1,'COAL':sum2,'Other':sum3}], index=[div])
-
-
-        return Fundamentals_grouped_df
 
     Fundamentals_results_list = []
     Fundamentals_estimate_list = []
@@ -177,8 +180,68 @@ def get_Fundamentals_alr_swings_and_cov(ref_col):
 
 
 
+def get_Polling_alr_swings_and_cov(ref_col, full_Fundamentals_results_df, ON_and_UAPP = False):
+    ### converts polling estimes df into alr swings between alr of polling estimates and results df
+
+    Polling_estimate_list = []
+
+    if ON_and_UAPP:
+        # estimates for only 2019 and 2022
+
+        for election_year in ['2019','2022']:
+            Polling_estimates = pd.read_csv(f"National_Polling_Estimates_{election_year}_Day_80.csv", index_col = 0)
+            Polling_estimate_list.append(Polling_estimates)
+
+    else:
+        for election_year in ['2016','2019','2022']:
+
+            # reduce to set of 4 to examine polling error
+            Polling_estimates = pd.read_csv(f"National_Polling_Estimates_{election_year}_Day_80.csv", index_col = 0)
+            if election_year != '2016':
+                Polling_estimates.loc[:,'OTH'] = Polling_estimates.iloc[:,3:].sum(axis=1)
+                Polling_estimates = Polling_estimates.drop(['ON','UAPP'], axis = 1)
+
+            Polling_estimates.index = election_year + Polling_estimates.index
+            Polling_estimate_list.append(Polling_estimates)
+
+
+    
+
+    full_Polling_estimate_df = pd.concat(Polling_estimate_list)
+
+    # center the natural swings to avoid bias - we assume swings are generally unbiased - that we cannot predict direction 3 years prior!
+
+    full_Fundamentals_results_df.rename(columns={'Other':'OTH'}, inplace = True)
+
+    swings = full_Fundamentals_results_df.rename(columns={'Other':'OTH'}) - full_Polling_estimate_df
+    #swings_centered = (swings - swings.mean()).sum(axis=1)
+    full_Polling_estimate_df = full_Polling_estimate_df + swings.mean()
+
+    results_alr = np.log(full_Fundamentals_results_df.drop(columns=[ref_col]).div(full_Fundamentals_results_df[ref_col], axis=0))
+    estimate_alr = np.log(full_Polling_estimate_df.drop(columns=[ref_col]).div(full_Polling_estimate_df[ref_col], axis=0))
+    alr_swing = results_alr - estimate_alr
+
+    alr_swing_cov = alr_swing.cov()
+
+
+    print(alr_swing.cov())
+    print((full_Fundamentals_results_df - full_Fundamentals_estimate_df).mean()) # should be 0 due to centralisation adjustment
+
+    return alr_swing, alr_swing_cov, full_Polling_estimate_df, estimate_alr
+
+
+Fundamentals_results_list = []
+for data_year in ['2013','2016','2019']:
+    Fundamentals_results_df = get_prior_and_results_df(data_year)[0]
+    Fundamentals_results_list.append(Fundamentals_results_df)
+full_Fundamentals_results_df = pd.concat(Fundamentals_results_list)
+
+
 ref_col = 'COAL'
+ON_and_UAPP = False
 alr_swing, alr_swing_cov, full_Fundamentals_estimate_df, estimate_alr = get_Fundamentals_alr_swings_and_cov(ref_col)
+alr_swing_poll, alr_swing_poll_cov, full_Polling_estimate_df, estimate_alr = get_Polling_alr_swings_and_cov(ref_col, full_Fundamentals_results_df, ON_and_UAPP)
+
 #simulated_alr_swings = multivariate_normal.rvs(mean=np.zeros(alr_swing.shape[1]), cov=alr_swing_cov, size=451)
 
 #predicted_alr = estimate_alr + simulated_alr_swings
@@ -190,7 +253,7 @@ alr_swing, alr_swing_cov, full_Fundamentals_estimate_df, estimate_alr = get_Fund
 
 import scipy.linalg
 from scipy.linalg import eigh
-from scipy.linalg import sqrtm, inv
+from scipy.linalg import sqrtm, inv, trace
 
 # Simulated inputs: Replace these with your actual data
 np.random.seed(42)
@@ -234,6 +297,11 @@ def log_adjust_correlation(R, min_eigval=1e-5, max_eigval_quantile=0.99):
 
 # Apply transformation
 R_adjusted = log_adjust_correlation(R_electorates.values)
+
+
+# Mahalanobis distance check - does R fit the data point reasonably (in ALR)?
+x = alr_swing.loc[alr_swing.index.str.startswith('2016'),]
+x.to_numpy().flatten() @ inv(np.kron(R_adjusted,alr_swing_cov)) @ x.to_numpy().flatten()
 
 
 
@@ -420,8 +488,11 @@ def split_category_in_simplex(simplex_probs, split_index, num_splits, dirichlet_
 
 def simulate_swings(alr_swing, alr_swing_cov, estimate_alr, num_simulations, dist, df_t, ref_col, full_Fundamentals_estimate_df):
 
-    all_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]))
+    all_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]+1))
     alr_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]))
+
+    prediction = np.zeros((alr_swing.shape[0], alr_swing.shape[1]+1))
+
 
     for i in range(num_simulations):
 
@@ -429,32 +500,34 @@ def simulate_swings(alr_swing, alr_swing_cov, estimate_alr, num_simulations, dis
             # Rescale covariance for the multivariate t-distribution
             cov_t_corrected = ((df_t - 2) / df_t) * alr_swing_cov  # Adjust scale matrix
             # Simulate swings using the corrected covariance
-            simulated_alr_swings = multivariate_t.rvs(loc=np.zeros(alr_swing.shape[1]), shape=cov_t_corrected, df=df_t, size=451)
+            simulated_alr_swings = multivariate_t.rvs(loc=np.zeros(alr_swing.shape[1]), shape=cov_t_corrected, df=df_t, size=452)
         elif dist == 'Normal':
-            simulated_alr_swings = multivariate_normal.rvs(mean=np.zeros(alr_swing.shape[1]), cov=alr_swing_cov, size=451)
+            simulated_alr_swings = multivariate_normal.rvs(mean=np.zeros(alr_swing.shape[1]), cov=alr_swing_cov, size=452)
 
         predicted_alr = estimate_alr + simulated_alr_swings
 
-        curr_prediction = alr_to_simplex_vectorized(predicted_alr, ref_col)[['ALP','COAL','GRN','Other']]
-        prior_prediction += curr_prediction
+        curr_prediction = alr_to_simplex_vectorized(predicted_alr, ref_col)[['ALP','COAL','GRN','OTH']]
+        prediction += curr_prediction
 
         all_simulated_samples[i] = curr_prediction
         alr_simulated_samples[i] = predicted_alr
 
-    prior_prediction /= 1000
+    prediction /= 1000
 
     simulated_variance = np.var(all_simulated_samples, axis=0)
 
     # Compute the standard deviation as the square root of the variance
     simulated_std_dev = np.sqrt(simulated_variance)
 
-    return prior_prediction, pd.DataFrame(simulated_std_dev, columns=full_Fundamentals_estimate_df.columns, index=full_Fundamentals_estimate_df.index), all_simulated_samples, alr_simulated_samples
+    return prediction, pd.DataFrame(simulated_std_dev, columns=full_Fundamentals_estimate_df.columns, index=full_Fundamentals_estimate_df.index), all_simulated_samples, alr_simulated_samples
 
 
 def simulate_correlated_swings(alr_swing, alr_swing_cov, num_simulations, dist, df_t):
 
-    all_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]))
+    all_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]+1))
     alr_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]))
+
+    prediction =  np.zeros((alr_swing.shape[0], alr_swing.shape[1]+1))
 
     for i in range(num_simulations):
 
@@ -484,7 +557,7 @@ def simulate_correlated_swings(alr_swing, alr_swing_cov, num_simulations, dist, 
             concatenated_predicted_alr = pd.concat([concatenated_predicted_alr, predicted_alr]) # add current year's values
 
         curr_prediction = alr_to_simplex_vectorized(predicted_alr, ref_col)[['ALP','COAL','GRN','Other']]
-        prior_prediction += curr_prediction
+        prediction += curr_prediction
 
         all_simulated_samples[i] = curr_prediction
         alr_simulated_samples[i] = predicted_alr
@@ -492,14 +565,14 @@ def simulate_correlated_swings(alr_swing, alr_swing_cov, num_simulations, dist, 
     import pdb;pdb.set_trace()
 
 
-    prior_prediction /= 1000
+    prediction /= 1000
 
     simulated_variance = np.var(all_simulated_samples, axis=0)
 
     # Compute the standard deviation as the square root of the variance
     simulated_std_dev = np.sqrt(simulated_variance)
 
-    return prior_prediction, pd.DataFrame(simulated_std_dev, columns=full_Fundamentals_estimate_df.columns, index=full_Fundamentals_estimate_df.index), all_simulated_samples, alr_simulated_samples
+    return prediction, pd.DataFrame(simulated_std_dev, columns=full_Fundamentals_estimate_df.columns, index=full_Fundamentals_estimate_df.index), all_simulated_samples, alr_simulated_samples
 
 
 use_correlation = 1
@@ -507,14 +580,19 @@ use_correlation = 1
 df_t = 5
 num_simulations = 1000
 
+method = 'Polls'
+swing = alr_swing if method == 'Fundamentals' else alr_swing_poll
+cov = alr_swing_cov if method == 'Fundamentals' else alr_swing_poll_cov
+
+
 if use_correlation:
-    t_means, t_stds, all_simulated_samples_t, alr_simulated_samples_t = simulate_correlated_swings(alr_swing, alr_swing_cov, num_simulations, 't', df_t)
+    t_means, t_stds, all_simulated_samples_t, alr_simulated_samples_t = simulate_correlated_swings(swing, cov, num_simulations, 't', df_t)
 
-    N_means, N_stds, all_simulated_samples_normal, alr_simulated_samples_normal = simulate_correlated_swings(alr_swing, alr_swing_cov, num_simulations, 'Normal', df_t)
+    N_means, N_stds, all_simulated_samples_normal, alr_simulated_samples_normal = simulate_correlated_swings(swing, cov, num_simulations, 'Normal', df_t)
 else:
-    t_means, t_stds, all_simulated_samples_t, alr_simulated_samples_t = simulate_swings(alr_swing, alr_swing_cov, estimate_alr, num_simulations, 't', df_t)
+    t_means, t_stds, all_simulated_samples_t, alr_simulated_samples_t = simulate_swings(swing, cov, estimate_alr, num_simulations, 't', df_t, ref_col, full_Fundamentals_estimate_df)
 
-    N_means, N_stds, all_simulated_samples_normal, alr_simulated_samples_normal = simulate_swings(alr_swing, alr_swing_cov, estimate_alr, num_simulations, 'Normal', df_t)
+    N_means, N_stds, all_simulated_samples_normal, alr_simulated_samples_normal = simulate_swings(swing, cov, estimate_alr, num_simulations, 'Normal', df_t, ref_col, full_Fundamentals_estimate_df)
 
 
 sns.kdeplot(alr_simulated_samples_normal[:, 0], label="Normal", color="blue")
