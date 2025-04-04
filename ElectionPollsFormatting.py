@@ -138,8 +138,8 @@ def parse_date_range(date_str):
 
 
 
-election_year = '2013'
-Polling_type = 'Electorate'
+election_year = '2022'
+Polling_type = 'National'
 
 last_election_date = {'2025': "21/05/22", '2022':"18/05/19", '2019':"02/07/16", '2016':"07/09/13", '2013':"21/08/10"}
 
@@ -160,15 +160,14 @@ if Polling_type == 'National':
         days_since_election = (parsed_median_dates - last_election_date).dt.days
 
         Opinion_Polls_2022_National.iloc[:,0] = days_since_election
-        Opinion_Polls_2022_National.rename(columns={"Date": "Days since last election"}) # not active yet
+        Opinion_Polls_2022_National = Opinion_Polls_2022_National.rename(columns={"Date": "Days since last election"}) # not active yet
         Opinion_Polls_2022_National.loc[:,'Sample size'] = Opinion_Polls_2022_National.loc[:,'Sample size'].fillna(1000) # essential polls seem likely to be 1000 each
 
-        Opinion_Polls_2022_National.iloc[:, 2:8] = Opinion_Polls_2022_National.iloc[:, 2:8].apply(pd.to_numeric, errors='raise') # eliminate strings
-        Opinion_Polls_2022_National.iloc[:, 2:8] = Opinion_Polls_2022_National.iloc[:, 2:8] - Opinion_Polls_2022_National.iloc[-1, 2:8] # make swings!
         Opinion_Polls_2022_National.iloc[:, 2:8] = Opinion_Polls_2022_National.iloc[:, 2:8].round(3)
-        Opinion_Polls_2022_National.iloc[:,1] = Opinion_Polls_2022_National.iloc[:,1].astype(int)  
+        Opinion_Polls_2022_National.loc[:,['Days since last election','Sample size']] = Opinion_Polls_2022_National.loc[:,['Days since last election','Sample size']].astype(int)  
         Poll_Swings_National = Opinion_Polls_2022_National.iloc[:-1,]
 
+        import pdb;pdb.set_trace()
 
         Poll_Swings_National.to_csv(f"NationalPollsforMGRW{election_year}.csv", index=False)
 
@@ -191,7 +190,7 @@ if Polling_type == 'National':
 
 
         Opinion_Polls_National.iloc[:,0] = days_since_election
-        Opinion_Polls_National = Opinion_Polls_National.rename(columns={"Date": "Days since last election"}) # not active yet
+        Opinion_Polls_National = Opinion_Polls_National.rename(columns={"Date": "Days since last election"}) 
 
         Opinion_Polls_National.iloc[:, 2:] = Opinion_Polls_National.iloc[:, 2:].apply(pd.to_numeric, errors='raise') # eliminate strings
         Opinion_Polls_National.iloc[:, 2:] = Opinion_Polls_National.iloc[:, 2:].round(3)

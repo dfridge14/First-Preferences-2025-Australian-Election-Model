@@ -6,13 +6,13 @@ import os
 import glob
 from pathlib import Path
 
-import numpy as np
-from scipy.stats import multivariate_normal, dirichlet
-
-from scipy.stats import multivariate_t
-import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 import scipy.stats as stats
 from scipy.optimize import minimize
+from scipy.special import gammaln  # Correct import for the gamma function
+from scipy.stats import multivariate_t, multivariate_normal, dirichlet
+
 
 
 # automatic error debugging
@@ -41,7 +41,7 @@ start = time.time()
 
 
 
-def get_prior_ALR_covariance(data_year):
+def get_prior_and_results_df(data_year):
     next_year = str(int(data_year)+3)
     Actual_results = pd.read_csv(f"{next_year}HouseDOPByDivision.csv", skiprows=1, index_col = None).rename(columns={'DivisionNm':'div_nm'})
     # COUntNUmber ==0, Pref Percent & decide on format - long or wide? Will generate swings for each, so wide is best
@@ -141,48 +141,56 @@ def get_prior_ALR_covariance(data_year):
 
     return Fundamentals_results_df, Fundamentals_estimate_df
 
-Fundamentals_results_list = []
-Fundamentals_estimate_list = []
+
+def get_Fundamentals_alr_swings_and_cov(ref_col):
+
+    Fundamentals_results_list = []
+    Fundamentals_estimate_list = []
 
 
-for data_year in ['2013','2016','2019']:
-    Fundamentals_results_df,Fundamentals_estimate_df = get_prior_ALR_covariance(data_year)
-    Fundamentals_results_list.append(Fundamentals_results_df)
-    Fundamentals_estimate_list.append(Fundamentals_estimate_df)
+    for data_year in ['2013','2016','2019']:
+        Fundamentals_results_df,Fundamentals_estimate_df = get_prior_and_results_df(data_year)
+        Fundamentals_results_list.append(Fundamentals_results_df)
+        Fundamentals_estimate_list.append(Fundamentals_estimate_df)
 
-full_Fundamentals_results_df = pd.concat(Fundamentals_results_list)
-full_Fundamentals_estimate_df = pd.concat(Fundamentals_estimate_list)
+    full_Fundamentals_results_df = pd.concat(Fundamentals_results_list)
+    full_Fundamentals_estimate_df = pd.concat(Fundamentals_estimate_list)
 
-# center the natural swings to avoid bias - we assume swings are generally unbiased - that we cannot predict direction 3 years prior!
-swings = full_Fundamentals_results_df - full_Fundamentals_estimate_df
-#swings_centered = (swings - swings.mean()).sum(axis=1)
-full_Fundamentals_estimate_df = full_Fundamentals_estimate_df + swings.mean()
+    # center the natural swings to avoid bias - we assume swings are generally unbiased - that we cannot predict direction 3 years prior!
+    swings = full_Fundamentals_results_df - full_Fundamentals_estimate_df
+    #swings_centered = (swings - swings.mean()).sum(axis=1)
+    full_Fundamentals_estimate_df = full_Fundamentals_estimate_df + swings.mean()
 
-import pdb; pdb.set_trace()
+    import pdb; pdb.set_trace()
 
+    results_alr = np.log(full_Fundamentals_results_df.drop(columns=[ref_col]).div(full_Fundamentals_results_df[ref_col], axis=0))
+    estimate_alr = np.log(full_Fundamentals_estimate_df.drop(columns=[ref_col]).div(full_Fundamentals_estimate_df[ref_col], axis=0))
+    alr_swing = results_alr - estimate_alr
 
-ref_col = 'Other'  # Reference category to remove
-
-results_alr = np.log(full_Fundamentals_results_df.drop(columns=[ref_col]).div(full_Fundamentals_results_df[ref_col], axis=0))
-estimate_alr = np.log(full_Fundamentals_estimate_df.drop(columns=[ref_col]).div(full_Fundamentals_estimate_df[ref_col], axis=0))
-alr_swing = results_alr - estimate_alr
-
-alr_swing_cov = alr_swing.cov()
+    alr_swing_cov = alr_swing.cov()
 
 
-print(alr_swing.cov())
-print((full_Fundamentals_results_df - full_Fundamentals_estimate_df).mean()) # should be 0 due to centralisation adjustment
+    print(alr_swing.cov())
+    print((full_Fundamentals_results_df - full_Fundamentals_estimate_df).mean()) # should be 0 due to centralisation adjustment
+
+    return alr_swing, alr_swing_cov, full_Fundamentals_estimate_df, estimate_alr
 
 
+
+ref_col = 'COAL'
+alr_swing, alr_swing_cov, full_Fundamentals_estimate_df, estimate_alr = get_Fundamentals_alr_swings_and_cov(ref_col)
 #simulated_alr_swings = multivariate_normal.rvs(mean=np.zeros(alr_swing.shape[1]), cov=alr_swing_cov, size=451)
 
 #predicted_alr = estimate_alr + simulated_alr_swings
 
 
 
+###################################################################################################### PLAY AROUND WITH R_ELECTORATES CORRELATION MATRIX#######################
 
-import numpy as np
+
 import scipy.linalg
+from scipy.linalg import eigh
+from scipy.linalg import sqrtm, inv
 
 # Simulated inputs: Replace these with your actual data
 np.random.seed(42)
@@ -276,8 +284,6 @@ def regularize_correlation_matrix(R, alpha=0.2, beta=0.3, min_eigen=0.5, max_eig
 R_electorates_regularized = regularize_correlation_matrix(R_electorates)
 
 
-from scipy.linalg import eigh
-from scipy.linalg import sqrtm, inv
 
 def adjust_alr_covariance(R_electorates, alr_swing_cov):
     ### combines electorate correlation matrix and between-party covariance matrix into a block covariance matrix
@@ -318,7 +324,7 @@ def adjust_alr_covariance(R_electorates, alr_swing_cov):
 
 
 
-import pdb;pdb.set_trace()
+#import pdb;pdb.set_trace()
 
 
 # --- Independent Model (Block Diagonal 450x450) ---
@@ -350,7 +356,7 @@ print("Variance ratio (Correlated / Independent):", variance_ratio)
 
 
 
-
+################################################### SIMULATE POLLING ERROR ###########################################################################################
 
 
 import pdb;pdb.set_trace()
@@ -376,14 +382,6 @@ def split_vote_share_dirichlet(total_vote_share, Others_proportions, alpha_scale
     samples = np.random.dirichlet(alpha, size=n_samples) * total_vote_share
     return samples
 
-
-
-#def alr_to_simplex(alr_samples): # chatgpt written
-#    """Convert ALR-transformed samples back to simplex space."""
-#    exp_values = np.exp(alr_samples)
-#    denominator = 1 + np.sum(exp_values, axis=-1, keepdims=True)
-#    base_category = 1 / denominator
-#    return np.hstack([exp_values / denominator, base_category])
 
 def alr_to_simplex_vectorized(df, ref_col):
     """Inverse ALR transformation for an entire DataFrame in a vectorized way."""
@@ -420,9 +418,7 @@ def split_category_in_simplex(simplex_probs, split_index, num_splits, dirichlet_
     ]) 
     return new_simplex_probs
 
-#prior_prediction = alr_to_simplex_vectorized(predicted_alr, ref_col)[['ALP','COAL','GRN','Other']]
-
-def simulate_swings(alr_swing, alr_swing_cov, estimate_alr, num_simulations, dist, df_t):
+def simulate_swings(alr_swing, alr_swing_cov, estimate_alr, num_simulations, dist, df_t, ref_col, full_Fundamentals_estimate_df):
 
     all_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]))
     alr_simulated_samples = np.zeros((num_simulations, alr_swing.shape[0], alr_swing.shape[1]))
@@ -520,8 +516,6 @@ else:
 
     N_means, N_stds, all_simulated_samples_normal, alr_simulated_samples_normal = simulate_swings(alr_swing, alr_swing_cov, estimate_alr, num_simulations, 'Normal', df_t)
 
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 sns.kdeplot(alr_simulated_samples_normal[:, 0], label="Normal", color="blue")
 sns.kdeplot(alr_simulated_samples_t[:, 0], label="T-distribution", color="red", linestyle="dashed")
@@ -540,10 +534,7 @@ plt.show()
 
 import pdb;pdb.set_trace()
 
-import numpy as np
-import scipy.stats as stats
-from scipy.optimize import minimize
-from scipy.special import gammaln  # Correct import for the gamma function
+
 
 # Load your ALR-transformed swings (shape: 150 electorates × 3 ALR components)
 

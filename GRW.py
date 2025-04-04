@@ -6,6 +6,18 @@ import os
 from pathlib import Path
 import matplotlib.pyplot as plt
 
+# automatic error debugging
+import sys
+import pdb
+import traceback
+
+def exception_handler(type, value, tb):
+    traceback.print_exception(type, value, tb)  # Print the error as usual
+    print("\n--- Entering post-mortem debugging ---\n")
+    pdb.pm()  # Start debugger at the error location
+
+sys.excepthook = exception_handler
+
 
 # Simulated data
 RANDOM_SEED = 8927
@@ -18,8 +30,8 @@ az.rcParams['plot.max_subplots'] = 100
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-election_year = '2016'
-SAMPLE_ERROR_SCALING_FACTOR = 1.5
+election_year = '2019'
+SAMPLE_ERROR_SCALING_FACTOR = 2
 
 
 
@@ -29,23 +41,16 @@ num_polling_days = 100
 
 import arviz as az
 
-election_year = '2016'
 last_election_year = str(int(election_year) - 3)
 election_date_num = {'2013':1113, '2016':1028, '2019':1050, '2022':1099}
 
-national_results = {'2016': np.array([42.04,34.73,10.23,13.00]), }
 # national/state results should come from the summed prior, assuming similar enrolment to last time!
-
 
 # 1. Total votes per seat last time.
 # 2. Adjusted via linear transformation
 # 3. Weighted sum of prior_weights and # votes
 
-#name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
-
 last_election_vote_totals = pd.read_csv(f"{last_election_year}HouseVotesCountedByDivision.csv", skiprows=1, index_col=None).rename(columns={'DivisionNm':'old_div'})[['old_div', 'TotalVotes']]
-#last_election_vote_totals['old_div'] = last_election_vote_totals['old_div'].replace(name_changes_year_dict[str(int(election_year)-3)])
-
 redistribution_df = pd.read_csv(f'Correspondence_CED_{str(int(election_year)-4)}_{str(int(election_year)-1)}.csv', index_col = None)
 
 merged_df = redistribution_df.merge(last_election_vote_totals, on="old_div")
@@ -102,7 +107,7 @@ def get_Prior_estimates_df(election_year):
     if election_year == '2016':
         Prior_estimates_df = pd.read_csv(f"Fundamentals_Votes_For_{election_year}.csv", index_col = None) # ONLY WORKS FOR 2016 - FOR OTHER YEARS WILL REQUIRE Polling_Prior_Votes
     else:
-        Prior_estimates_df = pd.read_csv(f"Polling_Prior_Votes_ON_add_For_{election_year}.csv", index_col = None)
+        Prior_estimates_df = pd.read_csv(f"Fundamentals_Votes_ON_add_For_{election_year}.csv", index_col = None)
 
 
 
@@ -129,12 +134,13 @@ def remove_ON_back_to_its_country(Prior_estimates_df, Polling_estimates, electio
 
     Prior_estimates_ON_add_df = Prior_estimates_df
 
-    true_prior_estimates = pd.read_csv(f"Polling_Prior_Votes_For_{election_year}.csv", index_col = None)
+    true_prior_estimates = pd.read_csv(f"Fundamentals_Votes_For_{election_year}.csv", index_col = None)
 
     Prior_estimates_dict = {
-        div: pd.DataFrame([group.set_index("PartyAb")["FP_Votes"].to_dict()])
-        for div, group in Prior_estimates_df.groupby("div_nm")
+    div: pd.DataFrame([group.to_dict()])
+    for div, group in Prior_estimates_df.iterrows()
     }
+
     # get true prior estimates wide format
     Prior_estimates_list = []
     for div in Prior_estimates_dict.keys():
@@ -168,9 +174,12 @@ def remove_ON_back_to_its_country(Prior_estimates_df, Polling_estimates, electio
 
 Prior_estimates_df = get_Prior_estimates_df(election_year).rename(columns={'Other':'OTH'}) # adds ON to every seat if no ON (for 2019 and 2022)
 
-# add 0.001 to Gorton Other!
+# add 0.001 to Gorton Other in 2016, or 0 others in 2019/2022 (use ON votes as they are higher --> less distortion)!
 if election_year == '2016':
     Prior_estimates_df.loc[Prior_estimates_df.index=='Gorton',['GRN','OTH']] += (-0.01,+0.01)
+else:
+    No_OTH_divisions = Prior_estimates_df.loc[Prior_estimates_df['OTH']==0.0,].index
+    Prior_estimates_df.loc[Prior_estimates_df['OTH']==0.0,['ON','OTH']] += (-0.005,+0.005)
 
 day_of_interest = 80
 day_80_polling_avg =  pd.DataFrame([[0.0]*len(Prior_estimates_df.columns)], columns=Prior_estimates_df.columns)
@@ -183,7 +192,7 @@ National_prior = (merged_totals.iloc[:,:-1] * weights.values[:,None]).sum().to_f
 
 
 
-def plot_GRW(x_posterior):
+def plot_GRW(x_posterior, day_of_interest):
 
     # Compute summary statistics
     x_mean = np.mean(x_posterior, axis=(0, 1))  # Mean trajectory (T, K)
@@ -192,7 +201,7 @@ def plot_GRW(x_posterior):
 
 
     # Time axis (100 days)
-    time = np.arange(100)
+    time = np.arange(day_of_interest+1)
 
 
     plt.figure(figsize=(10, 6))
@@ -253,16 +262,26 @@ starting_point = election_date_num[election_year] - num_polling_days # start 100
 
 National_polls = pd.read_csv(f'NationalPollsforMGRW{election_year}.csv')
 
-for party in National_polls.columns[2:]:
+
+for party in reversed(National_polls.columns[2:]):
 
     # Step 1: Load Data (Placeholder, replace with actual data)
     df = National_polls[['Days since last election','Sample size',party]] # Columns: [Days since last election, Sample size, COAL, ALP, GRN, party_4,...,Other]
 
+    # exclude 0 poll values (i.e. UAPP)
+    df = df.loc[df[party]>0,]
 
-    prior_poll_avg = df.loc[df['Days since last election'] < starting_point,].iloc[-10:,2:].mean()
+    if party == 'UAPP':
+        prior_poll_avg = df.loc[df['Days since last election'] < starting_point,].iloc[:,2:].mean() if election_year == '2022' else 0.04 # for 2019
+    else:
+        prior_poll_avg = df.loc[df['Days since last election'] < starting_point,].iloc[-10:,2:].mean()
+
     df = df.loc[df['Days since last election'] >= starting_point,]
     df.loc[:,'Days since last election'] -= starting_point
     df = df.rename(columns={'Days since last election':'Day_index'})
+
+    # only model the polling until day_of_interest
+    df = df.loc[df['Day_index']<=day_of_interest,]
 
     days = df['Day_index'].values
     observed_days = np.array(sorted(set(days))) 
@@ -291,7 +310,7 @@ for party in National_polls.columns[2:]:
 
         init_dist = pm.Normal.dist(mu=prior_poll_avg, sigma=0.02)  # Adjust sigma based on uncertainty
         # Latent vote share following a Gaussian random walk
-        vote_trend = pm.GaussianRandomWalk("vote_trend", sigma=0.005, shape=100, init_dist=init_dist)
+        vote_trend = pm.GaussianRandomWalk("vote_trend", sigma=0.005, shape=day_of_interest+1, init_dist=init_dist)
 
         # Observed polls (Normal likelihood with poll-dependent variance)
         #poll_sd = pm.Deterministic("poll_sd", agg_polls["poll_sd"])
@@ -304,7 +323,7 @@ for party in National_polls.columns[2:]:
     x_mean = np.mean(x_posterior, axis=(0, 1))  # Mean vote share over time
     day_80_polling_avg[party] = x_mean[day_of_interest]
 
-    #plot_GRW(x_posterior)
+    #plot_GRW(x_posterior, day_of_interest)
 
 day_80_polling_avg = day_80_polling_avg/ day_80_polling_avg.sum(axis=1)[0]
 
@@ -321,16 +340,29 @@ Polling_estimates_alr = Prior_estimates_alr.add(national_alr_swing.iloc[0], axis
 
 
 
-Polling_estimates = alr_to_simplex_vectorized(Polling_estimates_alr,ref_col)[['ALP','COAL','GRN','OTH']]
+Polling_estimates = alr_to_simplex_vectorized(Polling_estimates_alr,ref_col)[National_prior.columns.tolist()]
 
 # check that the aggregated results match the national polling average
 merged_totals_polling = Polling_estimates.merge(new_vote_totals_states.set_index('div_nm')[['new_vote_totals']], left_index=True, right_index=True)
 weights_polling = merged_totals_polling['new_vote_totals']/merged_totals_polling['new_vote_totals'].sum()
-weighted_national_polling = (merged_totals.iloc[:,:-1] * weights.values[:,None]).sum().to_frame().T
+weighted_national_polling = (merged_totals_polling.iloc[:,:-1] * weights_polling.values[:,None]).sum().to_frame().T
 import pdb;pdb.set_trace()
 
-remove_ON_back_to_its_country(Polling_estimates)
+if election_year == '2016':
+    Polling_estimates.loc[Polling_estimates.index=='Gorton',['GRN','OTH']] += (1,-1) * Polling_estimates.loc[Polling_estimates.index=='Gorton','OTH'][0]
+    import pdb;pdb.set_trace()
 
 
-plot_GRW(x_posterior)
+if election_year in ['2019','2022']:
+    OTH_values = Polling_estimates.loc[Polling_estimates.index.isin(No_OTH_divisions),'OTH'].values
+    Polling_estimates.loc[Polling_estimates.index.isin(No_OTH_divisions),['ON','OTH']] += np.array([OTH_values, - OTH_values]).T
+    Prior_estimates_df.loc[Prior_estimates_df.index.isin(No_OTH_divisions),['ON','OTH']] += (0.005,-0.005)
+    import pdb;pdb.set_trace()
+
+    Polling_estimates_from_National = remove_ON_back_to_its_country(Prior_estimates_df, Polling_estimates, election_year)
+
+
+import pdb;pdb.set_trace()
+# Polling_estimates.to_csv(f"National_Polling_Estimates_{election_year}_Day_{day_of_interest}.csv", index=True)
+
 import pdb;pdb.set_trace()
