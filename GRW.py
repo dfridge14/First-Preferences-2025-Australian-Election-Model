@@ -37,7 +37,7 @@ SAMPLE_ERROR_SCALING_FACTOR = 2
 
 
 
-num_polling_days = 100
+num_polling_days = 500
 
 import arviz as az
 
@@ -188,9 +188,6 @@ else:
     No_OTH_divisions = Prior_estimates_df.loc[Prior_estimates_df['OTH']==0.0,].index
     Prior_estimates_df.loc[Prior_estimates_df['OTH']==0.0,['ON','OTH']] += (-0.005,+0.005)
 
-day_of_interest = 80
-day_80_polling_avg =  pd.DataFrame([[0.0]*len(Prior_estimates_df.columns)], columns=Prior_estimates_df.columns)
-
 
 
 
@@ -263,10 +260,15 @@ def alr_to_simplex_vectorized(df, ref_col):
 # only do inference for last 100 days of election:
 starting_point = election_date_num[election_year] - num_polling_days # start 100 days before last day of polling
 
+
+day_of_interest = num_polling_days - 20
+day_80_polling_avg =  pd.DataFrame([[0.0]*len(Prior_estimates_df.columns)], columns=Prior_estimates_df.columns)
+
+
 National_polls = pd.read_csv(f'NationalPollsforMGRW{election_year}.csv')
 
 
-for party in reversed(National_polls.columns[2:]):
+for party in National_polls.columns[2:]:
 
     # Step 1: Load Data (Placeholder, replace with actual data)
     df = National_polls[['Days since last election','Sample size',party]] # Columns: [Days since last election, Sample size, COAL, ALP, GRN, party_4,...,Other]
@@ -312,21 +314,33 @@ for party in reversed(National_polls.columns[2:]):
     with pm.Model() as model:
 
         init_dist = pm.Normal.dist(mu=prior_poll_avg, sigma=0.02)  # Adjust sigma based on uncertainty
+        #sigma = pm.TruncatedNormal("sigma", mu=0.005, sigma=0.003, lower=1e-5)  # Prior for daily drift of random walk
+
+        log_sigma = pm.Normal("log_sigma", mu=np.log(0.005), sigma=1)
+        sigma = pm.Deterministic("sigma", pm.math.exp(log_sigma))
+
+
         # Latent vote share following a Gaussian random walk
-        vote_trend = pm.GaussianRandomWalk("vote_trend", sigma=0.005, shape=day_of_interest+1, init_dist=init_dist)
+        vote_trend = pm.GaussianRandomWalk("vote_trend", sigma=sigma, shape=day_of_interest+1, init_dist=init_dist)
 
         # Observed polls (Normal likelihood with poll-dependent variance)
         #poll_sd = pm.Deterministic("poll_sd", agg_polls["poll_sd"])
         observed = pm.Normal("observed", mu=vote_trend[agg_polls["Day_index"].values], sigma=SAMPLE_ERROR_SCALING_FACTOR*agg_polls["poll_sd"], observed=agg_polls["vote_share_weighted"])
 
-        trace = pm.sample(1000, tune=1000, target_accept=0.9)
+        trace = pm.sample(2000, tune=2000, chains=8, cores=8, target_accept=0.95)
 
 
     x_posterior = trace.posterior["vote_trend"].values
     x_mean = np.mean(x_posterior, axis=(0, 1))  # Mean vote share over time
     day_80_polling_avg[party] = x_mean[day_of_interest]
 
-    #plot_GRW(x_posterior, day_of_interest)
+    print(party, "estimated_sigma", az.summary(trace, var_names=["sigma"]))
+
+    plot_GRW(x_posterior, day_of_interest)
+
+
+
+
 
 day_80_polling_avg = day_80_polling_avg/ day_80_polling_avg.sum(axis=1)[0]
 
@@ -370,3 +384,44 @@ import pdb;pdb.set_trace()
 # Polling_estimates_from_National.to_csv(f"National_Polling_Estimates_{election_year}_Day_{day_of_interest}.csv", index=True)
 
 import pdb;pdb.set_trace()
+
+
+
+
+
+
+# estimation of mean drift 
+
+# 2016 COAL estimated_sigma
+#        mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+#sigma  0.003  0.001   0.002    0.004        0.0      0.0     249.0     520.0   1.03
+
+#2016 ALP estimated_sigma
+#        mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+#sigma  0.002  0.001   0.001    0.003        0.0      0.0     144.0     410.0   1.06
+
+#2016 GRN estimated_sigma
+
+#        mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+#sigma  0.001  0.0     0.0    0.002        0.0      0.0      47.0     142.0   1.12
+
+# 2016 OTH estimated_sigma         
+#        mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+#sigma  0.001  0.0   0.001    0.002        0.0      0.0      29.0      79.0   1.22
+
+# 2019 COAL estimated_sigma        
+#         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+# sigma  0.001  0.001     0.0    0.002        0.0      0.0      23.0      63.0   1.27
+
+# 2019 ALP estimated_sigma
+#         mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+# sigma  0.001  0.0     0.0    0.002        0.0      0.0      17.0      44.0   1.43
+
+
+# 2022 COAL estimated_sigma
+#        mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+#sigma  0.002  0.0   0.001    0.003        0.0      0.0      64.0     267.0   1.09
+
+# 2022 ALP estimated_sigma         
+#        mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+#sigma  0.001  0.0     0.0    0.002        0.0      0.0      20.0      98.0   1.31

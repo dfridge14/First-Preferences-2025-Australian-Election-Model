@@ -1,9 +1,14 @@
 setwd("/home/dania-freidgeim/Australian Election/")
 Elec_similarity_df <- read.csv("Electorate_Similarity_for_R.csv", header = TRUE, stringsAsFactors = FALSE)
+library(car)
+
 # 
 
 similarity_model = lm(Response ~ Similarity + TCP_type + State, data = Elec_similarity_df)
 summary(similarity_model)
+
+anova(similarity_model)
+Anova(similarity_model, type = "III")
 
 
 # Load necessary libraries
