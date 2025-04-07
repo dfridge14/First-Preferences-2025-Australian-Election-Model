@@ -30,19 +30,19 @@ az.rcParams['plot.max_subplots'] = 100
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-election_year = '2022'
+election_year = '2004'
 SAMPLE_ERROR_SCALING_FACTOR = 2
 
 
 
 
 
-num_polling_days = 500
+num_polling_days = 100
 
 import arviz as az
 
 last_election_year = str(int(election_year) - 3)
-election_date_num = {'2013':1113, '2016':1028, '2019':1050, '2022':1099}
+election_date_num = {'2007': 1141,'2010':1002, '2013':1113, '2016':1028, '2019':1050, '2022':1099}
 
 # national/state results should come from the summed prior, assuming similar enrolment to last time!
 
@@ -50,15 +50,16 @@ election_date_num = {'2013':1113, '2016':1028, '2019':1050, '2022':1099}
 # 2. Adjusted via linear transformation
 # 3. Weighted sum of prior_weights and # votes
 
-last_election_vote_totals = pd.read_csv(f"{last_election_year}HouseVotesCountedByDivision.csv", skiprows=1, index_col=None).rename(columns={'DivisionNm':'old_div'})[['old_div', 'TotalVotes']]
-redistribution_df = pd.read_csv(f'Correspondence_CED_{str(int(election_year)-4)}_{str(int(election_year)-1)}.csv', index_col = None)
+if election_year in ['2016','2019','2022']:
+    last_election_vote_totals = pd.read_csv(f"{last_election_year}HouseVotesCountedByDivision.csv", skiprows=1, index_col=None).rename(columns={'DivisionNm':'old_div'})[['old_div', 'TotalVotes']]
+    redistribution_df = pd.read_csv(f'Correspondence_CED_{str(int(election_year)-4)}_{str(int(election_year)-1)}.csv', index_col = None)
 
-merged_df = redistribution_df.merge(last_election_vote_totals, on="old_div")
-merged_df["new_vote_totals"] = merged_df["TotalVotes"] * merged_df["RATIO_FROM_TO"]
-new_vote_totals = merged_df.groupby("new_div")["new_vote_totals"].sum().reset_index().rename(columns={'new_div':'div_nm'})
+    merged_df = redistribution_df.merge(last_election_vote_totals, on="old_div")
+    merged_df["new_vote_totals"] = merged_df["TotalVotes"] * merged_df["RATIO_FROM_TO"]
+    new_vote_totals = merged_df.groupby("new_div")["new_vote_totals"].sum().reset_index().rename(columns={'new_div':'div_nm'})
 
-div_to_state = pd.read_csv(f"{election_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
-new_vote_totals_states = new_vote_totals.merge(div_to_state, on = 'div_nm', how='left')
+    div_to_state = pd.read_csv(f"{election_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+    new_vote_totals_states = new_vote_totals.merge(div_to_state, on = 'div_nm', how='left')
 
 
 
@@ -161,32 +162,34 @@ def remove_ON_back_to_its_country(Prior_estimates_df, Polling_estimates, electio
     return Polling_estimates
 
 
-Prior_estimates_df = get_Prior_estimates_df(election_year).rename(columns={'Other':'OTH'}) # adds ON to every seat if no ON (for 2019 and 2022)
+
+if election_year in ['2016','2019','2022']:
+    Prior_estimates_df = get_Prior_estimates_df(election_year).rename(columns={'Other':'OTH'}) # adds ON to every seat if no ON (for 2019 and 2022)
 
 
 
 
-merged_totals = Prior_estimates_df.merge(new_vote_totals_states.set_index('div_nm')[['new_vote_totals']], left_index=True, right_index=True)
-weights = merged_totals['new_vote_totals']/merged_totals['new_vote_totals'].sum()
-National_prior = (merged_totals.iloc[:,:-1] * weights.values[:,None]).sum().to_frame().T
+    merged_totals = Prior_estimates_df.merge(new_vote_totals_states.set_index('div_nm')[['new_vote_totals']], left_index=True, right_index=True)
+    weights = merged_totals['new_vote_totals']/merged_totals['new_vote_totals'].sum()
+    National_prior = (merged_totals.iloc[:,:-1] * weights.values[:,None]).sum().to_frame().T
 
-merged_totals_states = Prior_estimates_df.merge(new_vote_totals_states.set_index('div_nm'), left_index=True, right_index=True)
+    merged_totals_states = Prior_estimates_df.merge(new_vote_totals_states.set_index('div_nm'), left_index=True, right_index=True)
 
-State_prior_df = pd.DataFrame(columns=Prior_estimates_df.columns)
-for state in merged_totals_states['StateAb'].unique():
-    merged_totals_curr_state = merged_totals_states.loc[merged_totals_states['StateAb']==state,].drop('StateAb', axis = 1) # no longer need StateAb
-    curr_weights = merged_totals_curr_state['new_vote_totals']/merged_totals_curr_state['new_vote_totals'].sum()
-    State_prior = (merged_totals_curr_state.iloc[:,:-1] * curr_weights.values[:,None]).sum().to_frame().T
-    State_prior_df = pd.concat([State_prior_df, State_prior], ignore_index=True)
+    State_prior_df = pd.DataFrame(columns=Prior_estimates_df.columns)
+    for state in merged_totals_states['StateAb'].unique():
+        merged_totals_curr_state = merged_totals_states.loc[merged_totals_states['StateAb']==state,].drop('StateAb', axis = 1) # no longer need StateAb
+        curr_weights = merged_totals_curr_state['new_vote_totals']/merged_totals_curr_state['new_vote_totals'].sum()
+        State_prior = (merged_totals_curr_state.iloc[:,:-1] * curr_weights.values[:,None]).sum().to_frame().T
+        State_prior_df = pd.concat([State_prior_df, State_prior], ignore_index=True)
 
 
 
-# add 0.001 to Gorton Other in 2016, or 0 others in 2019/2022 (use ON votes as they are higher --> less distortion)!
-if election_year == '2016':
-    Prior_estimates_df.loc[Prior_estimates_df.index=='Gorton',['GRN','OTH']] += (-0.01,+0.01)
-else:
-    No_OTH_divisions = Prior_estimates_df.loc[Prior_estimates_df['OTH']==0.0,].index
-    Prior_estimates_df.loc[Prior_estimates_df['OTH']==0.0,['ON','OTH']] += (-0.005,+0.005)
+    # add 0.001 to Gorton Other in 2016, or 0 others in 2019/2022 (use ON votes as they are higher --> less distortion)!
+    if election_year == '2016':
+        Prior_estimates_df.loc[Prior_estimates_df.index=='Gorton',['GRN','OTH']] += (-0.01,+0.01)
+    else:
+        No_OTH_divisions = Prior_estimates_df.loc[Prior_estimates_df['OTH']==0.0,].index
+        Prior_estimates_df.loc[Prior_estimates_df['OTH']==0.0,['ON','OTH']] += (-0.005,+0.005)
 
 
 
@@ -260,12 +263,16 @@ def alr_to_simplex_vectorized(df, ref_col):
 # only do inference for last 100 days of election:
 starting_point = election_date_num[election_year] - num_polling_days # start 100 days before last day of polling
 
+if election_year not in ['2016','2019','2022','2025']:
+    Prior_estimates_df = pd.DataFrame(columns=['COAL','ALP','GRN','OTH'])
 
 day_of_interest = num_polling_days - 20
 day_80_polling_avg =  pd.DataFrame([[0.0]*len(Prior_estimates_df.columns)], columns=Prior_estimates_df.columns)
 
 
 National_polls = pd.read_csv(f'NationalPollsforMGRW{election_year}.csv')
+
+sigma_drift_prior = {'COAL':0.004,'ALP':0.004,'GRN':0.002,'OTH':0.003}
 
 
 for party in National_polls.columns[2:]:
@@ -311,33 +318,36 @@ for party in National_polls.columns[2:]:
 
 
 
+
+
     with pm.Model() as model:
 
         init_dist = pm.Normal.dist(mu=prior_poll_avg, sigma=0.02)  # Adjust sigma based on uncertainty
         #sigma = pm.TruncatedNormal("sigma", mu=0.005, sigma=0.003, lower=1e-5)  # Prior for daily drift of random walk
 
-        log_sigma = pm.Normal("log_sigma", mu=np.log(0.005), sigma=1)
+        log_sigma = pm.Normal("log_sigma", mu=np.log(sigma_drift_prior[party]), sigma=1)
         sigma = pm.Deterministic("sigma", pm.math.exp(log_sigma))
 
 
         # Latent vote share following a Gaussian random walk
-        vote_trend = pm.GaussianRandomWalk("vote_trend", sigma=sigma, shape=day_of_interest+1, init_dist=init_dist)
+        vote_trend = pm.GaussianRandomWalk("vote_trend", sigma=sigma_drift_prior[party], shape=day_of_interest+1, init_dist=init_dist)
 
         # Observed polls (Normal likelihood with poll-dependent variance)
         #poll_sd = pm.Deterministic("poll_sd", agg_polls["poll_sd"])
         observed = pm.Normal("observed", mu=vote_trend[agg_polls["Day_index"].values], sigma=SAMPLE_ERROR_SCALING_FACTOR*agg_polls["poll_sd"], observed=agg_polls["vote_share_weighted"])
 
-        trace = pm.sample(2000, tune=2000, chains=8, cores=8, target_accept=0.95)
+        trace = pm.sample(1000, tune=1000, chains=4, cores=4, target_accept=0.95)
 
 
     x_posterior = trace.posterior["vote_trend"].values
     x_mean = np.mean(x_posterior, axis=(0, 1))  # Mean vote share over time
     day_80_polling_avg[party] = x_mean[day_of_interest]
 
-    print(party, "estimated_sigma", az.summary(trace, var_names=["sigma"]))
+    print(party, election_year, "estimated_sigma", az.summary(trace, var_names=["sigma"]))
 
-    plot_GRW(x_posterior, day_of_interest)
+    #plot_GRW(x_posterior, day_of_interest)
 
+import pdb;pdb.set_trace()
 
 
 
@@ -421,7 +431,26 @@ import pdb;pdb.set_trace()
 # 2022 COAL estimated_sigma
 #        mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
 #sigma  0.002  0.0   0.001    0.003        0.0      0.0      64.0     267.0   1.09
+# COAL estimated_sigma         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat ; repeated!
+# sigma  0.002  0.001     0.0    0.005        0.0      0.0     120.0     233.0   1.07
 
 # 2022 ALP estimated_sigma         
 #        mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
 #sigma  0.001  0.0     0.0    0.002        0.0      0.0      20.0      98.0   1.31
+#ALP estimated_sigma         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat ; repeated
+#sigma  0.003  0.002     0.0    0.005        0.0      0.0     137.0     216.0   1.05
+
+
+# 2013 COAL estimated_sigma - last 100 days (campaign period!)         
+#       mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+#sigma  0.003  0.002     0.0    0.006        0.0      0.0     220.0     236.0   1.03
+
+#ALP estimated_sigma         
+#         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+# sigma  0.007  0.002   0.003    0.011        0.0      0.0     597.0    1129.0   1.01
+
+#GRN estimated_sigma         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+#sigma  0.002  0.001     0.0    0.003        0.0      0.0     176.0     189.0   1.04
+
+#OTH estimated_sigma         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
+#sigma  0.003  0.001   0.001    0.005        0.0      0.0     200.0     353.0   1.04
