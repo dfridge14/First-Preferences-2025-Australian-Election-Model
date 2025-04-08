@@ -485,7 +485,29 @@ elif Polling_type == 'State':
     State_Weighted_Polling_Average_df.to_csv("StatePollingWeightedAverage.csv", index = False)
     State_Results_df.to_csv("StateFederalResults.csv", index=False)
 
-    
+elif Polling_type == 'State_delta':
+
+    include_ON_UAPP = 0
+
+    State_polls = pd.read_csv(f"StatePolls{election_year}.csv", index_col = None)
+
+    if not include_ON_UAPP:
+        State_polls.loc[:,'OTH'] += State_polls.loc[:,'ON'] # combine ON with Others
+        State_polls = State_polls[['Poll_id','Date','Scope','Sample size','COAL','ALP','GRN','OTH']]
+
+    for state in ['NSW','VIC','QLD','WA','SA']:
+        state_polling = State_polls.loc[State_polls['Scope'] == state,]
+
+        dates = pd.Series(state_polling['Date']).str.strip()
+        parsed_median_dates = dates.apply(parse_date_range) 
+        parsed_median_dates = pd.to_datetime(parsed_median_dates) # datetime objects
+
+        election_date =  parsed_median_dates.iloc[0]
+        days_to_election = (election_date - parsed_median_dates).dt.days
+
+        state_polling.loc[:,'Date'] = days_to_election
+        state_polling = state_polling.rename(columns={"Date": "Days to election"}).sort_values(by='Days to election').reset_index(drop=True)
+
 
 
 Weighted_Polling_Average_list = []
