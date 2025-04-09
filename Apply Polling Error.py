@@ -30,25 +30,19 @@ az.rcParams['plot.max_subplots'] = 100
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-election_year = '2022'
-SAMPLE_ERROR_SCALING_FACTOR = 2
+election_year = '2019'
 
+n_samples = 1000000
+National_Polling_error_ALR_cov = pd.read_csv(f"PollingErrorALRCovarianceNational{election_year}.csv", index_col=0)
+National_Simulated_polling_error = np.random.multivariate_normal(mean = np.zeros(len(National_Polling_error_ALR_cov)), cov = National_Polling_error_ALR_cov.values, size=n_samples)
 
+National_Election_error_ALR_cov = pd.read_csv(f"ElectionErrorALRCovarianceNational{election_year}.csv", index_col=0)
+National_Simulated_election_error = np.random.multivariate_normal(mean = np.zeros(len(National_Election_error_ALR_cov)), cov = National_Election_error_ALR_cov.values, size=n_samples)
 
-
-
-num_polling_days = 100
-
-import arviz as az
 
 last_election_year = str(int(election_year) - 3)
-election_date_num = {'2007': 1141,'2010':1002, '2013':1113, '2016':1028, '2019':1050, '2022':1099}
 
-# national/state results should come from the summed prior, assuming similar enrolment to last time!
 
-# 1. Total votes per seat last time.
-# 2. Adjusted via linear transformation
-# 3. Weighted sum of prior_weights and # votes
 
 if election_year in ['2016','2019','2022']:
     last_election_vote_totals = pd.read_csv(f"{last_election_year}HouseVotesCountedByDivision.csv", skiprows=1, index_col=None).rename(columns={'DivisionNm':'old_div'})[['old_div', 'TotalVotes']]
@@ -176,11 +170,12 @@ if election_year in ['2016','2019','2022']:
     merged_totals_states = Prior_estimates_df.merge(new_vote_totals_states.set_index('div_nm'), left_index=True, right_index=True)
 
     State_prior_df = pd.DataFrame(columns=Prior_estimates_df.columns)
-    for state in merged_totals_states['StateAb'].unique():
+    for state in sorted(merged_totals_states['StateAb'].unique()):
         merged_totals_curr_state = merged_totals_states.loc[merged_totals_states['StateAb']==state,].drop('StateAb', axis = 1) # no longer need StateAb
         curr_weights = merged_totals_curr_state['new_vote_totals']/merged_totals_curr_state['new_vote_totals'].sum()
         State_prior = (merged_totals_curr_state.iloc[:,:-1] * curr_weights.values[:,None]).sum().to_frame().T
-        State_prior_df = pd.concat([State_prior_df, State_prior], ignore_index=True)
+        State_prior.index = [state]
+        State_prior_df = pd.concat([State_prior_df, State_prior])
 
 
 
@@ -193,50 +188,6 @@ if election_year in ['2016','2019','2022']:
 
 
 
-
-
-def plot_GRW(x_posterior, day_of_interest):
-
-    # Compute summary statistics
-    x_mean = np.mean(x_posterior, axis=(0, 1))  # Mean trajectory (T, K)
-    x_lower = np.percentile(x_posterior, 2.5, axis=(0, 1))  # 2.5th percentile (T, K)
-    x_upper = np.percentile(x_posterior, 97.5, axis=(0, 1))  # 97.
-
-
-    # Time axis (100 days)
-    time = np.arange(day_of_interest+1)
-
-
-    plt.figure(figsize=(10, 6))
-
-    plt.plot(time, x_mean)
-    plt.fill_between(time, x_lower, x_upper, alpha=0.2)
-
-    plt.xlabel("Days")
-    plt.ylabel("ALR Vote Share")
-    plt.title("ALR Vote Share Trajectory with 95% Credible Intervals")
-    plt.legend()
-    plt.grid()
-    plt.show()
-
-    window_size = 5  # Adjust for smoothing level
-    mean_trend_smooth = np.convolve(x_mean, np.ones(window_size)/window_size, mode='same')
-    hdi_low_smooth = np.convolve(x_lower, np.ones(window_size)/window_size, mode='same')
-    hdi_high_smooth = np.convolve(x_upper, np.ones(window_size)/window_size, mode='same')
-
-    plt.figure(figsize=(10, 6))
-
-    plt.plot(time, mean_trend_smooth)
-    plt.fill_between(time, hdi_low_smooth, hdi_high_smooth, alpha=0.2)
-
-    plt.xlabel("Days")
-    plt.ylabel("ALR Vote Share")
-    plt.title("ALR Vote Share Trajectory with 95% Credible Intervals")
-    plt.legend()
-    plt.grid()
-    plt.show()
-
-    return 1
 
 def alr_to_simplex_vectorized(df, ref_col):
     """Inverse ALR transformation for an entire DataFrame in a vectorized way."""
@@ -260,115 +211,55 @@ def alr_to_simplex_vectorized(df, ref_col):
 
 
 
-# only do inference for last 100 days of election:
-starting_point = election_date_num[election_year] - num_polling_days # start 100 days before last day of polling
+day_80_polling_avg_dict = {'2016': pd.DataFrame([[0.412262, 0.351972, 0.105693, 0.130074]], columns = ['COAL','ALP','GRN','OTH']), \
+                      '2019':pd.DataFrame([[0.384782, 0.36451, 0.095751, 0.035, 0.031, 0.088957]], columns = ['COAL','ALP','GRN','ON','UAPP','OTH']), \
+                      '2022':pd.DataFrame([[0.355905, 0.362643, 0.118432, 0.0383,0.0244,0.10032,]], columns = ['COAL','ALP','GRN','ON','UAPP','OTH']), \
+                      '2025':[]}
 
-if election_year not in ['2016','2019','2022','2025']:
-    Prior_estimates_df = pd.DataFrame(columns=['COAL','ALP','GRN','OTH'])
-
-day_of_interest = num_polling_days - 20
-day_80_polling_avg =  pd.DataFrame([[0.0]*len(Prior_estimates_df.columns)], columns=Prior_estimates_df.columns)
-
-
-National_polls = pd.read_csv(f'NationalPollsforMGRW{election_year}.csv')
-
-sigma_drift_prior = {'COAL':0.004,'ALP':0.004,'GRN':0.002,'OTH':0.003,'ON':0.003,'UAPP':0.003}
-
-
-for party in National_polls.columns[5:7]:
-
-    # Step 1: Load Data (Placeholder, replace with actual data)
-    df = National_polls[['Days since last election','Sample size',party]] # Columns: [Days since last election, Sample size, COAL, ALP, GRN, party_4,...,Other]
-
-    # exclude 0 poll values (i.e. UAPP)
-    df = df.loc[df[party]>0,]
-
-    if party == 'UAPP':
-        prior_poll_avg = df.loc[df['Days since last election'] < starting_point,].iloc[:,2:].mean() if election_year == '2022' else 0.04 # for 2019
-    else:
-        prior_poll_avg = df.loc[df['Days since last election'] < starting_point,].iloc[-10:,2:].mean()
-
-    df = df.loc[df['Days since last election'] >= starting_point,]
-    df.loc[:,'Days since last election'] -= starting_point
-    df = df.rename(columns={'Days since last election':'Day_index'})
-
-    # only model the polling until day_of_interest
-    df = df.loc[df['Day_index']<=day_of_interest,]
-
-    days = df['Day_index'].values
-    observed_days = np.array(sorted(set(days))) 
-    num_polls = len(days)
-    day_indices = np.array([np.where(observed_days == d)[0][0] + 1 for d in days]) 
-
-    observed_votes = df[party].values
-    sample_sizes = df['Sample size'].values
-
-    # Compute precisions
-    df["precision"] = df["Sample size"] / (df[party] * (1 - df[party]))
-
-    # Aggregate by day (precision-weighted mean & new variance)
-    agg_polls = df.groupby("Day_index").agg(
-        vote_share_weighted=(party, lambda x: np.sum(x * df.loc[x.index, "precision"]) / np.sum(df.loc[x.index, "precision"])),
-        total_precision=("precision", "sum")  # Sum of precisions
-    ).reset_index()
-
-    # Convert precision back to standard deviation
-    agg_polls["poll_sd"] = np.sqrt(1 / agg_polls["total_precision"])
+day_80_polling_avg = day_80_polling_avg_dict[election_year]/ day_80_polling_avg_dict[election_year].sum(axis=1)[0]
 
 
 
+# get alr-swing of
+ref_col = 'COAL'
+polling_alr = np.log(day_80_polling_avg.drop(columns=[ref_col]).div(day_80_polling_avg[ref_col], axis=0))
+National_prior_alr = np.log(National_prior.drop(columns=[ref_col]).div(National_prior[ref_col], axis=0))
+State_prior_alr = np.log(State_prior_df.drop(columns=[ref_col]).div(State_prior_df[ref_col], axis=0))
 
 
 
-    with pm.Model() as model:
+# apply National Polling error
+Simulated_national_result_alr = polling_alr.values + National_Simulated_polling_error  # shape: [1M, 5]
+national_alr_swing = Simulated_national_result_alr - National_prior_alr.values  # shape: [1M, 5]
 
-        init_dist = pm.Normal.dist(mu=prior_poll_avg, sigma=0.02)  # Adjust sigma based on uncertainty
-        #sigma = pm.TruncatedNormal("sigma", mu=0.005, sigma=0.003, lower=1e-5)  # Prior for daily drift of random walk
+# 2. Broadcast to all 8 states
+# Shape: [1M, 8, 5] = [1M, 1, 5] + [1, 8, 5]
+State_prior_alr_array = State_prior_alr.to_numpy()
+uniform_state_alr = national_alr_swing[:, np.newaxis, :] + State_prior_alr_array[np.newaxis, :, :]
 
-        log_sigma = pm.Normal("log_sigma", mu=np.log(sigma_drift_prior[party]), sigma=1)
-        sigma = pm.Deterministic("sigma", pm.math.exp(log_sigma))
-
-
-        # Latent vote share following a Gaussian random walk
-        vote_trend = pm.GaussianRandomWalk("vote_trend", sigma=sigma_drift_prior[party], shape=day_of_interest+1, init_dist=init_dist)
-
-        # Observed polls (Normal likelihood with poll-dependent variance)
-        #poll_sd = pm.Deterministic("poll_sd", agg_polls["poll_sd"])
-        observed = pm.Normal("observed", mu=vote_trend[agg_polls["Day_index"].values], sigma=SAMPLE_ERROR_SCALING_FACTOR*agg_polls["poll_sd"], observed=agg_polls["vote_share_weighted"])
-
-        trace = pm.sample(1000, tune=1000, chains=4, cores=4, target_accept=0.95)
+#national_alr_swing = Simulated_national_result_alr - National_prior_alr # new national swing - to be applied to all states!
+#unform_state_alr = State_prior_alr + national_alr_swing.values # states adjusted by uniform swing!
+#alr_to_simplex_vectorized(unform_state_alr,ref_col)[National_prior.columns.tolist()]
 
 
-    x_posterior = trace.posterior["vote_trend"].values
-    x_mean = np.mean(x_posterior, axis=(0, 1))  # Mean vote share over time
-    import pdb;pdb.set_trace()
-    day_80_polling_avg[party] = x_mean[day_of_interest]
+# Add state polling with state errors
+#alr_to_simplex_vectorized(unform_state_alr,ref_col)[National_prior.columns.tolist()]
 
-    print(party, election_year, "estimated_sigma", az.summary(trace, var_names=["sigma"]))
 
-    #plot_GRW(x_posterior, day_of_interest)
+
+# transform prior votes to ALR, apply swing, back-transform
+#Prior_estimates_alr = np.log(Prior_estimates_df.drop(columns=[ref_col]).div(Prior_estimates_df[ref_col], axis=0))
+
+#Polling_estimates_alr = Prior_estimates_alr.add(national_alr_swing.iloc[0], axis=1)
+
+
+
+#Polling_estimates = alr_to_simplex_vectorized(Polling_estimates_alr,ref_col)[National_prior.columns.tolist()]
 
 import pdb;pdb.set_trace()
 
 
 
-
-day_80_polling_avg = day_80_polling_avg/ day_80_polling_avg.sum(axis=1)[0]
-
-# get alr-swing of polls compared to prior
-ref_col = 'COAL'
-polling_alr = np.log(day_80_polling_avg.drop(columns=[ref_col]).div(day_80_polling_avg[ref_col], axis=0))
-prior_alr = np.log(National_prior.drop(columns=[ref_col]).div(National_prior[ref_col], axis=0))
-national_alr_swing = polling_alr - prior_alr
-
-# transform prior votes to ALR, apply swing, back-transform
-Prior_estimates_alr = np.log(Prior_estimates_df.drop(columns=[ref_col]).div(Prior_estimates_df[ref_col], axis=0))
-
-Polling_estimates_alr = Prior_estimates_alr.add(national_alr_swing.iloc[0], axis=1)
-
-
-
-Polling_estimates = alr_to_simplex_vectorized(Polling_estimates_alr,ref_col)[National_prior.columns.tolist()]
 
 # check that the aggregated results match the national polling average
 merged_totals_polling = Polling_estimates.merge(new_vote_totals_states.set_index('div_nm')[['new_vote_totals']], left_index=True, right_index=True)
@@ -394,64 +285,6 @@ if election_year in ['2019','2022']:
 import pdb;pdb.set_trace()
 # Polling_estimates_from_National.to_csv(f"National_Polling_Estimates_{election_year}_Day_{day_of_interest}.csv", index=True)
 
-import pdb;pdb.set_trace()
 
 
 
-
-
-
-# estimation of mean drift 
-
-# 2016 COAL estimated_sigma
-#        mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-#sigma  0.003  0.001   0.002    0.004        0.0      0.0     249.0     520.0   1.03
-
-#2016 ALP estimated_sigma
-#        mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-#sigma  0.002  0.001   0.001    0.003        0.0      0.0     144.0     410.0   1.06
-
-#2016 GRN estimated_sigma
-
-#        mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-#sigma  0.001  0.0     0.0    0.002        0.0      0.0      47.0     142.0   1.12
-
-# 2016 OTH estimated_sigma         
-#        mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-#sigma  0.001  0.0   0.001    0.002        0.0      0.0      29.0      79.0   1.22
-
-# 2019 COAL estimated_sigma        
-#         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# sigma  0.001  0.001     0.0    0.002        0.0      0.0      23.0      63.0   1.27
-
-# 2019 ALP estimated_sigma
-#         mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# sigma  0.001  0.0     0.0    0.002        0.0      0.0      17.0      44.0   1.43
-
-
-# 2022 COAL estimated_sigma
-#        mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-#sigma  0.002  0.0   0.001    0.003        0.0      0.0      64.0     267.0   1.09
-# COAL estimated_sigma         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat ; repeated!
-# sigma  0.002  0.001     0.0    0.005        0.0      0.0     120.0     233.0   1.07
-
-# 2022 ALP estimated_sigma         
-#        mean   sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-#sigma  0.001  0.0     0.0    0.002        0.0      0.0      20.0      98.0   1.31
-#ALP estimated_sigma         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat ; repeated
-#sigma  0.003  0.002     0.0    0.005        0.0      0.0     137.0     216.0   1.05
-
-
-# 2013 COAL estimated_sigma - last 100 days (campaign period!)         
-#       mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-#sigma  0.003  0.002     0.0    0.006        0.0      0.0     220.0     236.0   1.03
-
-#ALP estimated_sigma         
-#         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-# sigma  0.007  0.002   0.003    0.011        0.0      0.0     597.0    1129.0   1.01
-
-#GRN estimated_sigma         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-#sigma  0.002  0.001     0.0    0.003        0.0      0.0     176.0     189.0   1.04
-
-#OTH estimated_sigma         mean     sd  hdi_3%  hdi_97%  mcse_mean  mcse_sd  ess_bulk  ess_tail  r_hat
-#sigma  0.003  0.001   0.001    0.005        0.0      0.0     200.0     353.0   1.04

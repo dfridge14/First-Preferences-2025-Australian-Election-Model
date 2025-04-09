@@ -145,8 +145,8 @@ def parse_date_range(date_str):
 
 
 
-election_year = '2007'
-Polling_type = 'Old Election' # National, Electorate, State Election, State
+election_year = '2019'
+Polling_type = 'State' # National, Electorate, State Election, State
 
 last_election_date = {'2025': "21/05/22", '2022':"18/05/19", '2019':"02/07/16", '2016':"07/09/13", '2013':"21/08/10"}
 
@@ -417,7 +417,8 @@ elif Polling_type == 'Electorate':
 
 elif Polling_type == 'State':
 
-    include_ON_UAPP = 0
+    include_ON = 1
+    Type = '_rel_to_Nat' # or ''
 
     State_Weighted_Polling_Average_list = []
     State_Results_list = []
@@ -426,11 +427,13 @@ elif Polling_type == 'State':
     for election_year in ['2019','2022']:
         State_polls = pd.read_csv(f"StatePolls{election_year}.csv", index_col = None)
 
-        if not include_ON_UAPP:
+        if not include_ON:
             State_polls.loc[:,'OTH'] += State_polls.loc[:,'ON'] # combine ON with Others
             State_polls = State_polls[['Poll_id','Date','Scope','Sample size','COAL','ALP','GRN','OTH']]
 
-        for state in ['NSW','VIC','QLD','WA','SA']:
+        relevant_states = ['NSW','VIC','QLD','WA','SA'] if not Type else ['NSW','VIC','QLD','WA','SA','NAT']
+
+        for state in relevant_states:
             state_polling = State_polls.loc[State_polls['Scope'] == state,]
 
             dates = pd.Series(state_polling['Date']).str.strip()
@@ -482,32 +485,8 @@ elif Polling_type == 'State':
     State_Results_df = pd.concat([State_Results_df,State_Results_2016], ignore_index=True)
     import pdb;pdb.set_trace()
 
-    State_Weighted_Polling_Average_df.to_csv("StatePollingWeightedAverage.csv", index = False)
-    State_Results_df.to_csv("StateFederalResults.csv", index=False)
-
-elif Polling_type == 'State_delta':
-
-    include_ON_UAPP = 0
-
-    State_polls = pd.read_csv(f"StatePolls{election_year}.csv", index_col = None)
-
-    if not include_ON_UAPP:
-        State_polls.loc[:,'OTH'] += State_polls.loc[:,'ON'] # combine ON with Others
-        State_polls = State_polls[['Poll_id','Date','Scope','Sample size','COAL','ALP','GRN','OTH']]
-
-    for state in ['NSW','VIC','QLD','WA','SA']:
-        state_polling = State_polls.loc[State_polls['Scope'] == state,]
-
-        dates = pd.Series(state_polling['Date']).str.strip()
-        parsed_median_dates = dates.apply(parse_date_range) 
-        parsed_median_dates = pd.to_datetime(parsed_median_dates) # datetime objects
-
-        election_date =  parsed_median_dates.iloc[0]
-        days_to_election = (election_date - parsed_median_dates).dt.days
-
-        state_polling.loc[:,'Date'] = days_to_election
-        state_polling = state_polling.rename(columns={"Date": "Days to election"}).sort_values(by='Days to election').reset_index(drop=True)
-
+    State_Weighted_Polling_Average_df.to_csv(f"StatePollingWeightedAverage{Type}.csv", index = False)
+    State_Results_df.to_csv(f"StateFederalResults{Type}.csv", index=False)
 
 
 Weighted_Polling_Average_list = []
