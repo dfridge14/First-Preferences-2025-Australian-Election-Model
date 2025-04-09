@@ -160,11 +160,15 @@ if Type == 'Election_swing':
     National_State_df.loc[:,['COAL','ALP','GRN']] /= 100 # convert to proportions
     National_State_df.loc[:,'OTH'] = 1-National_State_df.loc[:,['COAL','ALP','GRN']].sum(axis=1)
     National_State_df = National_State_df[['Election_year','State','COAL','ALP','GRN','OTH']].sort_values(by=['Election_year','State'])
+    import pdb;pdb.set_trace()
 
 
     # convert to ALR
     National_State_ALR_df = National_State_df.copy().drop(ref_col, axis=1)
     National_State_ALR_df.iloc[:,2:] = np.log(National_State_df.iloc[:,2:].drop(columns=[ref_col]).div(National_State_df.iloc[:,2:][ref_col], axis=0))
+
+    # Save as csv file (Note: currently, years are INT type)
+    National_State_ALR_df.to_csv("National_State_ALR_df.csv", index = False)
 
     National_ALR_df = National_State_ALR_df.loc[National_State_ALR_df['State']=='NAT',] 
     National_ALR_df.loc[:,'Election_year'] = National_ALR_df['Election_year']

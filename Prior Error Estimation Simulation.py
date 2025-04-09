@@ -123,8 +123,8 @@ def get_prior_and_results_df(data_year):
     Fundamentals_estimate_df = pd.concat(Fundamentals_estimate_list)
 
     # Gorton 2016 adjustment: add 0.001 from GRN to Other
-    Fundamentals_results_df.loc[Fundamentals_results_df['Other'] == 0.0,['GRN','Other']] += (-0.001,0.001)
-    Fundamentals_estimate_df.loc[Fundamentals_estimate_df['Other'] == 0.0,['GRN','Other']] += (-0.001,0.001)
+    Fundamentals_results_df.loc[Fundamentals_results_df['Other'] == 0.0,['GRN','Other']] += (-0.01,0.01)
+    Fundamentals_estimate_df.loc[Fundamentals_estimate_df['Other'] == 0.0,['GRN','Other']] += (-0.01,0.01)
 
 
     Fundamentals_results_df = Fundamentals_results_df.div(Fundamentals_results_df.sum(axis=1), axis=0).sort_index()
