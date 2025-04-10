@@ -88,10 +88,13 @@ def get_prior_and_results_df(data_year):
 
     Prior_estimates_df = pd.read_csv(f"Fundamentals_Votes_For_{next_year}.csv", index_col = None)
 
+
+
     Prior_estimates_dict = {
         div: pd.DataFrame([group.set_index("PartyAb")["FP_Votes"].to_dict()])
         for div, group in Prior_estimates_df.groupby("div_nm")
     }
+    import pdb;pdb.set_trace()
 
     Fundamentals_results_list = []
     Fundamentals_estimate_list = []

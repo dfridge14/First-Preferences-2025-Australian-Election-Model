@@ -59,7 +59,7 @@ final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007
 
 
 is_redistribution = 0
-data_year = '2019'
+data_year = '2022'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 
 new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner','Gorton']}
@@ -3899,7 +3899,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
     candidate_change_redistribution = 0
     electorate_similarity = 0
     new_candidates_allocation = 1
-    ON_add = 1
+    ON_add = 0
 
 
     if Incumbent_advantage:
@@ -3947,7 +3947,6 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
             Omnipresent_parties = ['LP','ALP','GRN'] # Only 3 because Palmer is not in NT Senate in 2022! Aargh
 
             transformed_votes = reduce_to_Omnipresent_parties(Formal_prefs_dict, Senate_parties_by_div, list_of_DOP_dicts, Incumbency_by_div, new_seats_list, Omnipresent_parties, name_changes_year_dict, div_to_state_dict, party_category_dict, data_year)
-            import pdb;pdb.set_trace()
 
 
         elif new_candidates_allocation:
@@ -3961,6 +3960,8 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
             DOP_By_Division_next.loc[:,'PartyAb'] = DOP_By_Division_next.loc[:,'PartyAb'].fillna('IND').replace('GVIC','GRN')
             Div_parties_next_dict = {div: group['PartyAb'].tolist() for div, group in DOP_By_Division_next.groupby("div_nm")}
             Redistribution_pairs_df = pd.read_csv(f'RedistributionPairs{str(int(data_year)+2)}.csv', index_col = None)
+
+
 
             # Clause when ON results are needed for polling swing comparisons in 2019&2022
             if ON_add:
@@ -4003,7 +4004,8 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
 
 
-            
+            import pdb;pdb.set_trace()
+
             # if in Redistribution_pairs and DOP_By_Division_next has IND and DOP_By_Division has IND, first apply a normal full_redistribution_candidate_change
             print('Initial Redistribution')
             true_redistribution_required = []
@@ -4059,8 +4061,8 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
 
 
-
-           # get all IND-> IND non-redistribution divisions
+            import pdb;pdb.set_trace()
+            # get all IND-> IND non-redistribution divisions
             print('Independent Transition')
             IND_transition_required = []
             IND_transition_required_new_seat_pairs = []
@@ -4184,6 +4186,41 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
     return Final_allocated_pcts_aggregated_dict, Final_x_HS_df if Incumbent_advantage else First_Prefs_By_PP_Complete_Allocated
 
+
+def get_IND_defection_proportions():
+
+    Incumbency_by_div = pd.read_csv(f"{data_year}Incumbents.csv", index_col = None)
+    Incumbency_by_div['div_nm'] = Incumbency_by_div['div_nm'].replace(name_changes_year_dict)
+    party_category_dict = make_party_category_dict()
+
+
+    Division_IND_groupings = {'2016':{'NSW_IND':{'New England','Cowper','Lyne'}},
+                            '2019': {'IND': ['Wentworth', 'Warringah']},
+                            '2022': {'C200':['Boothby','Bradfield','Calare','Casey','Clark','Cowper','Curtin','Flinders','Goldstein','Grey','Hughes','Indi','Kooyong','Mackellar','Mayo','North Sydney','Page','Wannon','Warringah','Wentworth']},
+                            '2025': {'C200':['Curtin','Goldstein','Indi','Kooyong','Mackellar','Mayo','Wentworth','Clark','Moncrieff','Moore','Bradfield','Berowra','Forrest','Sturt','Gilmore','Wannon','Casey','Franklin','Cowper','Groom','Calare','Fremantle','Fisher','Grey','Monash','Lyne','Farrer','Mcpherson','Deakin','Bean','Riverina','Solomon','Flinders','Dickson','Fairfax'],'Muslim':['Blaxland','Calwell','Watson']}
+                            }
+    
+    for div in Division_IND_groupings['2022']['C200']:
+
+
+        list_div1_FP = Elimination_order_dict[div]# full votes
+        c = len(list_div1_FP)
+
+        # Initial votes
+        DOP_div_pref_percent_dict['Warringah']
+
+        # Get proportion of IND votes from each party
+        transferred_votes = independent_redistribution_reduce(div, Formal_prefs_dict, DOP_By_PP_Expand_wide_dict, DOP_div_pref_percent_dict, DOP_By_PP_Pref_Percent_wide_dict, c,Incumbency_by_div, div_to_state_dict, party_category_dict, name_changes_year_dict, FINAL_CANDIDATE_NO, data_year, list_div1_FP, votes_to_expand = None, Coalition_double_divs = [], combine_double_divs = True, votes_to_reduce=pd.DataFrame(), IND_VOTES_ONLY = False, by_pp_id = False)
+
+        # Group into categories:
+        # COAL, ALP, GRN, ON, UAPP, OTH
+
+
+
+
+
+
+    return 1
 
 
 
