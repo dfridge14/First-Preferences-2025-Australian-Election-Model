@@ -472,26 +472,36 @@ State_prior_alr =  np.log(State_prior_df.drop(columns=[ref_col]).div(State_prior
 State_prior_expanded = np.tile(State_prior_alr.to_numpy(), (n_samples, 1, 1)).reshape(n_samples, NO_OF_STATES, DIM_OF_COV_MATRIX[election_year])
 State_prior_expanded = State_prior_expanded[np.arange(n_samples)[:, None], division_state_indices[None, :], :] # Then use advanced indexing to map divisions to their state across all samples
 
+import pdb;pdb.set_trace()
+# get initial state deviations and expand
+State_prior_deviation_alr_expanded = State_prior_expanded - National_prior_alr.values.flatten()
+
+
+
+
+
+
+
 Prior_estimates_alr =  np.log(Prior_estimates_df.drop(columns=[ref_col]).div(Prior_estimates_df[ref_col], axis=0))
 Prior_estimates_alr_expanded = np.tile(Prior_estimates_alr.to_numpy(), (n_samples, 1, 1))
 
 # get State deviations into a (10000, 8, 5) array
-State_deviation_alr = State_Polls_Deviations_from_National_df_dict[election_year].set_index('State')
+State_polling_deviation_alr = State_Polls_Deviations_from_National_df_dict[election_year].set_index('State')
 if election_year in ['2019','2022','2025']:
-    State_deviation_alr.loc[:,'UAPP'] = 0.0 # add 0 deviation from National if no state polling!
-    State_deviation_alr = State_deviation_alr[['ALP','GRN','ON','UAPP','OTH']]
-State_deviation_alr_matrix = State_deviation_alr.values  # Convert to numpy array for easy broadcasting
-State_deviation_alr_matrix = np.expand_dims(State_deviation_alr_matrix, axis=0)  # Add an extra dimension for broadcasting
-State_deviation_alr_matrix_expanded = np.repeat(State_deviation_alr_matrix, n_samples, axis=0)  
-State_deviation_alr_matrix_expanded = State_deviation_alr_matrix_expanded[np.arange(n_samples)[:, None], division_state_indices[None, :], :]
+    State_polling_deviation_alr.loc[:,'UAPP'] = 0.0 # add 0 deviation from National if no state polling!
+    State_polling_deviation_alr = State_polling_deviation_alr[['ALP','GRN','ON','UAPP','OTH']]
+State_polling_deviation_alr_matrix = State_polling_deviation_alr.values  # Convert to numpy array for easy broadcasting
+State_polling_deviation_alr_matrix = np.expand_dims(State_polling_deviation_alr_matrix, axis=0)  # Add an extra dimension for broadcasting
+State_polling_deviation_alr_matrix_expanded = np.repeat(State_polling_deviation_alr_matrix, n_samples, axis=0)  
+State_polling_deviation_alr_matrix_expanded = State_polling_deviation_alr_matrix_expanded[np.arange(n_samples)[:, None], division_state_indices[None, :], :]
 
 #State_prior_alr = np.log(State_prior_df.drop(columns=[ref_col]).div(State_prior_df[ref_col], axis=0))
 
 # apply National Polling error
-Simulated_national_result_alr = National_Simulated_election_error_expanded + polling_alr.values  # shape: [1M, 5]
+Simulated_national_result_alr = National_Simulated_polling_error_expanded + polling_alr.values  # shape: [1M, 5]
 
 # apply State Polling error
-Simulated_state_polling_deviation = State_deviation_alr_matrix_expanded + State_Simulated_polling_error_centered_expanded
+Simulated_state_polling_deviation = State_polling_deviation_alr_matrix_expanded + State_Simulated_polling_error_centered_expanded
 Simulated_State_Polling_Results = Simulated_national_result_alr + Simulated_state_polling_deviation
 
 Projected_Electorate_Results = Prior_estimates_alr_expanded + (Simulated_State_Polling_Results - State_prior_expanded)
@@ -499,6 +509,29 @@ Projected_Electorate_Results = Prior_estimates_alr_expanded + (Simulated_State_P
 Simulated_Electorate_Polling_Results_ALR = Projected_Electorate_Results + Electorate_Residuals_Simulated_error_centered
 
 Simulated_Electorate_Polling_Results = alr_to_simplex_simulation_array(Simulated_Electorate_Polling_Results_ALR)
+
+
+# Now, do the same for Fundamentals:
+
+# 1. GET NATIONAL SWING (centered at 0)
+# 2. START WITH PRIOR STATE DEVIATIONS ( from state_prior) - essentially from last election
+# 3. ADD SIMULATED STATE DEVIATIONS
+# 4. ADD THIS TO NATIONAL SWING RESULT
+# 5. ADD TO ALL ELECTORATES
+# 6. ADD ELECTORATE ERROR
+
+Simulated_national_swing_alr = National_Simulated_election_error_expanded + National_prior_alr.values # 1
+Simulated_state_election_deviation = State_prior_deviation_alr_expanded + State_Simulated_election_error_centered_expanded # 2
+Simulated_State_election_Results = Simulated_national_swing_alr + Simulated_state_election_deviation
+
+Projected_Electorate_Swing_Results = Prior_estimates_alr_expanded + (Simulated_State_election_Results - State_prior_expanded)
+
+Simulated_Electorate_Swing_Results_ALR = Projected_Electorate_Swing_Results + Electorate_Residuals_Simulated_error_centered
+
+Simulated_Electorate_Swing_Results = alr_to_simplex_simulation_array(Simulated_Electorate_Swing_Results_ALR)
+
+
+
 
 #import pdb;pdb.set_trace()
 
@@ -561,7 +594,7 @@ Results_dict = get_results_df(election_year)[1]
 
 
 
-def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, election_year, alpha_scalar=100):
+def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, election_year, multiple_INDs_dict, alpha_scalar=100):
     final_sim = {}
     party_name_dict = {}
     NUM_MAIN_PARTIES = DIM_OF_COV_MATRIX[election_year]
@@ -619,6 +652,12 @@ def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, election_year,
             all_party_names = Polling_parties[1:] + minor_names + ['LP','NP'] # correct order
 
         # perform independent split as well!
+        if 'IND' in Prior_estimates_dict[div]:
+            
+            if div in multiple_INDs:
+
+            else:
+                all_party_names = [p if p != 'IND' else 'IND1' for p in all_party_names]
 
 
         
