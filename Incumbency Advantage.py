@@ -198,7 +198,7 @@ def create_Incumbents_by_div(Candidate_Incumbency, data_year):
         Incumbents_by_div.loc[Incumbents_by_div['elections_won']<0,'elections_won'] = 0
     import pdb;pdb.set_trace()
 
-    Incumbents_by_div.to_csv(f"{data_year}Incumbents.csv", index=False)
+    #Incumbents_by_div.to_csv(f"{data_year}Incumbents.csv", index=False)
 
     return 1
 
@@ -264,7 +264,7 @@ Final_x_df_for_Incumbency = Final_x_df_for_Incumbency.loc[~Final_x_df["div_nm"].
 
 import pdb;pdb.set_trace()
 
-Final_x_df_for_Incumbency.to_csv(f"{data_year}Final_{INTERESTED_NO_CANDS}_for_Incumbency.csv", index=False)
+#Final_x_df_for_Incumbency.to_csv(f"{data_year}Final_{INTERESTED_NO_CANDS}_for_Incumbency.csv", index=False)
 
 
 

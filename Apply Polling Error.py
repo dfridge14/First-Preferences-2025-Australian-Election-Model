@@ -2,7 +2,7 @@ import pymc as pm
 import numpy as np
 import pandas as pd
 import arviz as az
-import os
+import os, time
 from pathlib import Path
 import matplotlib.pyplot as plt
 
@@ -30,119 +30,16 @@ az.rcParams['plot.max_subplots'] = 100
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
+start_time = time.time()
+
 NO_OF_STATES = 8
 NO_OF_ELECTORATES = {'2016':150,'2019':151,'2022':151,'2025':150}
 DIM_OF_COV_MATRIX = {'2016':3,'2019':5,'2022':5,'2025':5}
 
-election_year = '2019'
-
 n_samples = 10000
-National_Polling_error_ALR_cov = pd.read_csv(f"PollingErrorALRCovarianceNational{election_year}.csv", index_col=0)
-National_Simulated_polling_error = np.random.multivariate_normal(mean = np.zeros(len(National_Polling_error_ALR_cov)), cov = National_Polling_error_ALR_cov.values, size=n_samples)[:, None, :] 
-# Broadcast national polling results across 10000 simulations and 150 electorates
-National_Simulated_polling_error_expanded = np.repeat(National_Simulated_polling_error, NO_OF_ELECTORATES[election_year], axis=1)
-
-
-National_Election_error_ALR_cov = pd.read_csv(f"ElectionErrorALRCovarianceNational{election_year}.csv", index_col=0)
-National_Simulated_election_error = np.random.multivariate_normal(mean = np.zeros(len(National_Election_error_ALR_cov)), cov = National_Election_error_ALR_cov.values, size=n_samples)[:, None, :] 
-National_Simulated_election_error_expanded = np.repeat(National_Simulated_election_error, NO_OF_ELECTORATES[election_year], axis=1)
-
-
-# state errors
-State_Polling_error_ALR_cov = pd.read_csv(f"PollingErrorALRCovarianceStateDeviation{election_year}.csv", index_col=0) 
-State_Simulated_polling_error = np.random.multivariate_normal(mean = np.zeros(len(State_Polling_error_ALR_cov)), cov = State_Polling_error_ALR_cov.values, size=n_samples*NO_OF_STATES)
-State_Simulated_polling_error = State_Simulated_polling_error.reshape(n_samples, NO_OF_STATES, DIM_OF_COV_MATRIX[election_year])
-
-State_Election_error_ALR_cov = pd.read_csv(f"ElectionErrorALRCovarianceStateDeviation{election_year}.csv", index_col=0)  
-State_Simulated_election_error = np.random.multivariate_normal(mean = np.zeros(len(State_Election_error_ALR_cov)), cov = State_Election_error_ALR_cov.values, size=n_samples*NO_OF_STATES)
-State_Simulated_election_error = State_Simulated_election_error.reshape(n_samples, NO_OF_STATES, DIM_OF_COV_MATRIX[election_year])
-
-Electorate_Residuals_cov = pd.read_csv(f"ElectorateResidualALRCovariance{election_year}.csv", index_col=0) 
-Electorate_Residuals_Simulated_error = np.random.multivariate_normal(mean = np.zeros(len(Electorate_Residuals_cov)), cov = Electorate_Residuals_cov.values, size=n_samples*NO_OF_ELECTORATES[election_year])
-Electorate_Residuals_Simulated_error = Electorate_Residuals_Simulated_error.reshape(n_samples, NO_OF_ELECTORATES[election_year], DIM_OF_COV_MATRIX[election_year])
 
 
 
-# weights of each state and division:
-Div_relative_weights_dict = {}
-State_relative_weights_dict = {}
-for year in ['2016','2019','2022','2025']:
-    last_election_year = str(int(year) - 3)
-
-    Enrolment_by_Div_prev = pd.read_csv(f"{last_election_year}GeneralEnrolmentByDivision.csv",index_col=None, skiprows=1).rename(columns={'DivisionNm':'old_div','StateAb':'State'})[['old_div','State','Enrolment']]
-    # adjust for redistribution
-    Correspondence_old_new = pd.read_csv(f"Correspondence_CED_{str(int(year) - 4)}_{str(int(year) - 1)}.csv")
-    merged = Correspondence_old_new.merge(Enrolment_by_Div_prev, on='old_div')
-    merged['Enrolment'] = merged['Enrolment'] * merged['RATIO_FROM_TO']
-    Enrolment_by_Div = merged.groupby(['new_div','State'])['Enrolment'].sum().reset_index().rename(columns={'new_div':'div_nm'})
-
-    Enrolment_by_State_prev = Enrolment_by_Div.groupby('State')['Enrolment'].sum()
-    State_relative_weights = Enrolment_by_State_prev / Enrolment_by_State_prev.sum()
-    Div_relative_weights = Enrolment_by_Div.iloc[:,:2]
-    Div_relative_weights.loc[:,'Relative weights'] = Enrolment_by_Div['Enrolment'] / Enrolment_by_Div.groupby('State')['Enrolment'].transform('sum')
-    Div_relative_weights = Div_relative_weights.set_index('div_nm')
-
-    Div_relative_weights_dict[year] = Div_relative_weights
-    State_relative_weights_dict[year] = State_relative_weights
-
-
-Div_relative_weights = Div_relative_weights_dict[election_year]
-State_relative_weights = State_relative_weights_dict[election_year]
-
-# centre state polling/swing deviations to weighted sum of 0!
-w = State_relative_weights.values.reshape(1,NO_OF_STATES,1)
-weighted_means = np.sum(State_Simulated_polling_error * w, axis=1, keepdims=True)  # Sum over states
-State_Simulated_polling_error_centered = State_Simulated_polling_error - weighted_means # Subtract the weighted mean from each state: shape still (10000, 8, 5)
-
-weighted_means = np.sum(State_Simulated_election_error * w, axis=1, keepdims=True)  # Sum over states
-State_Simulated_election_error_centered = State_Simulated_election_error - weighted_means # Subtract the weighted mean from each state: shape still (10000, 8, 5)
-
-
-
-
-# reshape State simulations correctly - map to correct div_nms
-states = ['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA']
-state_to_index = {state: i for i, state in enumerate(states)}
-division_state_indices = Div_relative_weights['State'].map(state_to_index).values  # shape (150,)
-
-State_Simulated_polling_error_centered_expanded = State_Simulated_polling_error_centered[np.arange(n_samples)[:, None], division_state_indices[None, :], :]
-State_Simulated_election_error_centered_expanded = State_Simulated_election_error_centered[np.arange(n_samples)[:, None], division_state_indices[None, :], :]
-
-
-
-
-# Centre Electorate Residuals to 0!
-w_div = Div_relative_weights.iloc[:,1:].values.reshape(1,NO_OF_ELECTORATES[election_year],1)
-weighted_means = np.sum(Electorate_Residuals_Simulated_error * w_div, axis=1, keepdims=True)
-
-centered_residuals = np.empty_like(Electorate_Residuals_Simulated_error)
-
-for state_idx in range(len(states)):  # 8 states
-
-    div_indices = np.where(division_state_indices == state_idx)[0] #  Find divisions that belong to this state
-    weights = Div_relative_weights.iloc[div_indices]['Relative weights'].values.reshape(1, -1, 1) # Get relative weights for these divisions
-    residuals = Electorate_Residuals_Simulated_error[:, div_indices, :] # Get the residuals for these divisions
-    weighted_mean = np.sum(residuals * weights, axis=1, keepdims=True)  # Compute weighted state mean
-    centered_residuals[:, div_indices, :] = residuals - weighted_mean # Center the residuals
-
-Electorate_Residuals_Simulated_error_centered = centered_residuals
-
-#import pdb;pdb.set_trace()
-
-
-
-
-
-if election_year in ['2016','2019','2022']:
-    last_election_vote_totals = pd.read_csv(f"{last_election_year}HouseVotesCountedByDivision.csv", skiprows=1, index_col=None).rename(columns={'DivisionNm':'old_div'})[['old_div', 'TotalVotes']]
-    redistribution_df = pd.read_csv(f'Correspondence_CED_{str(int(election_year)-4)}_{str(int(election_year)-1)}.csv', index_col = None)
-
-    merged_df = redistribution_df.merge(last_election_vote_totals, on="old_div")
-    merged_df["new_vote_totals"] = merged_df["TotalVotes"] * merged_df["RATIO_FROM_TO"]
-    new_vote_totals = merged_df.groupby("new_div")["new_vote_totals"].sum().reset_index().rename(columns={'new_div':'div_nm'})
-
-    div_to_state = pd.read_csv(f"{election_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
-    new_vote_totals_states = new_vote_totals.merge(div_to_state, on = 'div_nm', how='left')
 
 
 
@@ -176,7 +73,7 @@ def group_into_Categories(party_votes_shares_df, div, election_year, is_Other = 
         sum4 = party_votes_shares_df[list(next(iter(ONs)) if len(ONs) == 1 and isinstance(next(iter(ONs)), set) else ONs)].sum(axis=1).iloc[0]
         sum5 = party_votes_shares_df[list(next(iter(UAPPs)) if len(UAPPs) == 1 and isinstance(next(iter(UAPPs)), set) else UAPPs)].sum(axis=1).iloc[0]
     sum6 = party_votes_shares_df[list(next(iter(OTHs)) if len(OTHs) == 1 and isinstance(next(iter(OTHs)), set) else OTHs)].sum(axis=1).iloc[0]
-    if election_year == '2016':
+    if election_year in ['2013','2016']:
         Fundamentals_grouped_df = pd.DataFrame([{'ALP':sum1,'COAL':sum2,'GRN':sum3,'Other':sum6}], index=[div])
     elif election_year in ['2019','2022']:
         Fundamentals_grouped_df = pd.DataFrame([{'ALP':sum1,'COAL':sum2,'GRN':sum3,'ON':sum4, 'UAPP':sum5, 'Other':sum6}], index=[div])
@@ -209,14 +106,14 @@ def get_Prior_estimates_df(election_year, dont_add_ON = False):
 
     return Prior_estimates_df, Prior_estimates_dict
 
-def get_results_df(election_year):
+def get_results_df(election_year, to_Fundamentals = True):
     Actual_results = pd.read_csv(f"{election_year}HouseDOPByDivision.csv", skiprows=1, index_col = None).rename(columns={'DivisionNm':'div_nm'})
     # COUntNUmber ==0, Pref Percent & decide on format - long or wide? Will generate swings for each, so wide is best
 
 
     # Need the following: dict of new_div: party_First_Pref_votes_in_alphabetical_order (separate INDXs and COALs)
     Actual_results = Actual_results.loc[(Actual_results['CountNumber']==0) & (Actual_results['CalculationType']=='Preference Percent'),['div_nm','PartyAb','CalculationValue']]
-    Actual_results.loc[Actual_results['PartyAb'].isna(),].fillna('IND')
+    Actual_results.loc[Actual_results['PartyAb'].isna(),'PartyAb'] = 'IND'
     Actual_results.loc[Actual_results['PartyAb']=='GVIC','PartyAb'] = 'GRN'
     Actual_results.loc[Actual_results['PartyAb']=='CLR','PartyAb'] = 'ALP'
 
@@ -231,18 +128,31 @@ def get_results_df(election_year):
         div_results = Actual_results.loc[Actual_results['div_nm'] == div,].copy()
 
         div_results.loc[:,'Count'] = div_results.groupby('PartyAb').cumcount() + 1     # Count instances of the target string
+
         # Replace duplicates of the target string with increasing strings IND1, IND2, IND3, ...
+
         adjusted_party_names = div_results.apply(
             lambda row: f"{row['PartyAb']}{row['Count']}" if row['PartyAb'] == target else row['PartyAb'], axis=1
         ).reset_index(drop=True)
 
-        div_results_combined = div_results.groupby(['div_nm', 'PartyAb'], as_index=False)['CalculationValue'].sum()
+        if to_Fundamentals:
+            # keep IND together
+            div_results_combined = div_results.groupby(['div_nm', 'PartyAb'], as_index=False)['CalculationValue'].sum()
 
-        Actual_results.loc[Actual_results['div_nm'] == div,'PartyAb'] = adjusted_party_names
+            Actual_results_dict[div] = div_results_combined.pivot(index='div_nm', columns='PartyAb', values='CalculationValue')
 
-        Actual_results_dict[div] = div_results_combined.pivot(index='div_nm', columns='PartyAb', values='CalculationValue')
-        #Fundamentals_results_dict[div] = group_into_Fundamentals_Categories(Actual_results_dict[div], div)
-        #Fundamentals_estimate_dict[div] = group_into_Fundamentals_Categories(Prior_estimates_dict[div], div)
+
+        else:
+            # separate independents
+            div_results.loc[div_results['div_nm'] == div,'PartyAb'] = adjusted_party_names.values
+            div_results_combined = div_results.drop('Count', axis = 1)
+
+            ordered_parties = div_results_combined['PartyAb'].drop_duplicates()
+
+            pivoted = div_results_combined.pivot(index='div_nm', columns='PartyAb', values='CalculationValue')
+            
+            Actual_results_dict[div] = pivoted.reindex(columns = ordered_parties)
+
 
         Fundamentals_results_list.append(group_into_Categories(Actual_results_dict[div], div, election_year))
 
@@ -254,7 +164,6 @@ def get_results_df(election_year):
     Fundamentals_results_df = Fundamentals_results_df.div(Fundamentals_results_df.sum(axis=1), axis=0).sort_index()
 
     #Fundamentals_results_df.index = election_year +  Fundamentals_results_df.index
-
 
     return Fundamentals_results_df, Actual_results_dict
 
@@ -307,7 +216,7 @@ def get_National_State_Prior_estimates(election_year, new_vote_totals_states, do
     No_OTH_divisions = []
 
     if election_year == '2016':
-        Prior_estimates_df.loc[Prior_estimates_df.index=='Gorton',['GRN','OTH']] += (-0.01,+0.01)
+        Prior_estimates_df.loc[Prior_estimates_df.index=='Gorton',['GRN','OTH']] += (-0.005,+0.005)
     elif adjust_No_OTHs:
         No_OTH_divisions = Prior_estimates_df.loc[Prior_estimates_df['OTH']==0.0,].index
         Prior_estimates_df.loc[Prior_estimates_df['OTH']==0.0,['GRN','OTH']] += (-0.005,+0.005)
@@ -317,287 +226,388 @@ def get_National_State_Prior_estimates(election_year, new_vote_totals_states, do
 
 
 
-if election_year in ['2016','2019','2022']:
-    Prior_estimates_df, National_prior, State_prior_df, No_OTH_divisions = get_National_State_Prior_estimates(election_year, new_vote_totals_states)
+def simulate_Polling_Fundamentals_model(n_samples, election_year):
 
 
-def alr_to_simplex_vectorized(df, ref_col):
-    """Inverse ALR transformation for an entire DataFrame in a vectorized way."""
-    # Convert the DataFrame to a numpy array for vectorized operations
-    alr_vals = df.values
-    
-    # Apply the inverse ALR transformation across all values
-    exp_vals = np.exp(alr_vals)
+    National_Polling_error_ALR_cov = pd.read_csv(f"PollingErrorALRCovarianceNational{election_year}.csv", index_col=0)
+    National_Simulated_polling_error = np.random.multivariate_normal(mean = np.zeros(len(National_Polling_error_ALR_cov)), cov = National_Polling_error_ALR_cov.values, size=n_samples)[:, None, :] 
+    # Broadcast national polling results across 10000 simulations and 150 electorates
+    National_Simulated_polling_error_expanded = np.repeat(National_Simulated_polling_error, NO_OF_ELECTORATES[election_year], axis=1)
 
-    # Compute the reference category correctly
-    ref_vals = 1 / (1 + np.sum(exp_vals, axis=1, keepdims=True))  # Shape: (n_samples, 1)
 
-    # Compute all components
-    simplex_vals = np.concatenate((exp_vals * ref_vals, ref_vals), axis=1)  # Shape: (n_samples, D)
-    
-    # Create new column names, appending a reference category
-    new_columns = df.columns.tolist() + [ref_col]
-    
-    # Return as a DataFrame with the original indices and new columns
-    return pd.DataFrame(simplex_vals, columns=new_columns, index=df.index)
+    National_Election_error_ALR_cov = pd.read_csv(f"ElectionErrorALRCovarianceNational{election_year}.csv", index_col=0)
+    National_Simulated_election_error = np.random.multivariate_normal(mean = np.zeros(len(National_Election_error_ALR_cov)), cov = National_Election_error_ALR_cov.values, size=n_samples)[:, None, :] 
+    National_Simulated_election_error_expanded = np.repeat(National_Simulated_election_error, NO_OF_ELECTORATES[election_year], axis=1)
 
-def alr_to_simplex_simulation_array(alr_array):
-    """
-    Perform inverse ALR transformation on a 3D array of shape (S, D, K).
-    Returns a 3D array of shape (S, D, K+1) in the probability simplex.
-    """
-    exp_vals = np.exp(alr_array)  # shape (S, D, K)
-    ref_vals = 1 / (1 + np.sum(exp_vals, axis=-1, keepdims=True))  # shape (S, D, 1)
-    simplex = np.concatenate([ref_vals, exp_vals * ref_vals], axis=-1)  # shape (S, D, K+1)
-    return simplex
+
+    # state errors
+    State_Polling_error_ALR_cov = pd.read_csv(f"PollingErrorALRCovarianceStateDeviation{election_year}.csv", index_col=0) 
+    State_Simulated_polling_error = np.random.multivariate_normal(mean = np.zeros(len(State_Polling_error_ALR_cov)), cov = State_Polling_error_ALR_cov.values, size=n_samples*NO_OF_STATES)
+    State_Simulated_polling_error = State_Simulated_polling_error.reshape(n_samples, NO_OF_STATES, DIM_OF_COV_MATRIX[election_year])
+
+    State_Election_error_ALR_cov = pd.read_csv(f"ElectionErrorALRCovarianceStateDeviation{election_year}.csv", index_col=0)  
+    State_Simulated_election_error = np.random.multivariate_normal(mean = np.zeros(len(State_Election_error_ALR_cov)), cov = State_Election_error_ALR_cov.values, size=n_samples*NO_OF_STATES)
+    State_Simulated_election_error = State_Simulated_election_error.reshape(n_samples, NO_OF_STATES, DIM_OF_COV_MATRIX[election_year])
+
+    Electorate_Residuals_cov = pd.read_csv(f"ElectorateResidualALRCovariance{election_year}.csv", index_col=0) 
+    Electorate_Residuals_Simulated_error = np.random.multivariate_normal(mean = np.zeros(len(Electorate_Residuals_cov)), cov = Electorate_Residuals_cov.values, size=n_samples*NO_OF_ELECTORATES[election_year])
+    Electorate_Residuals_Simulated_error = Electorate_Residuals_Simulated_error.reshape(n_samples, NO_OF_ELECTORATES[election_year], DIM_OF_COV_MATRIX[election_year])
 
 
 
+    # weights of each state and division:
+    Div_relative_weights_dict = {}
+    State_relative_weights_dict = {}
+    for year in ['2016','2019','2022','2025']:
+        last_election_year = str(int(year) - 3)
+
+        Enrolment_by_Div_prev = pd.read_csv(f"{last_election_year}GeneralEnrolmentByDivision.csv",index_col=None, skiprows=1).rename(columns={'DivisionNm':'old_div','StateAb':'State'})[['old_div','State','Enrolment']]
+        # adjust for redistribution
+        Correspondence_old_new = pd.read_csv(f"Correspondence_CED_{str(int(year) - 4)}_{str(int(year) - 1)}.csv")
+        merged = Correspondence_old_new.merge(Enrolment_by_Div_prev, on='old_div')
+        merged['Enrolment'] = merged['Enrolment'] * merged['RATIO_FROM_TO']
+        Enrolment_by_Div = merged.groupby(['new_div','State'])['Enrolment'].sum().reset_index().rename(columns={'new_div':'div_nm'})
+
+        Enrolment_by_State_prev = Enrolment_by_Div.groupby('State')['Enrolment'].sum()
+        State_relative_weights = Enrolment_by_State_prev / Enrolment_by_State_prev.sum()
+        Div_relative_weights = Enrolment_by_Div.iloc[:,:2]
+        Div_relative_weights.loc[:,'Relative weights'] = Enrolment_by_Div['Enrolment'] / Enrolment_by_Div.groupby('State')['Enrolment'].transform('sum')
+        Div_relative_weights = Div_relative_weights.set_index('div_nm')
+
+        Div_relative_weights_dict[year] = Div_relative_weights
+        State_relative_weights_dict[year] = State_relative_weights
 
 
-# test for variability of seat results corrected for state swings - Obtain
+    Div_relative_weights = Div_relative_weights_dict[election_year]
+    State_relative_weights = State_relative_weights_dict[election_year]
 
-def test_variability_of_Electorate_Residuals(new_vote_totals_states, year_to_remove):
+    # centre state polling/swing deviations to weighted sum of 0!
+    w = State_relative_weights.values.reshape(1,NO_OF_STATES,1)
+    weighted_means = np.sum(State_Simulated_polling_error * w, axis=1, keepdims=True)  # Sum over states
+    State_Simulated_polling_error_centered = State_Simulated_polling_error - weighted_means # Subtract the weighted mean from each state: shape still (10000, 8, 5)
 
-    State_Results_2016_2022 = pd.read_csv('StateResults2016_2022.csv', index_col=None)
-
-    CAGO = 1 if year_to_remove == '2016' else 0
-
-
-    Electorate_residuals_list = []
-
-    for year in [p for p in ['2016','2019','2022'] if p != year_to_remove]: # ['2016','2019','2022']:
-        NUM_DIMS = DIM_OF_COV_MATRIX[year_to_remove] if year != '2016' else 3
-
-        Prior_estimates_df1, National_prior1, State_prior_df1, No_OTH_divisions1 = get_National_State_Prior_estimates(year, new_vote_totals_states, dont_add_ON = True, adjust_No_OTHs=False)
-        State_Results_curr = State_Results_2016_2022.loc[State_Results_2016_2022['Election']==int(year),]
-        Results_df = get_results_df(year)[0].rename(columns={'Other':'OTH'})
-        
-        if CAGO and (year in ['2019','2022']):
-            Prior_estimates_df1.loc[:,'OTH'] = Prior_estimates_df1.iloc[:,-3:].sum(axis=1)
-            Prior_estimates_df1 = Prior_estimates_df1.drop(columns=['ON','UAPP'])
-            State_prior_df1.loc[:,'OTH'] = State_prior_df1.iloc[:,3:6].sum(axis=1)
-            State_prior_df1 = State_prior_df1.drop(columns=['ON','UAPP'])
-            State_Results_curr.loc[:,'OTH'] = State_Results_curr.iloc[:,3:6].sum(axis=1)
-            State_Results_curr = State_Results_curr.drop(columns=['ON','UAPP'])
-            Results_df.loc[:,'OTH'] = Results_df.iloc[:,3:6].sum(axis=1)
-            Results_df = Results_df.drop(columns=['ON','UAPP'])
-
-        elif year == '2016':
-            State_Results_curr = State_Results_curr.drop(columns=['ON','UAPP'])
-
-        else: # not CAGO and year is 2019/2022 - replace 0s with nan!
-            Prior_estimates_df1 = Prior_estimates_df1.replace(0,np.nan)
-            State_prior_df1 = State_prior_df1.replace(0,np.nan)
-            State_Results_curr = State_Results_curr.replace(0,np.nan)
-            Results_df = Results_df.replace(0,np.nan)
-
-        State_Results_curr = State_Results_curr.drop('Election', axis=1).set_index('State')
-        
-        # convert both prior and results to ALR
-        ref_col = 'COAL'
-        State_Results_ALR = np.log(State_Results_curr.drop(columns=[ref_col]).div(State_Results_curr[ref_col], axis=0))
-        State_Prior_ALR = np.log(State_prior_df1.drop(columns=[ref_col]).div(State_prior_df1[ref_col], axis=0))
-        Prior_estimates_ALR_df1 = np.log(Prior_estimates_df1.drop(columns=[ref_col]).div(Prior_estimates_df1[ref_col], axis=0))
-        #import pdb;pdb.set_trace()
-
-        Div_relative_weights = Div_relative_weights_dict[year]
-
-        # add to corresponding divisions in states
-        True_State_ALR_swings = State_Results_ALR - State_Prior_ALR
-        Prior_estimates_ALR_df1.loc[:,'State'] = Div_relative_weights['State'].values
-        merged = pd.merge(Prior_estimates_ALR_df1, True_State_ALR_swings, left_on = 'State',right_index = True, suffixes = ('','_state_swing'))
-        #import pdb;pdb.set_trace()
-        merged.iloc[:,:NUM_DIMS] += merged.iloc[:,-NUM_DIMS:].values
-        State_swing_ALR = merged.iloc[:,:NUM_DIMS]
-        #
-
-        # get actual results for 4/6 parties
-        Results_df_ALR = np.log(Results_df.drop(columns=[ref_col]).div(Results_df[ref_col], axis=0))
-        Electorate_residuals = Results_df_ALR - State_swing_ALR
-
-        Electorate_residuals.index = year + Electorate_residuals.index
-
-        if (year == '2016') and (year_to_remove != '2016'):
-            Electorate_residuals.loc[:,['ON','UAPP']] = np.nan,np.nan
-
-        Electorate_residuals_list.append(Electorate_residuals)
+    weighted_means = np.sum(State_Simulated_election_error * w, axis=1, keepdims=True)  # Sum over states
+    State_Simulated_election_error_centered = State_Simulated_election_error - weighted_means # Subtract the weighted mean from each state: shape still (10000, 8, 5)
 
 
-    Electorate_residuals_ALR_df = pd.concat(Electorate_residuals_list)
-    Electorate_residuals_ALR_df = Electorate_residuals_ALR_df.loc[~(Electorate_residuals_ALR_df.index.str.startswith(year_to_remove)),]
+
+
+    # reshape State simulations correctly - map to correct div_nms
+    states = ['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA']
+    state_to_index = {state: i for i, state in enumerate(states)}
+    division_state_indices = Div_relative_weights['State'].map(state_to_index).values  # shape (150,)
+
+    State_Simulated_polling_error_centered_expanded = State_Simulated_polling_error_centered[np.arange(n_samples)[:, None], division_state_indices[None, :], :]
+    State_Simulated_election_error_centered_expanded = State_Simulated_election_error_centered[np.arange(n_samples)[:, None], division_state_indices[None, :], :]
+
+
+
+
+    # Centre Electorate Residuals to 0!
+    w_div = Div_relative_weights.iloc[:,1:].values.reshape(1,NO_OF_ELECTORATES[election_year],1)
+    weighted_means = np.sum(Electorate_Residuals_Simulated_error * w_div, axis=1, keepdims=True)
+
+    centered_residuals = np.empty_like(Electorate_Residuals_Simulated_error)
+
+    for state_idx in range(len(states)):  # 8 states
+
+        div_indices = np.where(division_state_indices == state_idx)[0] #  Find divisions that belong to this state
+        weights = Div_relative_weights.iloc[div_indices]['Relative weights'].values.reshape(1, -1, 1) # Get relative weights for these divisions
+        residuals = Electorate_Residuals_Simulated_error[:, div_indices, :] # Get the residuals for these divisions
+        weighted_mean = np.sum(residuals * weights, axis=1, keepdims=True)  # Compute weighted state mean
+        centered_residuals[:, div_indices, :] = residuals - weighted_mean # Center the residuals
+
+    Electorate_Residuals_Simulated_error_centered = centered_residuals
+
     #import pdb;pdb.set_trace()
 
-    return Electorate_residuals_ALR_df.cov(min_periods=1)
 
-test = 0
 
-if test:
-    Electorate_residuals_covMs = {}
-    for year_to_remove in ['2016','2019','2022','2025']:
-        Electorate_residuals_covMs[year_to_remove] = test_variability_of_Electorate_Residuals(new_vote_totals_states, year_to_remove)
+
+
+    if election_year in ['2016','2019','2022']:
+        last_election_vote_totals = pd.read_csv(f"{last_election_year}HouseVotesCountedByDivision.csv", skiprows=1, index_col=None).rename(columns={'DivisionNm':'old_div'})[['old_div', 'TotalVotes']]
+        redistribution_df = pd.read_csv(f'Correspondence_CED_{str(int(election_year)-4)}_{str(int(election_year)-1)}.csv', index_col = None)
+
+        merged_df = redistribution_df.merge(last_election_vote_totals, on="old_div")
+        merged_df["new_vote_totals"] = merged_df["TotalVotes"] * merged_df["RATIO_FROM_TO"]
+        new_vote_totals = merged_df.groupby("new_div")["new_vote_totals"].sum().reset_index().rename(columns={'new_div':'div_nm'})
+
+        div_to_state = pd.read_csv(f"{election_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+        new_vote_totals_states = new_vote_totals.merge(div_to_state, on = 'div_nm', how='left')
+
+
+    if election_year in ['2016','2019','2022']:
+        Prior_estimates_df, National_prior, State_prior_df, No_OTH_divisions = get_National_State_Prior_estimates(election_year, new_vote_totals_states)
+
+
+    def alr_to_simplex_simulation_array(alr_array):
+        """
+        Perform inverse ALR transformation on a 3D array of shape (S, D, K).
+        Returns a 3D array of shape (S, D, K+1) in the probability simplex.
+        """
+        exp_vals = np.exp(alr_array)  # shape (S, D, K)
+        ref_vals = 1 / (1 + np.sum(exp_vals, axis=-1, keepdims=True))  # shape (S, D, 1)
+        simplex = np.concatenate([ref_vals, exp_vals * ref_vals], axis=-1)  # shape (S, D, K+1)
+        return simplex
+
+
+
+
+
+    # test for variability of seat results corrected for state swings - Obtain
+
+    def test_variability_of_Electorate_Residuals(new_vote_totals_states, year_to_remove):
+
+        State_Results_2016_2022 = pd.read_csv('StateResults2016_2022.csv', index_col=None)
+
+        CAGO = 1 if year_to_remove == '2016' else 0
+
+        Electorate_residuals_list = []
+
+        for year in [p for p in ['2016','2019','2022'] if p != year_to_remove]: # ['2016','2019','2022']:
+            NUM_DIMS = DIM_OF_COV_MATRIX[year_to_remove] if year != '2016' else 3
+
+            Prior_estimates_df1, National_prior1, State_prior_df1, No_OTH_divisions1 = get_National_State_Prior_estimates(year, new_vote_totals_states, dont_add_ON = True, adjust_No_OTHs=False)
+            State_Results_curr = State_Results_2016_2022.loc[State_Results_2016_2022['Election']==int(year),]
+            Results_df = get_results_df(year)[0].rename(columns={'Other':'OTH'})
+            
+            if CAGO and (year in ['2019','2022']):
+                Prior_estimates_df1.loc[:,'OTH'] = Prior_estimates_df1.iloc[:,-3:].sum(axis=1)
+                Prior_estimates_df1 = Prior_estimates_df1.drop(columns=['ON','UAPP'])
+                State_prior_df1.loc[:,'OTH'] = State_prior_df1.iloc[:,3:6].sum(axis=1)
+                State_prior_df1 = State_prior_df1.drop(columns=['ON','UAPP'])
+                State_Results_curr.loc[:,'OTH'] = State_Results_curr.iloc[:,3:6].sum(axis=1)
+                State_Results_curr = State_Results_curr.drop(columns=['ON','UAPP'])
+                Results_df.loc[:,'OTH'] = Results_df.iloc[:,3:6].sum(axis=1)
+                Results_df = Results_df.drop(columns=['ON','UAPP'])
+
+            elif year == '2016':
+                State_Results_curr = State_Results_curr.drop(columns=['ON','UAPP'])
+
+            else: # not CAGO and year is 2019/2022 - replace 0s with nan!
+                Prior_estimates_df1 = Prior_estimates_df1.replace(0,np.nan)
+                State_prior_df1 = State_prior_df1.replace(0,np.nan)
+                State_Results_curr = State_Results_curr.replace(0,np.nan)
+                Results_df = Results_df.replace(0,np.nan)
+
+            State_Results_curr = State_Results_curr.drop('Election', axis=1).set_index('State')
+            
+            # convert both prior and results to ALR
+            ref_col = 'COAL'
+            State_Results_ALR = np.log(State_Results_curr.drop(columns=[ref_col]).div(State_Results_curr[ref_col], axis=0))
+            State_Prior_ALR = np.log(State_prior_df1.drop(columns=[ref_col]).div(State_prior_df1[ref_col], axis=0))
+            Prior_estimates_ALR_df1 = np.log(Prior_estimates_df1.drop(columns=[ref_col]).div(Prior_estimates_df1[ref_col], axis=0))
+            #import pdb;pdb.set_trace()
+
+            Div_relative_weights = Div_relative_weights_dict[year]
+
+            # add to corresponding divisions in states
+            True_State_ALR_swings = State_Results_ALR - State_Prior_ALR
+            Prior_estimates_ALR_df1.loc[:,'State'] = Div_relative_weights['State'].values
+            merged = pd.merge(Prior_estimates_ALR_df1, True_State_ALR_swings, left_on = 'State',right_index = True, suffixes = ('','_state_swing'))
+            #import pdb;pdb.set_trace()
+            merged.iloc[:,:NUM_DIMS] += merged.iloc[:,-NUM_DIMS:].values
+            State_swing_ALR = merged.iloc[:,:NUM_DIMS]
+            #
+
+            # get actual results for 4/6 parties
+            Results_df_ALR = np.log(Results_df.drop(columns=[ref_col]).div(Results_df[ref_col], axis=0))
+            Electorate_residuals = Results_df_ALR - State_swing_ALR
+
+            Electorate_residuals.index = year + Electorate_residuals.index
+
+            if (year == '2016') and (year_to_remove != '2016'):
+                Electorate_residuals.loc[:,['ON','UAPP']] = np.nan,np.nan
+
+            Electorate_residuals_list.append(Electorate_residuals)
+
+
+        Electorate_residuals_ALR_df = pd.concat(Electorate_residuals_list)
+        Electorate_residuals_ALR_df = Electorate_residuals_ALR_df.loc[~(Electorate_residuals_ALR_df.index.str.startswith(year_to_remove)),]
+
+        if year_to_remove != '2016':
+            Electorate_residuals_ALR_df = Electorate_residuals_ALR_df[['ALP','GRN','ON','UAPP','OTH']]
+
+
+
         import pdb;pdb.set_trace()
 
-        Electorate_residuals_covMs[year_to_remove].to_csv(f"ElectorateResidualALRCovariance{year_to_remove}.csv", index = True)
 
-    import pdb;pdb.set_trace()
+        return Electorate_residuals_ALR_df.cov(min_periods=1)
 
+    test = 1
 
+    if test:
+        Electorate_residuals_covMs = {}
+        for year_to_remove in ['2016','2019','2022','2025']:
+            Electorate_residuals_covMs[year_to_remove] = test_variability_of_Electorate_Residuals(new_vote_totals_states, year_to_remove)
+            import pdb;pdb.set_trace()
 
+            Electorate_residuals_covMs[year_to_remove].to_csv(f"ElectorateResidualALRCovariance{year_to_remove}.csv", index = True)
 
+        import pdb;pdb.set_trace()
 
 
-day_80_polling_avg_dict = {'2016': pd.DataFrame([[0.412262, 0.351972, 0.105693, 0.130074]], columns = ['COAL','ALP','GRN','OTH']), \
-                      '2019':pd.DataFrame([[0.384782, 0.36451, 0.095751, 0.035, 0.031, 0.088957]], columns = ['COAL','ALP','GRN','ON','UAPP','OTH']), \
-                      '2022':pd.DataFrame([[0.355905, 0.362643, 0.118432, 0.0383,0.0244,0.10032,]], columns = ['COAL','ALP','GRN','ON','UAPP','OTH']), \
-                      '2025':[]}
 
-state_poll_dev_alr = pd.read_csv("State_Polling_Deviations_from_National.csv", index_col=None)
-State_Polls_Deviations_from_National_df_dict = {'2016': state_poll_dev_alr.loc[state_poll_dev_alr['Election_year']==2016,].drop(['ON','Election_year'], axis=1), \
-                                                '2019': state_poll_dev_alr.loc[state_poll_dev_alr['Election_year']==2019,].drop(['Election_year'], axis=1).fillna(0), \
-                                                '2022': state_poll_dev_alr.loc[state_poll_dev_alr['Election_year']==2022,].drop(['Election_year'], axis=1).fillna(0), \
-                                                '2025': []}
 
 
-day_80_polling_avg = day_80_polling_avg_dict[election_year]/ day_80_polling_avg_dict[election_year].sum(axis=1)[0]
 
+    day_80_polling_avg_dict = {'2016': pd.DataFrame([[0.412262, 0.351972, 0.105693, 0.130074]], columns = ['COAL','ALP','GRN','OTH']), \
+                        '2019':pd.DataFrame([[0.384782, 0.36451, 0.095751, 0.035, 0.031, 0.088957]], columns = ['COAL','ALP','GRN','ON','UAPP','OTH']), \
+                        '2022':pd.DataFrame([[0.355905, 0.362643, 0.118432, 0.0383,0.0244,0.10032,]], columns = ['COAL','ALP','GRN','ON','UAPP','OTH']), \
+                        '2025':[]}
 
+    state_poll_dev_alr = pd.read_csv("State_Polling_Deviations_from_National.csv", index_col=None)
+    State_Polls_Deviations_from_National_df_dict = {'2016': state_poll_dev_alr.loc[state_poll_dev_alr['Election_year']==2016,].drop(['ON','Election_year'], axis=1), \
+                                                    '2019': state_poll_dev_alr.loc[state_poll_dev_alr['Election_year']==2019,].drop(['Election_year'], axis=1).fillna(0), \
+                                                    '2022': state_poll_dev_alr.loc[state_poll_dev_alr['Election_year']==2022,].drop(['Election_year'], axis=1).fillna(0), \
+                                                    '2025': []}
 
-# get alr values of all quantities
-ref_col = 'COAL'
-polling_alr = np.log(day_80_polling_avg.drop(columns=[ref_col]).div(day_80_polling_avg[ref_col], axis=0))
-National_prior_alr = np.log(National_prior.drop(columns=[ref_col]).div(National_prior[ref_col], axis=0))
 
-State_prior_alr =  np.log(State_prior_df.drop(columns=[ref_col]).div(State_prior_df[ref_col], axis=0))
-State_prior_expanded = np.tile(State_prior_alr.to_numpy(), (n_samples, 1, 1)).reshape(n_samples, NO_OF_STATES, DIM_OF_COV_MATRIX[election_year])
-State_prior_expanded = State_prior_expanded[np.arange(n_samples)[:, None], division_state_indices[None, :], :] # Then use advanced indexing to map divisions to their state across all samples
+    day_80_polling_avg = day_80_polling_avg_dict[election_year]/ day_80_polling_avg_dict[election_year].sum(axis=1)[0]
 
-import pdb;pdb.set_trace()
-# get initial state deviations and expand
-State_prior_deviation_alr_expanded = State_prior_expanded - National_prior_alr.values.flatten()
 
 
+    # get alr values of all quantities
+    ref_col = 'COAL'
+    polling_alr = np.log(day_80_polling_avg.drop(columns=[ref_col]).div(day_80_polling_avg[ref_col], axis=0))
+    National_prior_alr = np.log(National_prior.drop(columns=[ref_col]).div(National_prior[ref_col], axis=0))
 
+    State_prior_alr =  np.log(State_prior_df.drop(columns=[ref_col]).div(State_prior_df[ref_col], axis=0))
+    State_prior_expanded = np.tile(State_prior_alr.to_numpy(), (n_samples, 1, 1)).reshape(n_samples, NO_OF_STATES, DIM_OF_COV_MATRIX[election_year])
+    State_prior_expanded = State_prior_expanded[np.arange(n_samples)[:, None], division_state_indices[None, :], :] # Then use advanced indexing to map divisions to their state across all samples
 
+    #import pdb;pdb.set_trace()
+    # get initial state deviations and expand
+    State_prior_deviation_alr_expanded = State_prior_expanded - National_prior_alr.values.flatten()
 
 
 
-Prior_estimates_alr =  np.log(Prior_estimates_df.drop(columns=[ref_col]).div(Prior_estimates_df[ref_col], axis=0))
-Prior_estimates_alr_expanded = np.tile(Prior_estimates_alr.to_numpy(), (n_samples, 1, 1))
 
-# get State deviations into a (10000, 8, 5) array
-State_polling_deviation_alr = State_Polls_Deviations_from_National_df_dict[election_year].set_index('State')
-if election_year in ['2019','2022','2025']:
-    State_polling_deviation_alr.loc[:,'UAPP'] = 0.0 # add 0 deviation from National if no state polling!
-    State_polling_deviation_alr = State_polling_deviation_alr[['ALP','GRN','ON','UAPP','OTH']]
-State_polling_deviation_alr_matrix = State_polling_deviation_alr.values  # Convert to numpy array for easy broadcasting
-State_polling_deviation_alr_matrix = np.expand_dims(State_polling_deviation_alr_matrix, axis=0)  # Add an extra dimension for broadcasting
-State_polling_deviation_alr_matrix_expanded = np.repeat(State_polling_deviation_alr_matrix, n_samples, axis=0)  
-State_polling_deviation_alr_matrix_expanded = State_polling_deviation_alr_matrix_expanded[np.arange(n_samples)[:, None], division_state_indices[None, :], :]
 
-#State_prior_alr = np.log(State_prior_df.drop(columns=[ref_col]).div(State_prior_df[ref_col], axis=0))
 
-# apply National Polling error
-Simulated_national_result_alr = National_Simulated_polling_error_expanded + polling_alr.values  # shape: [1M, 5]
 
-# apply State Polling error
-Simulated_state_polling_deviation = State_polling_deviation_alr_matrix_expanded + State_Simulated_polling_error_centered_expanded
-Simulated_State_Polling_Results = Simulated_national_result_alr + Simulated_state_polling_deviation
+    Prior_estimates_alr =  np.log(Prior_estimates_df.drop(columns=[ref_col]).div(Prior_estimates_df[ref_col], axis=0))
+    Prior_estimates_alr_expanded = np.tile(Prior_estimates_alr.to_numpy(), (n_samples, 1, 1))
 
-Projected_Electorate_Results = Prior_estimates_alr_expanded + (Simulated_State_Polling_Results - State_prior_expanded)
+    # get State deviations into a (10000, 8, 5) array
+    State_polling_deviation_alr = State_Polls_Deviations_from_National_df_dict[election_year].set_index('State')
+    if election_year in ['2019','2022','2025']:
+        State_polling_deviation_alr.loc[:,'UAPP'] = 0.0 # add 0 deviation from National if no state polling!
+        State_polling_deviation_alr = State_polling_deviation_alr[['ALP','GRN','ON','UAPP','OTH']]
+    State_polling_deviation_alr_matrix = State_polling_deviation_alr.values  # Convert to numpy array for easy broadcasting
+    State_polling_deviation_alr_matrix = np.expand_dims(State_polling_deviation_alr_matrix, axis=0)  # Add an extra dimension for broadcasting
+    State_polling_deviation_alr_matrix_expanded = np.repeat(State_polling_deviation_alr_matrix, n_samples, axis=0)  
+    State_polling_deviation_alr_matrix_expanded = State_polling_deviation_alr_matrix_expanded[np.arange(n_samples)[:, None], division_state_indices[None, :], :]
 
-Simulated_Electorate_Polling_Results_ALR = Projected_Electorate_Results + Electorate_Residuals_Simulated_error_centered
+    #State_prior_alr = np.log(State_prior_df.drop(columns=[ref_col]).div(State_prior_df[ref_col], axis=0))
 
-Simulated_Electorate_Polling_Results = alr_to_simplex_simulation_array(Simulated_Electorate_Polling_Results_ALR)
+    # apply National Polling error
+    Simulated_national_result_alr = National_Simulated_polling_error_expanded + polling_alr.values  # shape: [1M, 5]
 
+    # apply State Polling error
+    Simulated_state_polling_deviation = State_polling_deviation_alr_matrix_expanded + State_Simulated_polling_error_centered_expanded
+    Simulated_State_Polling_Results = Simulated_national_result_alr + Simulated_state_polling_deviation
 
-# Now, do the same for Fundamentals:
+    Projected_Electorate_Results = Prior_estimates_alr_expanded + (Simulated_State_Polling_Results - State_prior_expanded)
 
-# 1. GET NATIONAL SWING (centered at 0)
-# 2. START WITH PRIOR STATE DEVIATIONS ( from state_prior) - essentially from last election
-# 3. ADD SIMULATED STATE DEVIATIONS
-# 4. ADD THIS TO NATIONAL SWING RESULT
-# 5. ADD TO ALL ELECTORATES
-# 6. ADD ELECTORATE ERROR
+    Simulated_Electorate_Polling_Results_ALR = Projected_Electorate_Results + Electorate_Residuals_Simulated_error_centered
 
-Simulated_national_swing_alr = National_Simulated_election_error_expanded + National_prior_alr.values # 1
-Simulated_state_election_deviation = State_prior_deviation_alr_expanded + State_Simulated_election_error_centered_expanded # 2
-Simulated_State_election_Results = Simulated_national_swing_alr + Simulated_state_election_deviation
+    Simulated_Electorate_Polling_Results = alr_to_simplex_simulation_array(Simulated_Electorate_Polling_Results_ALR)
 
-Projected_Electorate_Swing_Results = Prior_estimates_alr_expanded + (Simulated_State_election_Results - State_prior_expanded)
 
-Simulated_Electorate_Swing_Results_ALR = Projected_Electorate_Swing_Results + Electorate_Residuals_Simulated_error_centered
+    # Now, do the same for Fundamentals:
 
-Simulated_Electorate_Swing_Results = alr_to_simplex_simulation_array(Simulated_Electorate_Swing_Results_ALR)
+    # 1. GET NATIONAL SWING (centered at 0)
+    # 2. START WITH PRIOR STATE DEVIATIONS ( from state_prior) - essentially from last election
+    # 3. ADD SIMULATED STATE DEVIATIONS
+    # 4. ADD THIS TO NATIONAL SWING RESULT
+    # 5. ADD TO ALL ELECTORATES
+    # 6. ADD ELECTORATE ERROR
 
+    Simulated_national_swing_alr = National_Simulated_election_error_expanded + National_prior_alr.values # 1
+    Simulated_state_election_deviation = State_prior_deviation_alr_expanded + State_Simulated_election_error_centered_expanded # 2
+    Simulated_State_election_Results = Simulated_national_swing_alr + Simulated_state_election_deviation
 
+    Projected_Electorate_Swing_Results = Prior_estimates_alr_expanded + (Simulated_State_election_Results - State_prior_expanded)
 
+    Simulated_Electorate_Swing_Results_ALR = Projected_Electorate_Swing_Results + Electorate_Residuals_Simulated_error_centered
 
-#import pdb;pdb.set_trace()
+    Simulated_Electorate_Swing_Results = alr_to_simplex_simulation_array(Simulated_Electorate_Swing_Results_ALR)
 
 
-# Post-processing to remove artificial additions (includding ON in 2019/22)!
-if election_year == '2016':
-    div_idx = Div_relative_weights.index.get_loc('Gorton')
-    OTH = Simulated_Electorate_Polling_Results[:, div_idx, 3]  # shape (10000,)
-    # Apply the shift: increase GRN, decrease OTH
-    Simulated_Electorate_Polling_Results[:, div_idx, 2] += 1.0 * OTH  # GRN (index 2)
-    Simulated_Electorate_Polling_Results[:, div_idx, 3] -= 1.0 * OTH  # OTH (index 3)
 
-    import pdb;pdb.set_trace()
 
-def shift_share(sim, div_idx, from_party_idx, to_party_idx, proportion=1.0):
-    """Shifts a proportion of vote share from one party to another in one division, across all simulations."""
-    shift_amount = proportion * sim[:, div_idx, from_party_idx]
-    sim[:, div_idx, to_party_idx] += shift_amount
-    sim[:, div_idx, from_party_idx] -= shift_amount
+    # Post-processing to remove artificial additions (includding ON in 2019/22)!
+    if election_year == '2016':
+        div_idx = Div_relative_weights.index.get_loc('Gorton')
+        OTH = Simulated_Electorate_Polling_Results[:, div_idx, 3]  # shape (10000,)
+        # Apply the shift: increase GRN, decrease OTH
+        Simulated_Electorate_Polling_Results[:, div_idx, 2] += 1.0 * OTH  # GRN (index 2)
+        Simulated_Electorate_Polling_Results[:, div_idx, 3] -= 1.0 * OTH  # OTH (index 3)
 
-    return 1
+        #import pdb;pdb.set_trace()
 
-def redistribute_ON_votes(sim, division_names, party_names, ON_transfer_dict):
-    party_index_map = {name: idx for idx, name in enumerate(party_names)}
-    ON_idx = party_index_map['ON']
+    def shift_share(sim, div_idx, from_party_idx, to_party_idx, proportion=1.0):
+        """Shifts a proportion of vote share from one party to another in one division, across all simulations."""
+        shift_amount = proportion * sim[:, div_idx, from_party_idx]
+        sim[:, div_idx, to_party_idx] += shift_amount
+        sim[:, div_idx, from_party_idx] -= shift_amount
 
-    for div_nm, transfer_row in ON_transfer_dict.items():
-        div_idx = division_names.index(div_nm)
+        return 1
 
-        # Get ON vote array for this division
-        ON_votes = sim[:, div_idx, ON_idx]  # shape (10000,)
+    def redistribute_ON_votes(sim, division_names, party_names, ON_transfer_dict):
+        party_index_map = {name: idx for idx, name in enumerate(party_names)}
+        ON_idx = party_index_map['ON']
 
-        sim[:, div_idx, :] += np.outer(ON_votes, transfer_row.values) # add proportions scaled by ON_votes to df
+        for div_nm, transfer_row in ON_transfer_dict.items():
+            div_idx = division_names.index(div_nm)
 
-        # Zero out ON votes
-        sim[:, div_idx, ON_idx] = 0.0
+            # Get ON vote array for this division
+            ON_votes = sim[:, div_idx, ON_idx]  # shape (10000,)
 
-    return 1  # confirmation
+            sim[:, div_idx, :] += np.outer(ON_votes, transfer_row.values) # add proportions scaled by ON_votes to df
 
+            # Zero out ON votes
+            sim[:, div_idx, ON_idx] = 0.0
 
-if election_year in ['2019','2022','2025']:
-    for div_nm in No_OTH_divisions:
-        div_idx = Div_relative_weights.index.get_loc(div_nm)
-        shift_share(Simulated_Electorate_Polling_Results, div_idx, 5, 2, proportion=1.0) # always from OTH to UAPP (maybe different in 2025?)
+        return 1  # confirmation
 
-        # return ON back to its country in divs it did not run in!
-        ON_transfer_dict = remove_ON_back_to_its_country(Prior_estimates_df, election_year)
 
-        Polled_parties = ['COAL','ALP','GRN','ON','UAPP','OTH'] if  election_year != '2025' else ['COAL','ALP','GRN','ON','TOP','OTH']
-        redistribute_ON_votes(Simulated_Electorate_Polling_Results, Div_relative_weights.index.tolist(), Polled_parties, ON_transfer_dict)
+    if election_year in ['2019','2022','2025']:
+        for div_nm in No_OTH_divisions:
+            div_idx = Div_relative_weights.index.get_loc(div_nm)
+            shift_share(Simulated_Electorate_Polling_Results, div_idx, 5, 2, proportion=1.0) # always from OTH to UAPP (maybe different in 2025?)
+            shift_share(Simulated_Electorate_Swing_Results, div_idx, 5, 2, proportion=1.0)
 
+            # return ON back to its country in divs it did not run in!
+            ON_transfer_dict = remove_ON_back_to_its_country(Prior_estimates_df, election_year)
 
+            Polled_parties = ['COAL','ALP','GRN','ON','UAPP','OTH'] if  election_year != '2025' else ['COAL','ALP','GRN','ON','TOP','OTH']
+            redistribute_ON_votes(Simulated_Electorate_Polling_Results, Div_relative_weights.index.tolist(), Polled_parties, ON_transfer_dict)
+            redistribute_ON_votes(Simulated_Electorate_Swing_Results, Div_relative_weights.index.tolist(), Polled_parties, ON_transfer_dict)
 
 
-#import pdb;pdb.set_trace()
 
-Prior_estimates_dict = get_Prior_estimates_df(election_year, dont_add_ON = False)[1] # single row df for each div_nm
-Results_dict = get_results_df(election_year)[1]
 
 
 
+    return Simulated_Electorate_Polling_Results, Simulated_Electorate_Swing_Results
 
-def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, election_year, multiple_INDs_dict, alpha_scalar=100):
+
+
+def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, Results_dict, election_year, alpha_scalar=10):
     final_sim = {}
     party_name_dict = {}
     NUM_MAIN_PARTIES = DIM_OF_COV_MATRIX[election_year]
+
+    multiple_INDs_df = pd.read_csv(f"{election_year}_Multiple_INDs_divs.csv", index_col=None)
+    C200_IND_splits = pd.read_csv(f"Independent_splits_multiple.csv", index_col=None)
+    C200_IND_positions_df = pd.read_csv("C200_IND_positions_df.csv", index_col=None)
+    C200_IND_positions_curr = C200_IND_positions_df.loc[C200_IND_positions_df['Election_year'] == int(election_year),]
+
+
 
     Major_parties = ['COAL','LP','NP','LNP','LNQ','CLP','ALP','CLR','GRN','GVIC']
     Polling_parties = ['COAL','ALP','GRN']
@@ -610,14 +620,20 @@ def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, election_year,
 
 
     # For the split of COAL_double_divs
-    NP_ratios_curr = pd.read_csv("NP_ratio_estimated_df.csv", index_col=None)
-    NP_ratios_curr = NP_ratios_curr.loc[(NP_ratios_curr['election_year']==election_year) & (NP_ratios_curr['State'].isin(['VIC','NSW'])),]
+    if election_year == '2025':
+        NP_ratios_curr = pd.read_csv("NP_ratio_estimated_df_2025.csv", index_col=None)
+    else:
+        NP_ratios_curr = pd.read_csv("NP_ratio_estimated_df.csv", index_col=None)
+
+    NP_ratios_curr = NP_ratios_curr.loc[(NP_ratios_curr['election_year']==int(election_year)) ,] # & (NP_ratios_curr['State'].isin(['VIC','NSW']))
         
 
     for i, div in enumerate(Prior_estimates_dict.keys()): # will be alphabetical
         sim_block = sim[:, i, :]            # shape (10000, 4)
         main_parties = sim_block[:, :NUM_MAIN_PARTIES]     # shape (10000, 3)
         other_share = sim_block[:, NUM_MAIN_PARTIES]       # shape (10000,)
+
+        #print(div)
 
         # Extract prior for this division
 
@@ -626,6 +642,8 @@ def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, election_year,
         minor_names = list(prior_row_Other.columns)
         rel_weights = prior_row_Other.iloc[0].values
         rel_weights = rel_weights / rel_weights.sum()
+
+        #import pdb;pdb.set_trace()
 
         # Dirichlet sampling
         alpha = rel_weights * alpha_scalar
@@ -640,44 +658,219 @@ def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, election_year,
         all_party_names = Polling_parties + minor_names
 
 
+        # if no ON/TOP, demove this column!
+        ON_index, TOP_index = 3, 4
+        to_remove_index = []
+        if (election_year in ['2019','2022','2025']) and ('ON' not in prior_row.columns):
+            all_party_names = [p for p in all_party_names if p != 'ON']
+            to_remove_index.append(ON_index)
+
+        elif (election_year =='2025') and ('TOP' not in prior_row.columns):
+            all_party_names = [p for p in all_party_names if p != 'TOP']
+            to_remove_index.append(TOP_index)
+
+        combined = np.delete(combined, to_remove_index, axis=1) # does nothing if to_remove_index is empty
+
+        #import pdb;pdb.set_trace()
+
+
         if div in NP_ratios_curr['div_nm'].unique():
+            #import pdb;pdb.set_trace()
             COAL_votes = combined[:,0]
-            NP_est = NP_ratios_curr.loc[NP_ratios_curr['div_nm']==div,'final_estimate']
+
+            if 'COALLP' in prior_row.columns:
+                print('COALLP')
+                import pdb;pdb.set_trace()
+
+
+            if 'NP' in prior_row.columns and 'LP' in prior_row.columns:
+                NP_est = (prior_row['NP'] /  prior_row[['LP','NP']].sum(axis=1)).iloc[0]
+            else:
+                NP_est = NP_ratios_curr.loc[NP_ratios_curr['div_nm']==div,'final_estimate'].iloc[0]
+
             alpha = np.array([1-NP_est,NP_est]) * alpha_scalar
             splits = np.random.dirichlet(alpha, size=sim.shape[0])
             LP_NP_votes = splits * COAL_votes[:, None]
 
             combined = np.concatenate([combined, LP_NP_votes], axis=1)[:,1:] # Removes 'COAL' from 1st column
 
-            all_party_names = Polling_parties[1:] + minor_names + ['LP','NP'] # correct order
+            all_party_names = all_party_names[1:] + ['LP','NP'] # correct order
 
         # perform independent split as well!
         if 'IND' in Prior_estimates_dict[div]:
+            #import pdb;pdb.set_trace()
+
+            IND_index = all_party_names.index('IND')
+            IND_votes = combined[:,IND_index] # should be just one
             
-            if div in multiple_INDs:
+            if div in multiple_INDs_df['div_nm'].unique():
+                # split according to C200%, remainder evenly! 
+                #import pdb;pdb.set_trace()
+
+                num_INDs_curr = multiple_INDs_df.loc[multiple_INDs_df['div_nm'] == div,'No_of_INDs']
+                means_array = np.full(num_INDs_curr, 1/num_INDs_curr) # initialises an even split
+
+
+
+                if div in C200_IND_positions_curr['div_nm'].unique():
+                    # split according to C200 splits!
+
+                    C200_ratio = C200_IND_splits.loc[C200_IND_splits['Election'] == f'AverageFor{election_year}','Ratio'].iloc[0]
+
+                    C200_IND_position = C200_IND_positions_curr.loc[C200_IND_positions_curr['div_nm'] == div,'Number'].iloc[0]
+
+                    rest_value = (1 - C200_ratio) / (len(means_array) - 1)
+                    means_array[:] = rest_value  # fill all
+                    means_array[C200_IND_position - 1] = C200_ratio 
+
+                elif (election_year == '2025') and (div == 'Groom'):
+                    import pdb;pdb.set_trace()
+                    # mix between C200 and last split! - or ignore? TBD
+
+
+                splits = np.random.dirichlet(means_array, size=sim.shape[0])
+                All_IND_votes = splits * IND_votes[:, None]
+
+                combined = np.concatenate([combined, All_IND_votes], axis=1)
+                combined = np.delete(combined,IND_index, axis = 1) # remove 'IND' col
+
+                all_party_names = all_party_names + ['IND'+str(i) for i in range(1,num_INDs_curr.iloc[0]+1)]
+                all_party_names = [p for p in all_party_names if p != 'IND'] # remove IND
+
 
             else:
-                all_party_names = [p if p != 'IND' else 'IND1' for p in all_party_names]
+                all_party_names = [p if p != 'IND' else 'IND1' for p in all_party_names] # renames to IND1 if only single IND
 
 
-        
+        # map the order to the final ballot order
+        COAL_replacement_list = ['LP','NP','LNP','CLP']
+        Ballot_order = Results_dict[div].columns.tolist()
+
+        if 'COAL' in all_party_names:
+
+            COAL_replacement = [p for p in Ballot_order if p in COAL_replacement_list]
+
+            if len(COAL_replacement) > 1:
+                print('missed COAL double div')
+                import pdb;pdb.set_trace()
+
+            all_party_names = [COAL_replacement[0] if p == 'COAL' else p for p in all_party_names]
+
+
+        name_to_idx = {name: i for i, name in enumerate(all_party_names)}
+        col_indices = [name_to_idx[name] for name in Ballot_order]
+
+        if np.isnan(combined).any():
+            import pdb;pdb.set_trace()
 
         # Store results
-        final_sim[div] = combined 
-        party_name_dict[div] = all_party_names  # add names to avoid confusion in future!
-
-
-
+        final_sim[div] = combined[:, col_indices]
+        party_name_dict[div] = Ballot_order  # add names to avoid confusion in future!
 
     return final_sim, party_name_dict
 
 
-final_sim, party_name_dict = expand_all_divisions_from_prior_df(Simulated_Electorate_Polling_Results, Prior_estimates_dict, election_year, alpha_scalar=100)
+Polling_simulations_dict = {}
+Election_swing_simulations_dict = {}
+Prior_estimates_dict_per_election = {}
+Results_dict_per_election = {}
+
+for election_year in ['2016','2019','2022']:
+    Simulated_Electorate_Polling_Results, Simulated_Electorate_Swing_Results = simulate_Polling_Fundamentals_model(n_samples, election_year)
+
+    Polling_simulations_dict[election_year] = Simulated_Electorate_Polling_Results
+    Election_swing_simulations_dict[election_year] = Simulated_Electorate_Polling_Results
+
+
+    print("Done 20000 simulation processing:", time.time() - start_time, "seconds")
+
+    Prior_estimates_dict_per_election[election_year] = get_Prior_estimates_df(election_year, dont_add_ON = True)[1] # single row df for each div_nm
+    Results_dict_per_election[election_year] = get_results_df(election_year, to_Fundamentals=False)[1]
+
+
+def get_election_MAE(combined_samples, Prior_estimates_dict, Results_dict, election_year, alpha):
+
+    final_simulated_votes = expand_all_divisions_from_prior_df(combined_samples, Prior_estimates_dict, Results_dict, election_year, alpha_scalar=alpha)[0]
+
+    all_abs_diffs = []
+
+    for div in final_simulated_votes.keys():
+        pred = final_simulated_votes[div] * 100 # working in percentages finally
+        actual = Results_dict[div].iloc[0].values
+
+        # Broadcast subtraction: (n_sim, n_parties) - (n_parties,) => (n_sim, n_parties)
+        abs_diff = np.abs(pred - actual)
+
+        all_abs_diffs.append(abs_diff)
+
+    combined = np.concatenate(all_abs_diffs, axis=1)
+
+    # Average over parties for each simulation (axis=1)
+
+    MADs_per_sim_array = combined.mean(axis=1)
+
+    return MADs_per_sim_array.mean()
 
 
 
+
+
+
+
+
+weights = np.linspace(0, 1, 21)
+alphas = np.logspace(2, 3, 5)
+
+mad_scores = {}
+best_params = {}
+
+elections = list(Polling_simulations_dict.keys())
+
+for heldout in elections:
+    # Get the other two as training
+    train_elections = [e for e in elections if e != heldout]
+    
+    results = []
+    
+    for w in weights:
+        n_polling_samples = int(w * n_samples)
+
+        indices_poll = np.random.choice(n_samples, n_polling_samples, replace=False)
+        indices_fund = np.random.choice(n_samples, n_samples - n_polling_samples, replace=False)
+
+        for alpha in alphas:
+            print("weight = ", w, "alpha = ", alpha, "heldout = ", heldout)
+
+            val_errors = []
+            for election in train_elections: # choose from both elections
+
+                combined_samples = np.concatenate((Polling_simulations_dict[election_year][indices_poll],  Election_swing_simulations_dict[election_year][indices_fund]), axis=0) 
+                
+                
+                MAE = get_election_MAE(combined_samples, Prior_estimates_dict_per_election[election_year], Results_dict_per_election[election_year], election_year, alpha)
+                val_errors.append(MAE)
+            
+            avg_mae = np.mean(val_errors)
+            results.append(((w, alpha), avg_mae))
+
+    
+    best_w_alpha, best_val_mae = min(results, key=lambda x: x[1])
+    best_params[heldout] = {'w': best_w_alpha[0], 'alpha': best_w_alpha[1], 'val_mae': best_val_mae}
+
+    print("Done estimation:", time.time() - start_time, "seconds")
+    
+    # Now evaluate on heldout
+    n_polling_samples = int(best_w_alpha[0]*n_samples)
+    indices_poll = np.random.choice(n_samples, n_polling_samples, replace=False)
+    indices_fund = np.random.choice(n_samples, n_samples - n_polling_samples, replace=False)
+    combined_samples = np.concatenate((Polling_simulations_dict[heldout][indices_poll],  Election_swing_simulations_dict[heldout][indices_fund]), axis=0)
+
+    heldout_mae = get_election_MAE(combined_samples, Prior_estimates_dict_per_election[heldout], Results_dict_per_election[heldout], heldout, alpha)
+    best_params[heldout]['test_mae'] = heldout_mae
 
 import pdb;pdb.set_trace()
+
+    
 
 
 

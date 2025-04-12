@@ -59,7 +59,7 @@ final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007
 
 
 is_redistribution = 0
-data_year = '2019'
+data_year = '2022'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 
 new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner','Gorton']}
@@ -1782,6 +1782,8 @@ def independent_redistribution_reduce(div, Formal_prefs_dict, DOP_By_PP_Expand_w
 
     COMBINED_COALLP_NP = 0
 
+    
+
 
     # adjust house votes for incumbency advantage (unless no incumbent or non-senate is incumbent!) - First convert LP,NP in VIC/NSW to COAL
     if not Incumbency_by_div.loc[Incumbency_by_div["div_nm"] == div,'div_nm'].empty:
@@ -1799,6 +1801,9 @@ def independent_redistribution_reduce(div, Formal_prefs_dict, DOP_By_PP_Expand_w
             house_votes = adjust_c1_c2_for_incumbency_adv(div, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, c,Incumbency_by_div, div_to_state_dict, party_category_dict, name_changes_year_dict, FINAL_CANDIDATE_NO, data_year, by_pp_id = by_pp_id)
             if by_pp_id:
                 house_votes = house_votes.set_index('pp_id')
+            else:
+                # Experimental
+                house_votes.index = [0]
 
     else: # empty incumbent - no need for incumbency advantage
         house_votes = reduce_candidates_to_set_size(div, DOP_By_PP_Pref_Percent_wide_dict, c, by_pp_id=by_pp_id)
@@ -1877,6 +1882,7 @@ def independent_redistribution_reduce(div, Formal_prefs_dict, DOP_By_PP_Expand_w
 
     transferred_votes = Transfer_percent.mul(sum_non_senates, axis=0)
     #import pdb;pdb.set_trace()
+
 
     redistribution_votes = c1_votes.loc[:,~c1_votes.columns.isin(non_senate_cands)] + transferred_votes
 
@@ -3608,10 +3614,13 @@ def incumbency_advantage_change(div, Elimination_order_dict, DOP_By_PP_Expand_wi
         if (data_year == '2016') and (next_incumbent_row['div_nm']=='Flinders') and (next_incumbent_row['PartyAb']=='IND2'): # this is the Julia Banks clause
             JULIA_BANKS = 1
             continue
+        
 
         curr_inc_elections_won = curr_incumbent_row['elections_won'].iloc[0] if not curr_incumbent_row.empty else -2 # practical adjustment for empty row
 
-        if (curr_incumbent_row.empty) | (next_incumbent_row['elections_won'] != (curr_inc_elections_won + 1)):
+        Complex_count_condition = (data_year == '2022') & (next_incumbent_row['div_nm'] in ['Moore','Calare','Monash'])
+
+        if (curr_incumbent_row.empty) | (next_incumbent_row['elections_won'] != (curr_inc_elections_won + 1)) | Complex_count_condition:
 
             # not same incumbent!
             # 2 stages: 1. Remove INC ADV (only if there was an incumbent); 2. Add new 
@@ -3643,13 +3652,17 @@ def incumbency_advantage_change(div, Elimination_order_dict, DOP_By_PP_Expand_wi
             # Add new incumbency advantage - repeat the process with different Party/elections_won value!
             incumbent_party, incumbent_years = next_incumbent_row[['PartyAb', 'elections_won']]
 
+            if Complex_count_condition:
+                # deal with the incumbent advantage separately!
+                continue
+
             if incumbent_years > 0:
                 print('surprising - new incumbent won an election before', div)
                 #import pdb;pdb.set_trace()
 
         
             INCUMBENT_ADVANTAGE, NONINCUMBENT_DISADVANTAGE_dict = get_incumbency_advantage(div, top_party_list, div_to_state_dict, party_category_dict, name_changes_year_dict, data_year, X, incumbent_party, incumbent_years)
-            
+
             if (incumbent_party in ['LP','NP']) & ((div_to_state_dict[div] in ['VIC','NSW']) | ((data_year == '2007') & (div_to_state_dict[div] == 'QLD'))):
                 incumbent_party = 'COAL' if 'COAL' in top_party_list else 'COAL' + incumbent_party
 
@@ -3685,6 +3698,12 @@ def incumbency_advantage_change(div, Elimination_order_dict, DOP_By_PP_Expand_wi
             if incumbent_party.startswith('IND'):
                 incumbent_party = incumbent_party + div # should be correct IND number (i.e. IND1) as Incumbents_by_div created using 2022 data
                 print(div, incumbent_party)
+
+            if (data_year == '2022') and (incumbent_party == 'KAP'):
+                incumbent_party = 'KAP' + div
+            if (data_year == '2022') and (incumbent_party == 'XEN'):
+                incumbent_party = 'XEN' + div
+
 
 
             # remove incumbent_advantage; add nonincumbent disadvantage
@@ -3957,8 +3976,7 @@ def adjust_IND_priors(Incumbency_adjusted_FPs, Incumbency_by_div, party_category
             
 
     elif data_year == '2016':
-        Last_election_defection_proportions = pd.DataFrame([[0.2695, 0.3429, 0.5114, 0]], columns = ['COAL','ALP','GRN','OTH'], index = 'Wentworth') # inferred from 2018 Wentworth by-election (in BobKatterJuliaBanks.ods)
-        to_infer = ['Warringah', 'Wentworth']
+        Last_election_defection_proportions = pd.DataFrame([[0.2695, 0.3429, 0.5114, 0,0,0]], columns = ['COAL','ALP','GRN','ON','UAPP','Other'], index = ['Wentworth']) # inferred from 2018 Wentworth by-election (in BobKatterJuliaBanks.ods)
 
     next_INDs_div_dict = new_Associated_IND_candidates[str(int(data_year)+3)]
 
@@ -4123,34 +4141,68 @@ def adjust_IND_priors(Incumbency_adjusted_FPs, Incumbency_by_div, party_category
 
 
 
+    Complex_contests = ['Calare','Monash','Moore']
 
 
     if data_year == '2022':
-        Complex_contests = ['Calare','Monash','Moore']
+        for div in Incumbency_adjusted_FPs:
+            if div in Complex_contests:
+                
 
-        Historical_independent_proportions = pd.read_csv("Defecting_Incumbent_IND_proportions.csv", index_col = None)
+                Historical_independent_proportions = pd.read_csv("Defecting_Incumbent_IND_proportions.csv", index_col = None).set_index('Election')
 
-        # Calare/Monash currently have C200 IND votes, Moore as well due to above processing. All have Incumbent advantage. 
+                # Calare/Monash currently have C200 IND votes, Moore as well due to above processing. All have Incumbent advantage. 
 
-        # 1. electorate similarity to Kennedy/Flinders of the 3. 
+                # 1. electorate similarity to Kennedy/Flinders of the 3. 
 
-        weight_sum = 0
-        Defection_df_curr_list = []
+                for new_div in Complex_contests:
 
-        for IND_div in Historical_independent_proportions.index.str[:-4]:
+                    weight_sum = 0
+                    Defection_df_curr_list = []
 
-            # weight by correlation matrix
-            similarity_weight = Last_election_correlation_matrix.loc[new_div, IND_div]
-            weight_sum += similarity_weight
+                    for IND_div_whole in Historical_independent_proportions.index:
+                        IND_div = IND_div_whole[:-4]
+                        # weight by correlation matrix
+                        similarity_weight = Last_election_correlation_matrix.loc[new_div, IND_div]
+                        weight_sum += similarity_weight
 
-            Defection_df_curr_list.append(Last_election_defection_proportions.loc[IND_div] * similarity_weight)
+                        Defection_df_curr_list.append(Historical_independent_proportions.loc[Historical_independent_proportions.index == IND_div_whole,] * similarity_weight)
 
-        Defection_df_curr_estimate = pd.concat(Defection_df_curr_list).sum() / weight_sum # calculates weighted average of defection proportions
-        # 2. INC_advantage for the INDs???
+                    Defection_df_curr_estimate = pd.concat(Defection_df_curr_list).sum() / weight_sum # calculates weighted average of defection proportions
+                # 2. INC_advantage for the INDs -  take it proportionally form Others
 
 
-        # 3. Remove INC_advantage from IND currently --> automatic boost to Incumbent INDS
-        # 4. By electorate weighting, get new results - some of C200 IND will be swallowed.
+                #INCUMBENT_ADVANTAGES_COMPLEX = {'Calare': 6.288, 'Monash':7.6175,'Moore':2.8724} # calculated assuming they become 'OTH'
+
+                #to_donate = Incumbency_adjusted_FPs[div] * INCUMBENT_ADVANTAGES_COMPLEX[div] / 100 # normalised
+
+                #Incumbency_new_IND_adjusted_FPs[div] = Incumbency_adjusted_FPs[div].copy()
+                #Incumbency_new_IND_adjusted_FPs[div] = Incumbency_new_IND_adjusted_FPs[div] - to_donate
+
+                defection_party_df = pd.DataFrame(index=[div])
+
+                # 4. By electorate weighting, get new results - some of C200 IND will be swallowed.
+                import pdb;pdb.set_trace()
+                for p in Incumbency_adjusted_FPs[div].columns: # iterate in order of the columns
+                    if p in ['COAL','NP','LP','COALLP','COALNP','LNP','CLP']:
+                        defection_party_df.loc[:,p] = Defection_df_curr_estimate['COAL']
+                    elif p == 'ALP':
+                        defection_party_df.loc[:,p] = Defection_df_curr_estimate['ALP']
+                    elif p == 'GRN':
+                        defection_party_df.loc[:,p] = Defection_df_curr_estimate['GRN']
+                    else:
+                        defection_party_df.loc[:,p] = Defection_df_curr_estimate['Other']
+
+                # 2. Multiply these by proportions in defection_party_df
+
+                defection_votes  = Incumbency_new_IND_adjusted_FPs[div] * defection_party_df.iloc[0]
+
+                import pdb;pdb.set_trace()
+                Incumbency_new_IND_adjusted_FPs[div] = Incumbency_new_IND_adjusted_FPs[div] - defection_votes # for non-IND
+
+                IND_name = [p for p in Incumbency_new_IND_adjusted_FPs[div].columns if p.startswith('IND')][0]
+
+                Incumbency_new_IND_adjusted_FPs[div].loc[:,IND_name] += defection_votes.sum(axis=1)
     
 
 
@@ -4184,13 +4236,13 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
     Division_IND_groupings = {'2016':{'New England':2, 'Cowper':1, 'Lyne':1},
                             '2019': {'Wentworth':2, 'Warringah':2, 'Mackellar':1, 'Kooyong':1, 'Indi':1, 'Hume':1, 'Cowper':1, 'Mallee':3},
                             '2022': {'Boothby':2, 'Bradfield':1,'Calare':1,'Casey':2,'Clark':1,'Cowper':1,'Curtin':1,'Flinders':2,'Goldstein':1,'Grey':1,'Hughes':1,'Indi':1,'Kooyong':1,'Mackellar':1,'North Sydney':1,'Page':1,'Wannon':2,'Warringah':1,'Wentworth':1},
-                            '2025': {'Curtin':0,'Goldstein':0,'Indi':0,'Kooyong':0,'Mackellar':0,'Wentworth':0,'Clark':0,'Moncrieff':0,'Moore':0,'Bradfield':0,'Berowra':0,'Forrest':0,'Sturt':0,'Gilmore':0,'Wannon':0,'Casey':0,'Franklin':0,'Cowper':0,'Groom':0,'Calare':0,'Fremantle':0,'Fisher':0,'Grey':0,'Monash':0,'Lyne':0,'Farrer':0,'McPherson':0,'Deakin':0,'Bean':0,'Riverina':0,'Solomon':0,'Flinders':0,'Dickson':0,'Fairfax':0}
+                            '2025': {'Curtin':1,'Goldstein':1,'Indi':1,'Kooyong':1,'Mackellar':3,'Wentworth':2,'Clark':1,'Moncrieff':1,'Moore':2,'Bradfield':2,'Berowra':2,'Forrest':1,'Sturt':1,'Gilmore':1,'Wannon':1,'Casey':1,'Franklin':1,'Cowper':2,'Groom':1,'Calare':1,'Fremantle':1,'Fisher':1,'Grey':1,'Monash':2,'Lyne':1,'Farrer':1,'McPherson':1,'Deakin':1,'Bean':1,'Riverina':5,'Solomon':1,'Flinders':1,'Dickson':1,'Fairfax':1}
                             }
 
 
     new_Associated_IND_candidates = {'2019': {'Wentworth':2, 'Warringah':2},
                                     '2022': {'Boothby':2, 'Bradfield':1,'Calare':1,'Casey':2,'Curtin':1,'Flinders':2,'Goldstein':1,'Grey':1,'Hughes':1,'Kooyong':1,'Mackellar':1,'North Sydney':1,'Page':1,'Wannon':2},
-                                    '2025': {'Moncrieff':0,'Moore':0,'Berowra':0,'Forrest':0,'Sturt':0,'Gilmore':0,'Franklin':0,'Fremantle':0,'Fisher':0,'Grey':0,'Monash':0,'Lyne':0,'Farrer':0,'McPherson':0,'Deakin':0,'Bean':0,'Riverina':0,'Solomon':0,'Dickson':0,'Fairfax':0}
+                                    '2025': {'Moncrieff':1,'Moore':2,'Berowra':2,'Forrest':1,'Sturt':1,'Gilmore':1,'Franklin':1,'Fremantle':1,'Fisher':1,'Grey':1,'Monash':2,'Lyne':1,'Farrer':1,'McPherson':1,'Deakin':1,'Bean':1,'Riverina':5,'Solomon':1,'Dickson':1,'Fairfax':1}
                                     }
     
     Complex_contests = {'2025':['Calare','Monash','Moore']}
@@ -4315,7 +4367,12 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
             next_year = str(int(data_year) + 3)
             # 1. Get names of next election's parties in each div for comparison to senate
-            DOP_By_Division_next = pd.read_csv(f"{next_year}HouseDOPByDivision.csv", skiprows=1).rename(columns={'DivisionNm': 'div_nm'})[["div_nm","PartyAb"]].drop_duplicates()
+            if next_year != '2025':
+
+                DOP_By_Division_next = pd.read_csv(f"{next_year}HouseDOPByDivision.csv", skiprows=1).rename(columns={'DivisionNm': 'div_nm'})[["div_nm","PartyAb"]].drop_duplicates()
+
+            else:
+                DOP_By_Division_next = pd.read_csv("2025Candidates_By_Division.csv", index_col = None)
 
             DOP_By_Division_next.loc[:,'PartyAb'] = DOP_By_Division_next.loc[:,'PartyAb'].fillna('IND').replace('GVIC','GRN')
             Div_parties_next_dict = {div: group['PartyAb'].tolist() for div, group in DOP_By_Division_next.groupby("div_nm")}
@@ -4349,9 +4406,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
                     Incumbency_adjusted_FPs[div] = incumbency_advantage_change(div,Elimination_order_dict, DOP_By_PP_Expand_wide_dict, DOP_By_PP_Pref_Percent_wide_dict, div_to_state_dict, party_category_dict, name_changes_year_dict, Incumbency_by_div, FINAL_CANDIDATE_NO, data_year)
            
 
-            # FOR PRACTICE - TO BE REMOVED!
-            #Incumbency_adjusted_FPs = adjust_IND_priors(Incumbency_adjusted_FPs, Incumbency_by_div, party_category_dict, Senate_parties_by_div, data_year, MIXING_RATIO_FOR_IND_ASSOCIATION)
-            #import pdb;pdb.set_trace()
+
 
 
             # This changes input values, meaning full_redistribution_candidate_change needs to be adjusted to perform step-by-step transitions based on DOP_By_PP proportions,

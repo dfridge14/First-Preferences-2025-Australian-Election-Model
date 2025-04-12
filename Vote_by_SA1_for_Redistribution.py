@@ -28,7 +28,7 @@ census_years_for_data_years = {'2022':'2021','2019':'2016','2016':'2011','2013':
 data_year = "2019"
 census_year = census_years_for_data_years[data_year]
 redistribution_type = 'New Candidates'
-ON_add = True
+ON_add = False
 
 div_nm = "Melbourne"
 

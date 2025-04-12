@@ -13,7 +13,7 @@ final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007
 name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
 
 
-data_year = '2010'
+data_year = '2022'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 NONINCUMBENT_DISADVANTAGE =  INCUMBENT_ADVANTAGE/(FINAL_CANDIDATE_NO-1)
 
@@ -221,8 +221,42 @@ def create_wide_DOP_dict(Div_DOP_dict, DOP_type):
 
 #expand_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Expand")
 #reduce_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "Reduce")
-#Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
+Elimination_order_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "EliminationOrder")
 #VoteCount_dict = create_wide_DOP_dict(Div_DOP_dict, DOP_type = "VoteCount")
+
+
+
+################### Little section where multiple IND candidates are treated to
+
+
+multiple_INDs_list = []
+for div in Elimination_order_dict.keys():
+    if sum(x.startswith('IND') for x in Elimination_order_dict[div]) > 1:
+        num = sum(x.startswith('IND') for x in Elimination_order_dict[div])
+        multiple_INDs_list.append(pd.DataFrame([[div, num]], columns=['div_nm','No_of_INDs']))
+
+multiple_INDs_df = pd.concat(multiple_INDs_list, ignore_index=True)
+#multiple_INDs_df.to_csv(f"{data_year}_Multiple_INDs_divs.csv", index=False)
+
+
+
+
+Division_IND_groupings = {'2016':{'New England':2, 'Cowper':1, 'Lyne':1},
+                        '2019': {'Wentworth':2, 'Warringah':2, 'Mackellar':1, 'Kooyong':1, 'Indi':1, 'Hume':1, 'Cowper':1, 'Mallee':3},
+                        '2022': {'Boothby':2, 'Bradfield':1,'Calare':1,'Casey':2,'Clark':1,'Cowper':1,'Curtin':1,'Flinders':2,'Goldstein':1,'Grey':1,'Hughes':1,'Indi':1,'Kooyong':1,'Mackellar':1,'North Sydney':1,'Page':1,'Wannon':2,'Warringah':1,'Wentworth':1},
+                        '2025': {'Curtin':1,'Goldstein':1,'Indi':1,'Kooyong':1,'Mackellar':3,'Wentworth':2,'Clark':1,'Moncrieff':1,'Moore':2,'Bradfield':2,'Berowra':2,'Forrest':1,'Sturt':1,'Gilmore':1,'Wannon':1,'Casey':1,'Franklin':1,'Cowper':2,'Groom':1,'Calare':1,'Fremantle':1,'Fisher':1,'Grey':1,'Monash':2,'Lyne':1,'Farrer':1,'McPherson':1,'Deakin':1,'Bean':1,'Riverina':5,'Solomon':1,'Flinders':1,'Dickson':1,'Fairfax':1}
+                        }
+
+
+rows = [(year, div, num) for year, divs in Division_IND_groupings.items() for div, num in divs.items()]
+
+# Create DataFrame
+C200_IND_positions_df = pd.DataFrame(rows, columns=['Election_year', 'div_nm', 'Number'])
+C200_IND_positions_df.to_csv("C200_IND_positions_df.csv", index=False)
+
+
+import pdb;pdb.set_trace()
+
 
 
 
@@ -304,13 +338,13 @@ def create_DOP_By_PP_csvs(data_year, name_changes_year_dict):
     DOP_By_PP_Reduce.loc[:,'CalculationValue'] = DOP_By_PP_Reduce.loc[:,'CalculationValue'] / 100
     import pdb;pdb.set_trace()
 
-    DOP_By_PP_Pref_Percent.to_csv(f"{data_year}DOP_By_PP_Pref_Percent.csv", index=False)
-    DOP_By_PP_Reduce.to_csv(f"{data_year}DOP_By_PP_Reduce.csv", index=False)
-    DOP_By_PP_Expand.to_csv(f"{data_year}DOP_By_PP_Expand.csv", index=False)
+    #DOP_By_PP_Pref_Percent.to_csv(f"{data_year}DOP_By_PP_Pref_Percent.csv", index=False)
+    #DOP_By_PP_Reduce.to_csv(f"{data_year}DOP_By_PP_Reduce.csv", index=False)
+    #DOP_By_PP_Expand.to_csv(f"{data_year}DOP_By_PP_Expand.csv", index=False)
 
     return 1
 
-create_DOP_By_PP_csvs(data_year, name_changes_year_dict) # create csv file!
+#create_DOP_By_PP_csvs(data_year, name_changes_year_dict) # create csv file!
 
 import pdb;pdb.set_trace()
 

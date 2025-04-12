@@ -103,6 +103,16 @@ for data_year in ['2004','2007','2010','2013','2016','2019','2022']:
 
 COAL_NP_ratio_df = pd.concat(COAL_ratio_df_list, ignore_index=False)
 
+COAL_NP_ratio_df_2025 = pd.read_csv("COAL_NP_ratio_df_2025.csv", index_col = None).fillna('')
+
+ONLY_2025 = 1
+
+if ONLY_2025:
+    COAL_NP_ratio_df = pd.concat([COAL_NP_ratio_df,COAL_NP_ratio_df_2025], ignore_index=True)
+
+import pdb;pdb.set_trace()
+
+
 #COAL_NP_ratio_df.to_csv('COAL_NP_ratio_df.csv', index = False)
     
 #import pdb;pdb.set_trace()
@@ -199,6 +209,19 @@ def weighted_estimate(row):
 # Apply to DataFrame
 COAL_NP_ratio_df_prediction.loc[:,'final_estimate'] = COAL_NP_ratio_df_prediction.apply(weighted_estimate, axis=1)
 
-COAL_NP_ratio_df_prediction[['div_nm','State','election_year','final_estimate']].to_csv('NP_ratio_estimated_df.csv', index = False)
+
+
+COAL_NP_ratio_df_prediction = COAL_NP_ratio_df_prediction[['div_nm','State','election_year','final_estimate']]
+
+import pdb;pdb.set_trace()
+
+if not ONLY_2025:
+    COAL_NP_ratio_df_prediction.to_csv(f'NP_ratio_estimated_df.csv', index = False)
+
+else:
+    COAL_NP_ratio_df_prediction = COAL_NP_ratio_df_prediction.loc[COAL_NP_ratio_df_prediction['election_year'] == 2025,]
+    COAL_NP_ratio_df_prediction.to_csv(f'NP_ratio_estimated_df_2025.csv', index = False)
+
+
 
 import pdb;pdb.set_trace()
