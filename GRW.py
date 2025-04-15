@@ -30,7 +30,7 @@ az.rcParams['plot.max_subplots'] = 100
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-election_year = '2022'
+election_year = '2025'
 SAMPLE_ERROR_SCALING_FACTOR = 2
 
 
@@ -42,7 +42,7 @@ num_polling_days = 100
 import arviz as az
 
 last_election_year = str(int(election_year) - 3)
-election_date_num = {'2007': 1141,'2010':1002, '2013':1113, '2016':1028, '2019':1050, '2022':1099}
+election_date_num = {'2007': 1141,'2010':1002, '2013':1113, '2016':1028, '2019':1050, '2022':1099,'2025':1078}
 
 # national/state results should come from the summed prior, assuming similar enrolment to last time!
 
@@ -263,6 +263,9 @@ def alr_to_simplex_vectorized(df, ref_col):
 # only do inference for last 100 days of election:
 starting_point = election_date_num[election_year] - num_polling_days # start 100 days before last day of polling
 
+if election_year == '2025':
+    Prior_estimates_df = pd.DataFrame(columns=['COAL','ALP','GRN','ON','TOP','OTH'])
+
 if election_year not in ['2016','2019','2022','2025']:
     Prior_estimates_df = pd.DataFrame(columns=['COAL','ALP','GRN','OTH'])
 
@@ -272,10 +275,10 @@ day_80_polling_avg =  pd.DataFrame([[0.0]*len(Prior_estimates_df.columns)], colu
 
 National_polls = pd.read_csv(f'NationalPollsforMGRW{election_year}.csv')
 
-sigma_drift_prior = {'COAL':0.004,'ALP':0.004,'GRN':0.002,'OTH':0.003,'ON':0.003,'UAPP':0.003}
+sigma_drift_prior = {'COAL':0.004,'ALP':0.004,'GRN':0.002,'OTH':0.003,'ON':0.003,'UAPP':0.003,'TOP':0.003}
 
 
-for party in National_polls.columns[5:7]:
+for party in National_polls.columns[2:]:
 
     # Step 1: Load Data (Placeholder, replace with actual data)
     df = National_polls[['Days since last election','Sample size',party]] # Columns: [Days since last election, Sample size, COAL, ALP, GRN, party_4,...,Other]
@@ -341,7 +344,6 @@ for party in National_polls.columns[5:7]:
 
     x_posterior = trace.posterior["vote_trend"].values
     x_mean = np.mean(x_posterior, axis=(0, 1))  # Mean vote share over time
-    import pdb;pdb.set_trace()
     day_80_polling_avg[party] = x_mean[day_of_interest]
 
     print(party, election_year, "estimated_sigma", az.summary(trace, var_names=["sigma"]))

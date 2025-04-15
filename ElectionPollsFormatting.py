@@ -145,8 +145,8 @@ def parse_date_range(date_str):
 
 
 
-election_year = '2019'
-Polling_type = 'State' # National, Electorate, State Election, State
+election_year = '2025'
+Polling_type = 'National' # National, Electorate, State Election, State
 
 last_election_date = {'2025': "21/05/22", '2022':"18/05/19", '2019':"02/07/16", '2016':"07/09/13", '2013':"21/08/10"}
 
@@ -181,6 +181,31 @@ if Polling_type == 'National':
         Opinion_Polls_2022_National.loc[:,'Sample size'] = Opinion_Polls_2022_National.loc[:,'Sample size'].fillna(1000) # essential polls seem likely to be 1000 each
 
         Opinion_Polls_2022_National.iloc[:, 2:8] = Opinion_Polls_2022_National.iloc[:, 2:8].round(3)
+        Opinion_Polls_2022_National.loc[:,['Days since last election','Sample size']] = Opinion_Polls_2022_National.loc[:,['Days since last election','Sample size']].astype(int)  
+        Poll_Swings_National = Opinion_Polls_2022_National.iloc[:-1,]
+
+        import pdb;pdb.set_trace()
+
+        Poll_Swings_National.to_csv(f"NationalPollsforMGRW{election_year}.csv", index=False)
+
+    if election_year == '2025':
+        
+        Opinion_Polls_2022_National = pd.read_csv(f"{election_year}ElectionPollFormatted.csv").dropna(how='all')
+
+        # Convert date format to datetime.date
+        dates = pd.Series(Opinion_Polls_2022_National.iloc[:,0])
+        parsed_median_dates = dates.apply(parse_date_range) 
+
+        parsed_median_dates = pd.to_datetime(parsed_median_dates) # datetime objects
+
+        last_election_date = datetime.strptime(Opinion_Polls_2022_National.iloc[-1,0], '%d/%m/%Y') 
+        days_since_election = (parsed_median_dates - last_election_date).dt.days
+
+        Opinion_Polls_2022_National.iloc[:,0] = days_since_election
+        Opinion_Polls_2022_National = Opinion_Polls_2022_National.rename(columns={"Date": "Days since last election"}) # not active yet
+        Opinion_Polls_2022_National.loc[:,'Sample size'] = Opinion_Polls_2022_National.loc[:,'Sample size'].fillna(1000) # essential polls seem likely to be 1000 each
+
+        Opinion_Polls_2022_National.iloc[:, 2:] = Opinion_Polls_2022_National.iloc[:, 2:].round(3)
         Opinion_Polls_2022_National.loc[:,['Days since last election','Sample size']] = Opinion_Polls_2022_National.loc[:,['Days since last election','Sample size']].astype(int)  
         Poll_Swings_National = Opinion_Polls_2022_National.iloc[:-1,]
 
@@ -417,14 +442,18 @@ elif Polling_type == 'Electorate':
 
 elif Polling_type == 'State':
 
-    include_ON = 1
-    Type = '_rel_to_Nat' # or ''
+    if election_year == '2025':
 
-    State_Weighted_Polling_Average_list = []
-    State_Results_list = []
 
-    # get the weighted-averages of state polls for both CAGO and also ON/UAPP added
-    for election_year in ['2019','2022']:
+        include_ON = 1
+        Type = '_rel_to_Nat' # or ''
+
+        State_Weighted_Polling_Average_list = []
+        State_Results_list = []
+
+        import pdb;pdb.set_trace()
+
+        # get the weighted-averages of state polls for both CAGO and also ON/UAPP added
         State_polls = pd.read_csv(f"StatePolls{election_year}.csv", index_col = None)
 
         if not include_ON:
@@ -474,19 +503,83 @@ elif Polling_type == 'State':
             State_Results_list.append(Election_result) # store actual result
             #import pdb;pdb.set_trace()
 
-    State_Weighted_Polling_Average_df = pd.concat(State_Weighted_Polling_Average_list, ignore_index=True)
-    State_Results_df =  pd.concat(State_Results_list, ignore_index=True)
+        State_Weighted_Polling_Average_df = pd.concat(State_Weighted_Polling_Average_list, ignore_index=True)
+        #State_Results_df =  pd.concat(State_Results_list, ignore_index=True)
+        import pdb;pdb.set_trace()
+        State_Weighted_Polling_Average_df.to_csv(f"2025StatePollingWeightedAverage{Type}.csv", index = False)
 
-    State_Polling_2016 = pd.read_csv("StatePolls2016Final.csv", index_col = None, skiprows=1)
-    Polling_estimates_2016 = State_Polling_2016.loc[State_Polling_2016['Type']=='Estimate',].iloc[:,1:]
-    State_Results_2016 = State_Polling_2016.loc[State_Polling_2016['Type']=='Result',].iloc[:,1:]
-    
-    State_Weighted_Polling_Average_df = pd.concat([State_Weighted_Polling_Average_df,Polling_estimates_2016], ignore_index=True)
-    State_Results_df = pd.concat([State_Results_df,State_Results_2016], ignore_index=True)
-    import pdb;pdb.set_trace()
+    else:
 
-    State_Weighted_Polling_Average_df.to_csv(f"StatePollingWeightedAverage{Type}.csv", index = False)
-    State_Results_df.to_csv(f"StateFederalResults{Type}.csv", index=False)
+        include_ON = 1
+        Type = '_rel_to_Nat' # or ''
+
+        State_Weighted_Polling_Average_list = []
+        State_Results_list = []
+
+        # get the weighted-averages of state polls for both CAGO and also ON/UAPP added
+        for election_year in ['2019','2022']:
+            State_polls = pd.read_csv(f"StatePolls{election_year}.csv", index_col = None)
+
+            if not include_ON:
+                State_polls.loc[:,'OTH'] += State_polls.loc[:,'ON'] # combine ON with Others
+                State_polls = State_polls[['Poll_id','Date','Scope','Sample size','COAL','ALP','GRN','OTH']]
+
+            relevant_states = ['NSW','VIC','QLD','WA','SA'] if not Type else ['NSW','VIC','QLD','WA','SA','NAT']
+
+            for state in relevant_states:
+                state_polling = State_polls.loc[State_polls['Scope'] == state,]
+
+                dates = pd.Series(state_polling['Date']).str.strip()
+                parsed_median_dates = dates.apply(parse_date_range) 
+                parsed_median_dates = pd.to_datetime(parsed_median_dates) # datetime objects
+
+                election_date =  parsed_median_dates.iloc[0]
+                days_to_election = (election_date - parsed_median_dates).dt.days
+
+                state_polling.loc[:,'Date'] = days_to_election
+                state_polling = state_polling.rename(columns={"Date": "Days to election"}).sort_values(by='Days to election').reset_index(drop=True)
+
+                # compute variances for modelling
+                Sampling_var = (state_polling.iloc[1:,4:] * (1 - state_polling.iloc[1:,4:])).div(state_polling.iloc[1:,]['Sample size'], axis=0)
+                Drift_var = pd.DataFrame(state_polling.iloc[1:,1:2].to_numpy()*pd.DataFrame((sigma_drift_function(state_polling.iloc[1:,4:].mean())**2)).T.values, index = Sampling_var.index, columns = Sampling_var.columns)
+                Total_var = Sampling_var + Drift_var
+
+                Precision = 1/Total_var
+
+                # Compute precision weights
+                precision_sums = Precision.sum(axis=0)
+                weighted_avg = ((state_polling.iloc[1:,4:]*Precision) / precision_sums).sum(axis=0)
+                weighted_avg /= weighted_avg.sum()
+
+                avg_stds = pd.DataFrame(np.sqrt( 1/precision_sums.astype('float'))).T
+                avg_stds.columns = [col + '_stds' for col in avg_stds.columns]
+
+                State_polling_avg = pd.DataFrame(weighted_avg).T
+                Election_name = election_year + state
+                State_polling_avg.loc[:,'Election'] = Election_name
+                Election_result = state_polling.iloc[:1,4:]
+                Election_result.loc[:,'Election'] = Election_name
+                #import pdb;pdb.set_trace()
+
+                State_polling_avg = pd.concat([State_polling_avg, avg_stds], axis = 1)
+                
+                State_Weighted_Polling_Average_list.append(State_polling_avg)
+                State_Results_list.append(Election_result) # store actual result
+                #import pdb;pdb.set_trace()
+
+        State_Weighted_Polling_Average_df = pd.concat(State_Weighted_Polling_Average_list, ignore_index=True)
+        State_Results_df =  pd.concat(State_Results_list, ignore_index=True)
+
+        State_Polling_2016 = pd.read_csv("StatePolls2016Final.csv", index_col = None, skiprows=1)
+        Polling_estimates_2016 = State_Polling_2016.loc[State_Polling_2016['Type']=='Estimate',].iloc[:,1:]
+        State_Results_2016 = State_Polling_2016.loc[State_Polling_2016['Type']=='Result',].iloc[:,1:]
+        
+        State_Weighted_Polling_Average_df = pd.concat([State_Weighted_Polling_Average_df,Polling_estimates_2016], ignore_index=True)
+        State_Results_df = pd.concat([State_Results_df,State_Results_2016], ignore_index=True)
+        import pdb;pdb.set_trace()
+
+        State_Weighted_Polling_Average_df.to_csv(f"StatePollingWeightedAverage{Type}.csv", index = False)
+        State_Results_df.to_csv(f"StateFederalResults{Type}.csv", index=False)
 
 
 Weighted_Polling_Average_list = []

@@ -5,6 +5,9 @@ import arviz as az
 import os, time
 from pathlib import Path
 import matplotlib.pyplot as plt
+from itertools import product
+from concurrent.futures import ProcessPoolExecutor
+from tqdm import tqdm 
 
 from collections import defaultdict
 
@@ -40,7 +43,7 @@ NO_OF_STATES = 8
 NO_OF_ELECTORATES = {'2016':150,'2019':151,'2022':151,'2025':150}
 DIM_OF_COV_MATRIX = {'2016':3,'2019':5,'2022':5,'2025':5}
 
-n_samples = 10000
+n_samples = 100
 
 
 
@@ -251,13 +254,45 @@ def get_National_State_Prior_estimates(election_year, new_vote_totals_states, do
     return Prior_estimates_df, National_prior, State_prior_df, No_OTH_divisions
 
 
+def sigmoid(x, midpoint=1.0, steepness=2.0):
+    """Smooth saturation from 0 to 1 centered at midpoint."""
+    return 1 / (1 + np.exp(-steepness * (x - midpoint)))
 
-def simulate_Polling_Fundamentals_model(n_samples, election_year, df_t = 0, v = 1.0):
+def compute_effective_state_weights(P_s_y, steepness=2.0):
+    """
+    Compute effective weights for state polling using a sigmoid of relative precision.
+    
+    Parameters:
+    - P_s_y: pd.Series or np.ndarray of state polling precision per state/year.
+    - s: Global trust level in state polling (between 0 and 1).
+    - steepness: Controls how rapidly weight saturates toward 1.
+
+    Returns:
+    - effective_s: np.ndarray of weights between 0 and s (smoothly scaled).
+    """
+    # Compute average precision (per-year if needed)
+    avg_precision = np.mean(P_s_y)
+    relative_precision = P_s_y / avg_precision
+
+    # Apply sigmoid to smooth-saturate the weighting
+    scaled = sigmoid(relative_precision, midpoint=1.0, steepness=steepness)
+    return scaled
+
+# scale state weights nicely
+Average_Precisions = pd.read_csv("State_Polling_Average_Precisions.csv")
+Scaled_Precisions =  compute_effective_state_weights(Average_Precisions['Mean_precision'], steepness=2.0)
+Average_Precisions.loc[:,"Scaled_Precisions"] = Scaled_Precisions
+Average_Precisions.set_index('Year').to_csv("State_Polling_Scaled_Precisions.csv", index = True)
+#import pdb;pdb.set_trace()
+
+
+
+
+def simulate_Polling_Fundamentals_model(n_samples, election_year, df_t = 0, v = 1, s = 0.1):
 
     dist = "Normal" if df_t == 0 else "t"
-    print(dist)
+    #print(dist)
     Volatility_cat = pd.read_csv(f"Volatility_weights_df_{election_year}.csv", index_col= None)
-    Volatility_index = {}
 
     weights_idx_dict = defaultdict(list)
     for idx, scale in enumerate(Volatility_cat['Volatility_weights']):
@@ -294,11 +329,11 @@ def simulate_Polling_Fundamentals_model(n_samples, election_year, df_t = 0, v = 
     Electorate_Residuals_cov = pd.read_csv(f"ElectorateResidualALRCovariance{election_year}.csv", index_col=0) 
 
     Scaled_covs = {}
-    category_weights = {0:0.95, 1:1.25,2:1.5,3:2}
+    category_weights = {0:0.95, 1:1.25,2:1.5,3:4}
 
     OTH_index = -1
     for cat, weight in category_weights.items():
-        scaling = 1 + (weight-1) * v if (weight > 1) else weight # proper variability of Others
+        scaling = (1 + (weight-1) * v) if (weight > 1) else (1 - (1-weight)*v) # proper variability of Others
         
         # Adjust the OTH variance and covariances
         cov_adj = Electorate_Residuals_cov.values.copy()
@@ -318,6 +353,7 @@ def simulate_Polling_Fundamentals_model(n_samples, election_year, df_t = 0, v = 
                 cov_adj[i, OTH_index] = cov_adj[OTH_index, i]  # keep symmetry
         
         Scaled_covs[cat] = cov_adj
+        #import pdb;pdb.set_trace()
 
 
     #Electorate_Residuals_Simulated_error = np.random.multivariate_normal(mean = np.zeros(len(Electorate_Residuals_cov)), cov = Electorate_Residuals_cov.values, size=n_samples*NO_OF_ELECTORATES[election_year])
@@ -550,11 +586,11 @@ def simulate_Polling_Fundamentals_model(n_samples, election_year, df_t = 0, v = 
         Electorate_residuals_covMs = {}
         for year_to_remove in ['2016','2019','2022','2025']:
             Electorate_residuals_covMs[year_to_remove] = test_variability_of_Electorate_Residuals(new_vote_totals_states, year_to_remove)
-            import pdb;pdb.set_trace()
+            #import pdb;pdb.set_trace()
 
             Electorate_residuals_covMs[year_to_remove].to_csv(f"ElectorateResidualALRCovariance{year_to_remove}.csv", index = True)
 
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
 
     #print(National_prior)
 
@@ -566,7 +602,7 @@ def simulate_Polling_Fundamentals_model(n_samples, election_year, df_t = 0, v = 
     day_80_polling_avg_dict = {'2016': pd.DataFrame([[0.412262, 0.351972, 0.105693, 0.130074]], columns = ['COAL','ALP','GRN','OTH']), \
                         '2019':pd.DataFrame([[0.384782, 0.36451, 0.095751, 0.035, 0.031, 0.088957]], columns = ['COAL','ALP','GRN','ON','UAPP','OTH']), \
                         '2022':pd.DataFrame([[0.355905, 0.362643, 0.118432, 0.0383,0.0244,0.10032,]], columns = ['COAL','ALP','GRN','ON','UAPP','OTH']), \
-                        '2025':pd.DataFrame([[0.34757, 0.312214, 0.125763, 0.07127, 0.011843, 0.131341]], columns = ['COAL','ALP','GRN','ON','UAPP','OTH'])}
+                        '2025':pd.DataFrame([[0.34757, 0.312214, 0.125763, 0.07127, 0.011843, 0.131341]], columns = ['COAL','ALP','GRN','ON','TOP','OTH'])}
 
     
     state_poll_dev_alr = pd.read_csv("State_Polling_Deviations_from_National.csv", index_col=None)
@@ -580,6 +616,12 @@ def simulate_Polling_Fundamentals_model(n_samples, election_year, df_t = 0, v = 
 
 
     day_80_polling_avg = day_80_polling_avg_dict[election_year]/ day_80_polling_avg_dict[election_year].sum(axis=1)[0]
+
+        
+
+
+
+
 
 
 
@@ -600,16 +642,34 @@ def simulate_Polling_Fundamentals_model(n_samples, election_year, df_t = 0, v = 
 
 
 
-
-
     Prior_estimates_alr =  np.log(Prior_estimates_df.drop(columns=[ref_col]).div(Prior_estimates_df[ref_col], axis=0))
     Prior_estimates_alr_expanded = np.tile(Prior_estimates_alr.to_numpy(), (n_samples, 1, 1))
 
     # get State deviations into a (10000, 8, 5) array
     State_polling_deviation_alr = State_Polls_Deviations_from_National_df_dict[election_year].set_index('State')
-    if election_year in ['2019','2022','2025']:
+    if election_year in ['2019','2022']:
         State_polling_deviation_alr.loc[:,'UAPP'] = 0.0 # add 0 deviation from National if no state polling!
         State_polling_deviation_alr = State_polling_deviation_alr[['ALP','GRN','ON','UAPP','OTH']]
+    elif election_year == '2025':
+        State_polling_deviation_alr.loc[:,'TOP'] = 0.0 # add 0 deviation from National if no state polling!
+        State_polling_deviation_alr = State_polling_deviation_alr[['ALP','GRN','ON','TOP','OTH']]
+
+    # scale the state polling deviations, based on relative polling precision (sample size etc.)
+    Scaled_precisions_curr = pd.read_csv("State_Polling_Scaled_Precisions.csv", index_col = 0).loc[int(election_year)]
+    relative_state_precisions = Scaled_precisions_curr.set_index('Scope', drop = True).drop('Mean_precision', axis = 1)
+    #relative_state_precisions = relative_state_precisions['Scaled_Precisions']/relative_state_precisions['Scaled_Precisions'].mean()
+
+    #import pdb;pdb.set_trace()
+    
+    State_polling_deviation_alr = State_polling_deviation_alr.mul(s*relative_state_precisions.values, axis = 0) # now scaled based on state precision
+
+    s_i = s * relative_state_precisions
+
+    print("s_i", v, s)
+
+    #import pdb;pdb.set_trace()
+
+
     State_polling_deviation_alr_matrix = State_polling_deviation_alr.values  # Convert to numpy array for easy broadcasting
     State_polling_deviation_alr_matrix = np.expand_dims(State_polling_deviation_alr_matrix, axis=0)  # Add an extra dimension for broadcasting
     State_polling_deviation_alr_matrix_expanded = np.repeat(State_polling_deviation_alr_matrix, n_samples, axis=0)  
@@ -622,9 +682,34 @@ def simulate_Polling_Fundamentals_model(n_samples, election_year, df_t = 0, v = 
 
     # apply State Polling error
     Simulated_state_polling_deviation = State_polling_deviation_alr_matrix_expanded + State_Simulated_polling_error_centered_expanded
-    Simulated_State_Polling_Results = Simulated_national_result_alr + Simulated_state_polling_deviation
 
-    Projected_Electorate_Results = Prior_estimates_alr_expanded + (Simulated_State_Polling_Results - State_prior_expanded)
+    # weight State Polling, relative to National: use linear combination of last year's 
+    #import pdb;pdb.set_trace()
+    
+    #state_weights = s * Year_state_polling_weights.loc[int(election_year)].iloc[0]
+
+    # get 1 - s_i per state
+
+    Scaled_national_polling_deviations = (National_prior_alr.values - State_prior_alr).mul(1-s_i.values, axis = 0)
+    Scaled_national_polling_deviations.index = Scaled_national_polling_deviations.index.map(state_to_index)
+    seat_state_alr = Scaled_national_polling_deviations.iloc[division_state_indices]
+    Scaled_national_polling_deviations_expanded = np.broadcast_to(seat_state_alr, (n_samples, NO_OF_ELECTORATES[election_year], DIM_OF_COV_MATRIX[election_year])).copy()
+    
+    #Scaled_national_polling_deviations_array = np.expand_dims(Scaled_national_polling_deviations, axis=0)  # Add an extra dimension for broadcasting
+    #Scaled_national_polling_deviations_expanded = np.repeat(Scaled_national_polling_deviations_array, n_samples, axis=0)  
+    #Scaled_national_polling_deviations_expanded = Scaled_national_polling_deviations_expanded[np.arange(n_samples)[:, None], division_state_indices[None, :], :]
+
+
+    Combined_state_mean = polling_alr.values + Scaled_national_polling_deviations_expanded + State_polling_deviation_alr_matrix_expanded # already scaled!
+    Combined_state_errors = National_Simulated_polling_error_expanded + State_Simulated_polling_error_centered_expanded
+
+    Simulated_State_Weighted_Polling_Results = Combined_state_mean + Combined_state_errors
+
+    #Simulated_State_Polling_Results = Simulated_national_result_alr + (1 - state_weights) * (National_prior_alr.values - State_prior_expanded) + (state_weights) * Simulated_state_polling_deviation
+
+
+
+    Projected_Electorate_Results = Prior_estimates_alr_expanded + (Simulated_State_Weighted_Polling_Results - State_prior_expanded)
 
     Simulated_Electorate_Polling_Results_ALR = Projected_Electorate_Results + Electorate_Residuals_Simulated_error_centered
 
@@ -728,6 +813,9 @@ def simulate_Polling_Fundamentals_model(n_samples, election_year, df_t = 0, v = 
 
 
 def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, Results_dict, election_year, alpha_scalar=100):
+
+    LP_NP_VOLATILITY_FACTOR = 2
+
     final_sim = {}
     party_name_dict = {}
     NUM_MAIN_PARTIES = DIM_OF_COV_MATRIX[election_year]
@@ -820,7 +908,7 @@ def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, Results_dict, 
             else:
                 NP_est = NP_ratios_curr.loc[NP_ratios_curr['div_nm']==div,'final_estimate'].iloc[0]
 
-            alpha = np.array([1-NP_est,NP_est]) * alpha_scalar
+            alpha = np.array([1-NP_est,NP_est]) * alpha_scalar/LP_NP_VOLATILITY_FACTOR
             splits = np.random.dirichlet(alpha, size=sim.shape[0])
             LP_NP_votes = splits * COAL_votes[:, None]
 
@@ -865,7 +953,7 @@ def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, Results_dict, 
                     # mix between C200 and last split! - or ignore? TBD
 
 
-                splits = np.random.dirichlet(means_array, size=sim.shape[0])
+                splits = np.random.dirichlet(means_array* alpha_scalar, size=sim.shape[0])
                 All_IND_votes = splits * IND_votes[:, None]
 
                 combined = np.concatenate([combined, All_IND_votes], axis=1)
@@ -954,10 +1042,10 @@ def perform_validation_testing(n_samples, coverage_level, coverage_weight = 5):
 
 
 
-    weights = np.linspace(0, 1, 21) # np.array([0.4,0.6])#
-    alphas = np.logspace(1, 3, 5) # np.array([100,1000])#
-    df_ts = np.array([3,5,10,20,0]) # 0 --> normal! np.array([5,0])#
-    vs = np.linspace(0, 2, 11) #np.array([0.25,0.5])#
+    weights = np.array([0.4,0.6])#np.linspace(0, 1, 21)
+    alphas = np.array([100,1000])#np.logspace(1, 3, 5)
+    df_ts = np.array([5,0])#np.array([2.5,3,5,10,20,0]) # 0 --> normal!
+    vs = np.array([0.25,0.5])#np.linspace(0, 2, 11)
 
 
 
@@ -1062,6 +1150,148 @@ def perform_validation_testing(n_samples, coverage_level, coverage_weight = 5):
 
 
 
+
+
+def worker(job):
+
+    coverage_weight = 5
+    
+    weights = np.linspace(0, 1, 21) # np.array([0.4,0.6])# np.linspace(0, 1, 21) # 
+    alphas = np.linspace(20,60, 9) # np.array([100,1000])# 
+   
+
+    elections = ['2016','2019','2022']
+    heldout, s, v = job
+    train_elections = [e for e in elections if e != heldout]
+
+    Polling_simulations_dict = {}
+    Election_swing_simulations_dict = {}
+
+    Prior_estimates_dict_per_election = {}
+    Results_dict_per_election = {}
+
+    for election_year in train_elections:
+        polling, swing = simulate_Polling_Fundamentals_model(n_samples, election_year, s = s, v=v)
+        Polling_simulations_dict[election_year] = polling
+        Election_swing_simulations_dict[election_year] = swing
+
+        Prior_estimates_dict_per_election[election_year] = get_Prior_estimates_df(election_year, dont_add_ON = True)[1] # single row df for each div_nm
+        Results_dict_per_election[election_year] = get_results_df(election_year, to_Fundamentals=False)[1]
+
+    results = []
+
+    for w in weights:
+        n_polling_samples = int(w * n_samples)
+        indices_poll = np.random.choice(n_samples, n_polling_samples, replace=False)
+        indices_fund = np.random.choice(n_samples, n_samples - n_polling_samples, replace=False)
+
+        for alpha in alphas:
+            val_scores = []
+            #print("weight = ", w, "alpha = ", alpha, "s =", s, "v = ", v, "heldout = ", heldout)
+            for election_year in train_elections:
+                combined_samples = np.concatenate(
+                    (
+                        Polling_simulations_dict[election_year][indices_poll],
+                        Election_swing_simulations_dict[election_year][indices_fund]
+                    ),
+                    axis=0
+                )
+                mae, coverage = mae, coverage = get_election_MAE(combined_samples, Prior_estimates_dict_per_election[election_year], Results_dict_per_election[election_year], election_year, coverage_level, alpha)
+                            
+                penalty = max(0, coverage_level - coverage)
+                val_score = mae + coverage_weight * penalty
+
+                val_scores.append(val_score)
+
+            avg_score = np.mean(val_scores)
+
+            results.append((s, v, w, alpha, avg_score))
+
+    return results
+
+
+def parallelise_validation_simulation(coverage_level, coverage_weight):
+    elections = ['2016','2019','2022']
+    s_s = np.linspace(0,0,1) # np.array([5,0])#  0 --> normal! 
+    vs = np.linspace(0.05, 0.5, 10) # np.array([0.25,0.5])# 
+
+    jobs = list(product(elections, s_s, vs))
+
+    with ProcessPoolExecutor(max_workers=24) as executor:
+        results_nested = list(tqdm(executor.map(worker, jobs), total=len(jobs), desc="Processing jobs"))
+
+
+    # Flatten the nested list of results into a single list
+    results_flat = []
+
+    for i, results in enumerate(results_nested):
+        heldout = jobs[i][0]  # Get the heldout value from jobs (index i)
+        if not isinstance(results, list):
+            print(f"[ERROR] Unexpected type at job {i}: {type(results)} - {results}")
+            continue
+
+        for result in results:
+            if len(result) != 5:
+                print(f"[ERROR] Malformed result at job {i}: {result}")
+                continue
+            s, v, w, alpha, avg_score = result
+            results_flat.append((heldout, s, v, w, alpha, avg_score))
+
+    # Create DataFrame
+    df_results = pd.DataFrame(results_flat, columns=['heldout', 's', 'v', 'w', 'alpha', 'avg_score'])
+
+    best_params = {}
+
+    for heldout in df_results['heldout'].unique():
+        df_heldout = df_results[df_results['heldout'] == heldout]
+        
+        # Get the row with minimum validation MAE
+        best_row = df_heldout.loc[df_heldout['avg_score'].idxmin()]
+
+        # Extract best params
+        best_s = best_row['s']
+        best_v = best_row['v']
+        best_w = best_row['w']
+        best_alpha = best_row['alpha']
+        best_val_score = best_row['avg_score']
+
+        best_params[heldout] = {
+            'w': best_w,
+            'alpha': best_alpha,
+            's': best_s,
+            'v': best_v ,
+            'val_score': best_val_score
+        }
+
+        Simulated_Electorate_Polling_Results, Simulated_Electorate_Swing_Results = simulate_Polling_Fundamentals_model(n_samples, heldout, s=best_s, v=best_v)
+
+        Prior_estimates_dict = get_Prior_estimates_df(heldout, dont_add_ON = True)[1] # single row df for each div_nm
+        Results_dict = get_results_df(heldout, to_Fundamentals=False)[1]
+
+        
+        # Now evaluate on heldout
+        n_polling_samples = int(best_w*n_samples)
+        indices_poll = np.random.choice(n_samples, n_polling_samples, replace=False)
+        indices_fund = np.random.choice(n_samples, n_samples - n_polling_samples, replace=False)
+        combined_samples = np.concatenate((Simulated_Electorate_Polling_Results[indices_poll],  Simulated_Electorate_Swing_Results[indices_fund]), axis=0)
+
+        heldout_mae, heldout_coverage = get_election_MAE(combined_samples, Prior_estimates_dict, Results_dict, heldout, coverage_level, best_alpha)
+        best_params[heldout]['test_mae'] = heldout_mae
+        best_params[heldout]['test_coverage'] = heldout_coverage
+
+    import pdb;pdb.set_trace()
+
+
+    return best_params
+
+
+
+
+
+
+
+
+
 def get_topn_sets_per_electorate(data_dict, n = 2, threshold=0.15):
     result = {}
 
@@ -1094,28 +1324,33 @@ def index_tuples_to_candidate_names(topn_by_div, colnames_by_div):
     return result
 
 
+
 Method = 'Validation' # 'Validation'
 coverage_level = 0.95
+
     
 if Method == 'Validation':
     validation = {}
-    for coverage_weight in [2,3,5,10]:
-        best_params = perform_validation_testing(n_samples, coverage_level, coverage_weight)
-        validation[coverage_weight] = best_params
-        print(best_params)
-        print(time.time() - start_time)
+    #for coverage_weight in [2,3,5,10]:
+    best_params = parallelise_validation_simulation(coverage_level, 5)
+    #validation[coverage_weight] = best_params
+    print(best_params)
+    print(time.time() - start_time)
     import pdb;pdb.set_trace()
 
 elif Method =='Simulation':
 
     w = 0.8
     alpha = 30
-    df_t = 0
-    v = 0.1
+    v = 0.30
 
-    election_year = '2025'
+    election_year = '2016'
 
-    Simulated_Electorate_Polling_Results, Simulated_Electorate_Swing_Results = simulate_Polling_Fundamentals_model(n_samples, election_year, v = 0.1)
+    Simulated_Electorate_Polling_Results, Simulated_Electorate_Swing_Results = simulate_Polling_Fundamentals_model(n_samples, election_year, v = v)
+
+    import pdb;pdb.set_trace()
+
+    import pdb;pdb.set_trace()
 
     print(f"Done {n_samples*2}simulation processing:", time.time() - start_time, "seconds")
 
@@ -1157,7 +1392,7 @@ elif Method =='Simulation':
 
 
 
-    indices = np.random.permutation(10000)
+    indices = np.random.permutation(n_samples)
 
 
     Weighted_Simulations = np.concatenate((Simulated_Electorate_Polling_Results[indices[:int(w*n_samples)]],  Simulated_Electorate_Swing_Results[indices[int(w*n_samples):]]), axis=0)
@@ -1178,8 +1413,37 @@ elif Method =='Simulation':
     )
 
     import pandas as pd
-import numpy as np
-import os
+
+
+def redistribute():
+    top2_idx = np.argsort(sim_votes, axis=1)[:, -2:]
+    top2_names = np.sort(np.array(party_names)[top2_idx])
+
+    top2_votes = np.take_along_axis(sim_votes, top2_idx, axis=1).astype(float)
+
+    for i, party in enumerate(party_names):
+        if party in top2_names:  # skip if party is a top 2 in any sim
+            continue
+        if party not in prefs:
+            continue
+
+    for (p1, p2), share_p1 in prefs[party].items():
+        pair = tuple(sorted([p1, p2]))
+        match_mask = np.all(top2_names == pair, axis=1)
+
+    winner_idx = np.argmax(top2_votes, axis=1)
+    winners = top2_names[np.arange(n_sim), winner_idx]
+
+    unique, counts = np.unique(winners, return_counts=True)
+    proportions = dict(zip(unique, counts / n_sim))
+
+    return proportions
+
+
+
+
+
+
 
 
 def export_simulations_to_csv(sim_dict, Results_dict, output_dir="2025_Election_FP_Practice"):
@@ -1206,12 +1470,12 @@ def export_simulations_to_csv(sim_dict, Results_dict, output_dir="2025_Election_
 
 
 
-
+export_simulations_to_csv(final_simulated_votes, Results_dict, output_dir="2025_Election_FP_Practice")
 
 
 import pdb;pdb.set_trace()
 
-export_simulations_to_csv(final_simulated_votes, Results_dict, output_dir="2025_Election_FP_Practice")
+
 
 
 

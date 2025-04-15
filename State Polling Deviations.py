@@ -33,10 +33,10 @@ os.chdir(base_dir)
 
 
 
-Type = 'Election_swing' # 'Election_swing' 'Polling'
+Type = 'Polling' # 'Election_swing' 'Polling'
 ref_col = 'COAL'
 
-remove_election_year = 1
+remove_election_year = 0
 
 
 
@@ -212,7 +212,7 @@ if Type == 'Election_swing':
 
         import pdb;pdb.set_trace()
 
-        curr_year_Election_swing_covM.to_csv(f'ElectionErrorALRCovarianceStateDeviation{curr_election_year}.csv', index = True)
+        #curr_year_Election_swing_covM.to_csv(f'ElectionErrorALRCovarianceStateDeviation{curr_election_year}.csv', index = True)
 
 
 
@@ -261,6 +261,13 @@ elif Type == 'Polling':
     National_result_ALR = State_Results_CAGO_ALR.loc[State_Results_CAGO_ALR['Scope']== 'NAT',].reset_index(drop=True)
     State_result_ALR = State_Results_CAGO_ALR.loc[State_Results_CAGO_ALR['Scope']!= 'NAT',].reset_index(drop=True)
 
+    print(National_poll_ALR.iloc[:,2:] - National_result_ALR.iloc[:,2:])
+
+    import pdb;pdb.set_trace()
+
+
+
+
 
     # get state - national, for each of Poll and results
     State_NAT_poll_merged = pd.merge(State_poll_ALR, National_poll_ALR, on='Year', how='left', suffixes=('','_Nat'))
@@ -274,7 +281,7 @@ elif Type == 'Polling':
 
     
 
-    #import pdb;pdb.set_trace()
+    import pdb;pdb.set_trace()
 
 
     # weights based on sample sizes of state polls:
@@ -332,6 +339,60 @@ elif Type == 'Polling':
         # convert precisions to ALR, using formula 1 / (prec_alp * mu_alp**2) + 1 / (prec_coal * mu_coal**2) - Delta Method approximation (for simplicity, use independence)
         precision_weights = vectorized_log_ratio_precision(means_df_curr, std_weights_array, ref_col='COAL', numerator_list=['ALP', 'GRN', 'OTH'], rho=0.0)
 
+        if curr_election_year == '2025':
+            Relative_state_polling_precision = State_NAT_poll_merged.iloc[:,:2].reset_index(drop=True)
+            Relative_state_polling_precision.loc[:,"Mean_precision"] = precision_weights.mean(axis = 1).values
+
+            # now, 2025 values:
+            State_stds_2025 = pd.read_csv("2025StatePollingWeightedAverage_rel_to_Nat.csv", index_col = None).iloc[:-1,]
+            State_stds_2025.loc[:,'Year'] = State_stds_2025['Election'].str.extract(r'(\d{4})')
+            State_stds_2025.loc[:,'Scope'] = State_stds_2025['Election'].str.extract(r'(\D+)$')[0]
+            #State_stds_2025.loc[:,'OTH'] = State_stds_2025.loc[:,'OTH'] + State_stds_2025.loc[:,'ON']
+            #State_stds_2025 = State_stds_2025.drop(['ON','ON_stds'], axis = 1)
+            std_weights_array_2025 = 1/State_stds_2025.iloc[:,-7:-2].to_numpy()
+
+            precision_weights_2025 = vectorized_log_ratio_precision(State_stds_2025.iloc[:,:5], std_weights_array_2025, ref_col='COAL', numerator_indices=[1,2,3,4], \
+                                                               numerator_list=['ALP', 'GRN', 'ON','OTH'], rho=0.0)
+            
+            State_stds_2025_states = State_stds_2025.iloc[:,-2:]
+            State_stds_2025_states.loc[:,"Mean_precision"] = precision_weights_2025.mean(axis=1).values
+
+            Average_precisions = pd.concat([Relative_state_polling_precision, State_stds_2025_states], ignore_index = True)
+            Average_precisions = Average_precisions.loc[~((Average_precisions['Year'] == '2016') & (Average_precisions['Scope'] == 'TAS')),]
+
+            # add other states
+            missing_states = ['TAS','NT','ACT']
+
+            for year in ['2016','2019','2022','2025']:
+                grouped_by_year  = Average_precisions.loc[Average_precisions['Year'] == year,]
+                grouped_by_year = grouped_by_year.loc[grouped_by_year['Scope'] != 'TAS',]
+                min_precision = grouped_by_year['Mean_precision'].min()
+                import pdb;pdb.set_trace()
+
+                for missing_state in missing_states:
+                    Average_precisions = pd.concat([Average_precisions,pd.DataFrame([[year, missing_state, min_precision / 2]], columns = ['Year', 'Scope',"Mean_precision"])])
+
+
+            Average_precisions = Average_precisions.sort_values(by = ['Year','Scope']).reset_index(drop=True)
+
+            Average_precisions.to_csv("State_Polling_Average_Precisions.csv", index = False)
+
+            Precisions_by_year = Average_precisions.groupby('Year')['Mean_precision'].agg('mean')/Average_precisions.groupby('Year')['Mean_precision'].agg('mean').sum()
+            Precisions_by_year_weighting = ((Precisions_by_year/0.25)**1.5).to_frame() # divide by mean, intermediate of linear and quadratic
+
+            Precisions_by_year_weighting.to_csv("State_Polling_Precisions_by_Year.csv", index = True)
+
+
+
+            import pdb;pdb.set_trace()
+
+
+            
+            
+
+
+        import pdb;pdb.set_trace()
+
         # normalise weights
         observation_precision_weights = precision_weights.mean(axis=1).reset_index(drop=True)
         weight_sum = observation_precision_weights.sum()
@@ -360,9 +421,9 @@ elif Type == 'Polling':
             ON_var = ON_OTH_VAR_ratio_Polling[curr_election_year] * cov_curr.iloc[-1,-1]
             curr_year_Polling_swing_covM = extend_corr_matrix_to_5x5(corr_curr, ON_var, ON_var, cov_curr, ref_col)[1]
 
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
 
-        curr_year_Polling_swing_covM.to_csv(f'PollingErrorALRCovarianceStateDeviation{curr_election_year}.csv', index = True)
+        #curr_year_Polling_swing_covM.to_csv(f'PollingErrorALRCovarianceStateDeviation{curr_election_year}.csv', index = True)
 
 
 

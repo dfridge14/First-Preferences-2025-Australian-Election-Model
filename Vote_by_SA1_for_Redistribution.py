@@ -25,10 +25,10 @@ os.chdir(base_dir)
 census_years_for_data_years = {'2022':'2021','2019':'2016','2016':'2011','2013':'2011'}
 
 
-data_year = "2019"
+data_year = "2022"
 census_year = census_years_for_data_years[data_year]
 redistribution_type = 'New Candidates'
-ON_add = False
+ON_add = True
 
 div_nm = "Melbourne"
 

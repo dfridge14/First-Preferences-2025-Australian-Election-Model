@@ -59,7 +59,7 @@ final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007
 
 
 is_redistribution = 0
-data_year = '2022'
+data_year = '2016'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 
 new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner','Gorton']}
@@ -3760,6 +3760,7 @@ def incumbency_advantage_change(div, Elimination_order_dict, DOP_By_PP_Expand_wi
             lost_votes = expanded_votes.set_index("pp_id").multiply(expand_div.set_index("pp_id")).reset_index()
 
             if JULIA_BANKS:
+                import pdb;pdb.set_trace()
                 lost_votes.iloc[:,1:]*= JULIA_BANKS_INCUMBENCY_ADVANTAGE
 
             expanded_votes = expanded_votes.set_index("pp_id").subtract(lost_votes.set_index("pp_id")).reset_index()
@@ -3772,6 +3773,9 @@ def incumbency_advantage_change(div, Elimination_order_dict, DOP_By_PP_Expand_wi
 
     expanded_votes.loc[expanded_votes['pp_id'].isin(zero_rows_pp_ids), expanded_votes.columns[1:]] = 0.0 # return 0 columns to 0
     incumbency_change_adjusted_votes = expanded_votes.set_index('pp_id').clip(lower=0)
+
+    if JULIA_BANKS:
+        import pdb;pdb.set_trace()
 
     #import pdb;pdb.set_trace()
     incumbency_change_adjusted_votes = incumbency_change_adjusted_votes.div(incumbency_change_adjusted_votes.sum(axis=1), axis=0).mul(100)
@@ -3843,6 +3847,91 @@ def split_into_c2_dict(Div_parties_next_dict, map_new_seats_to_old_seats):
     return c2_dict, new_parties_dict
 
 
+
+def adjust_complex_contests(vote_df, div, is_latent_IND):
+
+    import pdb;pdb.set_trace()
+
+    #Complex_contests = ['Calare','Monash','Moore']
+
+
+    Historical_independent_proportions = pd.read_csv("Defecting_Incumbent_IND_proportions.csv", index_col = None).set_index('Election')
+
+    Last_election_correlation_matrix = pd.read_csv(f"Electorate_Correlation_Matrix_2022.csv", index_col = 0)
+
+    INCUMBENT_ADVANTAGES_COMPLEX = {'Calare': 6.288, 'Monash':7.6175,'Moore':2.8724} # calculated assuming they become 'OTH'
+    INCUMBENT_ADVANTAGES_Relative = {}
+
+    # Calare/Monash currently have C200 IND votes, Moore as well due to above processing. All have Incumbent advantage. 
+
+    # 1. electorate similarity to Kennedy/Flinders of the 3. 
+
+    INFORMAL_votes = vote_df['INFORMAL']
+
+    vote_df_working = vote_df.drop('INFORMAL', axis = 1)
+
+    vote_sums_by_PP = vote_df_working.sum(axis=1)
+
+    vote_df_working  = vote_df_working.div(vote_sums_by_PP, axis=0)
+
+    
+    weight_sum = 0
+    Defection_df_curr_list = []
+
+    for IND_div_whole in Historical_independent_proportions.index:
+        IND_div = IND_div_whole[:-4]
+        # weight by correlation matrix
+        similarity_weight = Last_election_correlation_matrix.loc[div, IND_div]
+        weight_sum += similarity_weight
+
+        Defection_df_curr_list.append(Historical_independent_proportions.loc[Historical_independent_proportions.index == IND_div_whole,] * similarity_weight)
+
+    Defection_df_curr_estimate = pd.concat(Defection_df_curr_list).sum() / weight_sum # calculates weighted average of defection proportions
+
+
+    
+
+    #to_donate = Incumbency_adjusted_FPs[div] * INCUMBENT_ADVANTAGES_COMPLEX[div] / 100 # normalised
+
+    #Incumbency_new_IND_adjusted_FPs[div] = Incumbency_adjusted_FPs[div].copy()
+    #Incumbency_new_IND_adjusted_FPs[div] = Incumbency_new_IND_adjusted_FPs[div] - to_donate
+
+    defection_party_df = pd.DataFrame(index=[div])
+
+    # 4. By electorate weighting, get new results - some of C200 IND will be swallowed.
+    import pdb;pdb.set_trace()
+    for p in vote_df_working.columns: # iterate in order of the columns
+        if p in ['COAL','NP','LP','COALLP','COALNP','LNP','CLP']:
+            defection_party_df.loc[:,p] = Defection_df_curr_estimate['COAL']
+        elif p == 'ALP':
+            defection_party_df.loc[:,p] = Defection_df_curr_estimate['ALP']
+        elif p == 'GRN':
+            defection_party_df.loc[:,p] = Defection_df_curr_estimate['GRN']
+        else:
+            defection_party_df.loc[:,p] = Defection_df_curr_estimate['Other']
+
+    # 2. Multiply these by proportions in defection_party_df
+
+    defection_votes  = vote_df_working * defection_party_df.iloc[0]
+
+    vote_df_working = vote_df_working - defection_votes # for non-IND
+
+    IND_name = [p for p in vote_df.columns if p.startswith('IND')][0]
+
+    vote_df_working.loc[:,IND_name] += defection_votes.sum(axis=1)
+
+
+    # return to vote shares from proportions
+    vote_df_working = vote_df_working.mul(vote_sums_by_PP / vote_df_working.sum(axis=1), axis=0)
+    vote_df_working.loc[:,'INFORMAL'] = INFORMAL_votes
+    vote_df = vote_df_working
+
+    import pdb;pdb.set_trace()
+
+    return vote_df
+
+
+
 def perform_Ideology_donation(Ideology_Donation_df, party_category_dict, First_Prefs_By_PP_Complete_Redistributed, new_parties_dict, c2_dict, new_seats_list, div_to_state_dict, map_new_seats_to_old_seats, next_year, Ideo_Categories, party_type = 'new'):
     # partitions keys of First_Prefs dict by new_div, applying new_party expansion through ad-hoc-weighted proportion estimation
 
@@ -3903,7 +3992,15 @@ def finalise_independent_vote_FP_pair(name_changes_year_dict, data_year, pair, F
     ordered_cols.append('INFORMAL')
     FP_pair_df = FP_pair_df[ordered_cols]
 
-    #import pdb;pdb.set_trace()
+    Complex_contests = ['Calare', 'Monash','Moore']
+
+
+    if (data_year == '2022') and (pair[1] in Complex_contests):
+        #import pdb;pdb.set_trace()
+
+        FP_pair_df = adjust_complex_contests(FP_pair_df, pair[1], is_latent_IND = 1)
+
+        #import pdb;pdb.set_trace()
 
     # round votes correctly; INFORMAL should already be last!
     FP_pair_df = transform_to_raw_votes(FP_pair_df, pair[0], name_changes_year_dict, data_year, IS_FINAL_TRANSFORMATION = True)
@@ -4043,8 +4140,6 @@ def adjust_IND_priors(Incumbency_adjusted_FPs, Incumbency_by_div, party_category
 
                     Final_votes.loc[:,'IND'] = defection_votes.sum(axis=1)
 
-                    if new_div == 'Bradfield':
-                        import pdb;pdb.set_trace()
 
                     Incumbency_new_IND_adjusted_FPs[div] = Final_votes # Full adjustment - later will combine with ideology-based estimate
 
@@ -4137,73 +4232,7 @@ def adjust_IND_priors(Incumbency_adjusted_FPs, Incumbency_by_div, party_category
 
                     # 4. Weight the 2 approximations, mix with 0.5
 
-                    Incumbency_new_IND_adjusted_FPs[div] = curr_FP_By_PP*(1 - MIXING_RATIO_FOR_IND_ASSOCIATION) + MIXING_RATIO_FOR_IND_ASSOCIATION * Final_votes
-
-
-
-    Complex_contests = ['Calare','Monash','Moore']
-
-
-    if data_year == '2022':
-        for div in Incumbency_adjusted_FPs:
-            if div in Complex_contests:
-                
-
-                Historical_independent_proportions = pd.read_csv("Defecting_Incumbent_IND_proportions.csv", index_col = None).set_index('Election')
-
-                # Calare/Monash currently have C200 IND votes, Moore as well due to above processing. All have Incumbent advantage. 
-
-                # 1. electorate similarity to Kennedy/Flinders of the 3. 
-
-                for new_div in Complex_contests:
-
-                    weight_sum = 0
-                    Defection_df_curr_list = []
-
-                    for IND_div_whole in Historical_independent_proportions.index:
-                        IND_div = IND_div_whole[:-4]
-                        # weight by correlation matrix
-                        similarity_weight = Last_election_correlation_matrix.loc[new_div, IND_div]
-                        weight_sum += similarity_weight
-
-                        Defection_df_curr_list.append(Historical_independent_proportions.loc[Historical_independent_proportions.index == IND_div_whole,] * similarity_weight)
-
-                    Defection_df_curr_estimate = pd.concat(Defection_df_curr_list).sum() / weight_sum # calculates weighted average of defection proportions
-                # 2. INC_advantage for the INDs -  take it proportionally form Others
-
-
-                #INCUMBENT_ADVANTAGES_COMPLEX = {'Calare': 6.288, 'Monash':7.6175,'Moore':2.8724} # calculated assuming they become 'OTH'
-
-                #to_donate = Incumbency_adjusted_FPs[div] * INCUMBENT_ADVANTAGES_COMPLEX[div] / 100 # normalised
-
-                #Incumbency_new_IND_adjusted_FPs[div] = Incumbency_adjusted_FPs[div].copy()
-                #Incumbency_new_IND_adjusted_FPs[div] = Incumbency_new_IND_adjusted_FPs[div] - to_donate
-
-                defection_party_df = pd.DataFrame(index=[div])
-
-                # 4. By electorate weighting, get new results - some of C200 IND will be swallowed.
-                import pdb;pdb.set_trace()
-                for p in Incumbency_adjusted_FPs[div].columns: # iterate in order of the columns
-                    if p in ['COAL','NP','LP','COALLP','COALNP','LNP','CLP']:
-                        defection_party_df.loc[:,p] = Defection_df_curr_estimate['COAL']
-                    elif p == 'ALP':
-                        defection_party_df.loc[:,p] = Defection_df_curr_estimate['ALP']
-                    elif p == 'GRN':
-                        defection_party_df.loc[:,p] = Defection_df_curr_estimate['GRN']
-                    else:
-                        defection_party_df.loc[:,p] = Defection_df_curr_estimate['Other']
-
-                # 2. Multiply these by proportions in defection_party_df
-
-                defection_votes  = Incumbency_new_IND_adjusted_FPs[div] * defection_party_df.iloc[0]
-
-                import pdb;pdb.set_trace()
-                Incumbency_new_IND_adjusted_FPs[div] = Incumbency_new_IND_adjusted_FPs[div] - defection_votes # for non-IND
-
-                IND_name = [p for p in Incumbency_new_IND_adjusted_FPs[div].columns if p.startswith('IND')][0]
-
-                Incumbency_new_IND_adjusted_FPs[div].loc[:,IND_name] += defection_votes.sum(axis=1)
-    
+                    Incumbency_new_IND_adjusted_FPs[div] = curr_FP_By_PP*(1 - MIXING_RATIO_FOR_IND_ASSOCIATION) + MIXING_RATIO_FOR_IND_ASSOCIATION * Final_votes    
 
 
     return Incumbency_new_IND_adjusted_FPs
@@ -4226,7 +4255,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
     candidate_change_redistribution = 0
     electorate_similarity = 0
     new_candidates_allocation = 1
-    ON_add = 0
+    ON_add = 1
 
     MIXING_RATIO_FOR_IND_ASSOCIATION = 0.5
 
@@ -4245,7 +4274,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
                                     '2025': {'Moncrieff':1,'Moore':2,'Berowra':2,'Forrest':1,'Sturt':1,'Gilmore':1,'Franklin':1,'Fremantle':1,'Fisher':1,'Grey':1,'Monash':2,'Lyne':1,'Farrer':1,'McPherson':1,'Deakin':1,'Bean':1,'Riverina':5,'Solomon':1,'Dickson':1,'Fairfax':1}
                                     }
     
-    Complex_contests = {'2025':['Calare','Monash','Moore']}
+    Complex_contests = ['Calare','Monash','Moore']
 
 
     if Incumbent_advantage:
@@ -4385,6 +4414,10 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
                 for div in Div_parties_next_dict.keys():
                     if 'ON' not in Div_parties_next_dict[div]:
                         Div_parties_next_dict[div].append('ON')
+                        
+                    if data_year == '2022':
+                        if 'TOP' not in Div_parties_next_dict[div]:
+                            Div_parties_next_dict[div].append('TOP')
                 
 
             if new_seats_list:
@@ -4471,7 +4504,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
                 IND_Initial_First_Prefs_By_PP_Complete_Redistributed[pair] = IND_Initial_First_Prefs_By_PP_Complete_Redistributed[pair].set_index('pp_id')
            
             #import pdb;pdb.set_trace()
-            # Next: apply new_divs - both non-IND and IND
+            # Next: apply new_cands - both non-IND and IND versions, to later combine
             Initial_First_Prefs_By_PP_Complete_Redistributed = perform_Ideology_donation(Ideology_Donation_df, party_category_dict, Initial_First_Prefs_By_PP_Complete_Redistributed, new_parties_dict, c2_dict, new_seats_list, div_to_state_dict, map_new_seats_to_old_seats, next_year, Ideo_Categories)
             IND_Initial_First_Prefs_By_PP_Complete_Redistributed = perform_Ideology_donation(Ideology_Donation_df, party_category_dict, IND_Initial_First_Prefs_By_PP_Complete_Redistributed, new_parties_dict, c2_dict, new_seats_list, div_to_state_dict, map_new_seats_to_old_seats, next_year, Ideo_Categories)
             #import pdb;pdb.set_trace()
@@ -4485,7 +4518,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
 
 
-            import pdb;pdb.set_trace()
+            #import pdb;pdb.set_trace()
             # get all IND-> IND non-redistribution divisions
             print('Independent Transition')
             IND_transition_required = []
@@ -4536,6 +4569,8 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
                 IND_FP_pair_df = IND_Transition_First_Prefs_By_PP_Complete_Redistributed[pair]
 
                 Transition_First_Prefs_By_PP_Complete_Redistributed[pair] = finalise_independent_vote_FP_pair(name_changes_year_dict, data_year, pair, FP_pair_df, IND_FP_pair_df)
+
+
                 
                 #import pdb;pdb.set_trace()
 
@@ -4587,15 +4622,19 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
             for pair in Added_new_IND_dict.keys():
                 # get the average of their values:
-                import pdb;pdb.set_trace()
+                #import pdb;pdb.set_trace()
                 totals = First_Prefs_By_PP_Complete_Redistributed[pair].iloc[:,:-1].sum(axis=1)
-                raw_new_IND_votes = Added_new_IND_dict[pair][pair[0]].mul(totals, axis = 0) / 100
+                raw_new_IND_votes = Added_new_IND_dict[pair][pair[1]].mul(totals, axis = 0) / 100
                 raw_new_IND_votes.loc[:,'INFORMAL'] = First_Prefs_By_PP_Complete_Redistributed[pair]['INFORMAL']
 
                 First_Prefs_By_PP_Complete_Redistributed[pair] = ((1-MIXING_RATIO_FOR_IND_ASSOCIATION) * First_Prefs_By_PP_Complete_Redistributed[pair] + MIXING_RATIO_FOR_IND_ASSOCIATION*raw_new_IND_votes)
 
 
             for pair in First_Prefs_By_PP_Complete_Redistributed.keys():
+
+                if (data_year == '2022') and (pair[1] in Complex_contests):
+                    First_Prefs_By_PP_Complete_Redistributed[pair] = adjust_complex_contests(First_Prefs_By_PP_Complete_Redistributed[pair], pair[1], is_latent_IND=False)
+
                 First_Prefs_By_PP_Complete_Redistributed[pair] = transform_to_raw_votes(First_Prefs_By_PP_Complete_Redistributed[pair], pair[0], name_changes_year_dict, data_year, IS_FINAL_TRANSFORMATION = True)
                 First_Prefs_By_PP_Complete_Redistributed[pair] = First_Prefs_By_PP_Complete_Redistributed[pair][(First_Prefs_By_PP_Complete_Redistributed[pair] != 0.0).any(axis=1)].reset_index()
 
