@@ -38,6 +38,7 @@ SAMPLE_ERROR_SCALING_FACTOR = 2
 
 
 num_polling_days = 100
+DAYS_TO_ELECTION = 10
 
 import arviz as az
 
@@ -269,7 +270,7 @@ if election_year == '2025':
 if election_year not in ['2016','2019','2022','2025']:
     Prior_estimates_df = pd.DataFrame(columns=['COAL','ALP','GRN','OTH'])
 
-day_of_interest = num_polling_days - 20
+day_of_interest = num_polling_days - DAYS_TO_ELECTION
 day_80_polling_avg =  pd.DataFrame([[0.0]*len(Prior_estimates_df.columns)], columns=Prior_estimates_df.columns)
 
 
@@ -279,6 +280,9 @@ sigma_drift_prior = {'COAL':0.004,'ALP':0.004,'GRN':0.002,'OTH':0.003,'ON':0.003
 
 
 for party in National_polls.columns[2:]:
+
+    if party == 'OTH':
+        continue
 
     # Step 1: Load Data (Placeholder, replace with actual data)
     df = National_polls[['Days since last election','Sample size',party]] # Columns: [Days since last election, Sample size, COAL, ALP, GRN, party_4,...,Other]
@@ -326,10 +330,10 @@ for party in National_polls.columns[2:]:
     with pm.Model() as model:
 
         init_dist = pm.Normal.dist(mu=prior_poll_avg, sigma=0.02)  # Adjust sigma based on uncertainty
-        #sigma = pm.TruncatedNormal("sigma", mu=0.005, sigma=0.003, lower=1e-5)  # Prior for daily drift of random walk
+        sigma = pm.TruncatedNormal("sigma", mu=0.005, sigma=sigma_drift_prior[party], lower=1e-5)  # Prior for daily drift of random walk
 
-        log_sigma = pm.Normal("log_sigma", mu=np.log(sigma_drift_prior[party]), sigma=1)
-        sigma = pm.Deterministic("sigma", pm.math.exp(log_sigma))
+        #log_sigma = pm.Normal("log_sigma", mu=np.log(sigma_drift_prior[party]), sigma=1)
+        #sigma = pm.Deterministic("sigma", pm.math.exp(log_sigma))
 
 
         # Latent vote share following a Gaussian random walk
@@ -345,17 +349,20 @@ for party in National_polls.columns[2:]:
     x_posterior = trace.posterior["vote_trend"].values
     x_mean = np.mean(x_posterior, axis=(0, 1))  # Mean vote share over time
     day_80_polling_avg[party] = x_mean[day_of_interest]
+    print(day_80_polling_avg)
 
     print(party, election_year, "estimated_sigma", az.summary(trace, var_names=["sigma"]))
 
     #plot_GRW(x_posterior, day_of_interest)
 
+
+
+
+# very important to ensure that Others is imputed off correct distribution of minor parties (for 2025 issues where ON/TOP are often blank!)
+day_80_polling_avg['OTH'] = 1 - day_80_polling_avg.sum(axis=1)[0]
+
 import pdb;pdb.set_trace()
 
-
-
-
-day_80_polling_avg = day_80_polling_avg/ day_80_polling_avg.sum(axis=1)[0]
 
 # get alr-swing of polls compared to prior
 ref_col = 'COAL'

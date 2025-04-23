@@ -28,6 +28,8 @@ Candidates_2025 = pd.read_csv("2025Candidates_By_Division.csv", index_col=None)
 Candidates_2025.groupby('div_nm')['PartyAb'].count()
 Candidates_2025.groupby('PartyAb')['div_nm'].count()
 
+import pdb;pdb.set_trace()
+
 
 dup_counts = Candidates_2025.groupby('div_nm')['PartyAb'].value_counts()
 
@@ -43,7 +45,7 @@ party_sets = Candidates_2025.groupby('div_nm')['PartyAb'].apply(set)
 # Filter to those containing both target parties
 divs_with_both = party_sets[party_sets.apply(lambda x: parties.issubset(x))].index.tolist()
 
-print(divs_with_both)
+#print(divs_with_both)
 
 election_year = '2025'
 
@@ -63,8 +65,39 @@ for election_year in ['2016','2019','2022','2025']:
 
     Volatility_Cats = Elec_order.merge(Volatility_curr, on = 'Electorate', how = 'left').fillna(0).rename(columns={'Volatility_Cat':'Volatility_weights'})
     Volatility_Cats['Volatility_weights'] = Volatility_Cats['Volatility_weights'].astype(int)
+    #import pdb;pdb.set_trace()
+    #Volatility_Cats.to_csv(f"Volatility_weights_df_{election_year}.csv", index = False)
+
+
+def swing_weight_exp_vectorized(O_series, beta=0.5, start=0.2, k=10):
+
+    O = O_series.values
+    weight = np.ones_like(O)
+
+    mask = O > start
+    decay = np.exp(-k * (O[mask] - start))
+    weight[mask] = (1 - beta) * decay + beta
+
+    return pd.Series(weight, index=O_series.index)
+
+
+# Now, weighing of swing uniformity for Other categories:
+for election_year in ['2016','2019','2022','2025']:
+
+    High_Others = pd.read_csv(f"High_Prior_OTH_Electorates_{election_year}.csv", index_col = 0)
+
+    beta,k = 0,10
+    # Compute the weights
+    others_weights = swing_weight_exp_vectorized(High_Others['OTH'], beta=beta, k=k)
+
+    # Combine into a DataFrame for inspection
+    weighted_df = pd.DataFrame({
+        "Others_vote": High_Others['OTH'],
+        "Swing_weight": others_weights
+    })
+
+    print(weighted_df)
     import pdb;pdb.set_trace()
-    Volatility_Cats.to_csv(f"Volatility_weights_df_{election_year}.csv", index = False)
 
 
 

@@ -27,10 +27,8 @@ census_years_for_data_years = {'2022':'2021','2019':'2016','2016':'2011','2013':
 
 data_year = "2022"
 census_year = census_years_for_data_years[data_year]
-redistribution_type = 'New Candidates'
-ON_add = True
-
-div_nm = "Melbourne"
+redistribution_type = 'redistribution' # 'New Candidates' #'redistribution'
+ON_add = False
 
 start = time.time()
 
@@ -291,6 +289,9 @@ def prepare_wide_dicts_for_MMHg(data_year, census_year, name_changes_year_dict, 
     if redistribution_type == 'omnipresent':
         Div_First_Prefs_By_PP_dict_wide = {div: group.drop('div_nm', axis=1) for div, group in df_3PP.groupby('div_nm')}
 
+    #if redistribution_type == 'redistribution':
+    #    Redist_Div_First_Prefs_By_PP_dict_wide = 0
+
 
     return Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, redistribution_divs_set, old_divs_set
 
@@ -507,9 +508,10 @@ def candidate_totals_rebalancing(SA1_vote_array, Booth_type_actual_vote_totals):
     overall_vote_total = sum(SA1_vote_totals)
 
     if np.round(overall_vote_total,2) != np.sum(Booth_type_actual_vote_totals):
+        print(np.round(overall_vote_total,2), np.sum(Booth_type_actual_vote_totals))
         import pdb;pdb.set_trace()
 
-        raise ValueError("Mine: SA1_vote_array's global vote totals don't match")
+        #raise ValueError("Mine: SA1_vote_array's global vote totals don't match")
 
     adj_weights = SA1_vote_totals / overall_vote_total # proportional to size of SA1
     difference_vector = Booth_type_actual_vote_totals - curr_cand_totals
@@ -564,7 +566,9 @@ def candidate_prior_simulation_weighted(div, mean, weight_Others, PP_coords, SA1
             weighted_array = curr_array * weights_PB[i,:][:, np.newaxis]
 
             if np.isnan(weighted_array).any():
-                import pdb;pdb.set_trace()
+                weighted_array = np.nan_to_num(weighted_array, nan=0)
+                #import pdb;pdb.set_trace()
+                print('replaced')
 
 
             Booth_type_result_array += weighted_array
@@ -616,7 +620,7 @@ def candidate_prior_simulation_weighted(div, mean, weight_Others, PP_coords, SA1
         return np.round(result_array,6)
     
     else:
-        K = FP_wide[div_nm][FP_wide[div_nm]['pp_id'] == 0].iloc[0, 1:].tolist()
+        K = FP_wide[div][FP_wide[div]['pp_id'] == 0].iloc[0, 1:].tolist()
         n = SA1_wide[SA1_wide['pp_id'] == 0].iloc[0, 1:].tolist()
         N = sum(K)
 
@@ -631,6 +635,7 @@ def candidate_prior_simulation_weighted(div, mean, weight_Others, PP_coords, SA1
 
 def SA1_candidate_prior_df_output(div, mean, to_weight, PP_coords, SA1_centroids, SA1_wide, FP_wide, census_year):
     ### gets array of SA1 vote using weighted algorithm, working with the mean if mean == 1 else using MMHg
+
 
     if to_weight:
         array = candidate_prior_simulation_weighted(div, mean, weight_Others=1, PP_coords=PP_coords, SA1_centroids=SA1_centroids, SA1_wide=SA1_wide,FP_wide=FP_wide, census_year=census_year)
@@ -691,17 +696,18 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
 
     # 2. 
     mean = 1
+    to_weight = 1
 
     for div in (old_divs_set - abolished_divs_dict[data_year]):
         print(div)
         if redistribution_type == 'redistribution':
-            Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Div_First_Prefs_By_PP_dict_wide[div], census_year)
+            Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, to_weight, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Div_First_Prefs_By_PP_dict_wide[div], census_year)
         elif redistribution_type == 'omnipresent':
-            Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Div_First_Prefs_By_PP_dict_wide[div], census_year)
+            Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, to_weight, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], Div_First_Prefs_By_PP_dict_wide[div], census_year)
         elif redistribution_type == 'New Candidates':
             # get the moving SA1s (from each old_div)
             curr_div_new_candidate_votes = Redist_Div_First_Prefs_By_PP_dict_wide[(div,div)]
-            Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], curr_div_new_candidate_votes, census_year)
+            Vote_by_SA1_df = SA1_candidate_prior_df_output(div, mean, to_weight, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[div], curr_div_new_candidate_votes, census_year)
 
         # subtract votes being given away from 2022 election results
         curr_div_SA1_list = SA1s_giver_div_dict[div].tolist()
@@ -725,7 +731,7 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
             if giver_div == receiver_div:
                 continue # want to process only redistirbutions!
 
-        Redist_Vote_by_SA1_df = SA1_candidate_prior_df_output(giver_div, mean, 0, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[giver_div], Redist_Div_First_Prefs_By_PP_dict_wide[div_pair], census_year)
+        Redist_Vote_by_SA1_df = SA1_candidate_prior_df_output(giver_div, mean, to_weight, PP_coords, SA1_centroids, Div_SA1_By_PP_dict_wide[giver_div], Redist_Div_First_Prefs_By_PP_dict_wide[div_pair], census_year)
 
         curr_SA1_list = redistribution_SA1s_dict[div_pair].tolist()
         SA1_totals_to_transfer = Redist_Vote_by_SA1_df.loc[Redist_Vote_by_SA1_df.index.isin(curr_SA1_list),].sum() # assumed SA1s are in the index!
@@ -801,6 +807,8 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
         for div in redistribution_divs_set:
 
             print(div)
+            if div in abolished_div_list:
+                continue
 
             First_Preferences = Electorate_total_FP_dict[div]
 
@@ -862,16 +870,201 @@ def perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_F
 
         import pdb;pdb.set_trace()
 
-        TCP_Redistributed = pd.DataFrame.from_dict(TCP_dict, orient='index').fillna(0)[['ALP','LP','NP','GRN','IND']]
-        TCP_Redistributed = TCP_Redistributed.sort_index()
+        TCP_Redistributed = pd.DataFrame.from_dict(TCP_dict, orient='index').fillna(0)[['ALP','LP','NP','CLP','GRN','IND']]
+        TCP_Redistributed = TCP_Redistributed.sort_index().rename(columns={'LP':'LIB','NP':'NAT'})
+
+        # format as 2-Column table!
+        
+        def extract_contest_info(row):
+            # Get the name of the electorate from the index
+
+            # Identify non-zero parties
+            non_zero_parties = [party for party in row.index if row[party] != 0]
+            non_zero_parties.sort()
+
+            # Skip rows that don't have exactly 2 non-zero entries
+            if len(non_zero_parties) != 2:
+                return None
+
+            p1, p2 = non_zero_parties
+
+            val1 = round(row[p1]*100, 1)
+            val2 = round(row[p2]*100, 1)
+
+            # Determine if it's an ALP vs COAL (LP or NP) contest
+            is_alp_vs_coal = (
+                ('ALP' in non_zero_parties) and
+                ('LIB' in non_zero_parties)
+            )
+
+            # Add comment only if not ALP vs COAL
+            comment = '' if is_alp_vs_coal else f'{p1} vs {p2}'
+
+            return pd.Series({
+                "ALP": val1,
+                "COAL": val2,
+                "Contest Comments": comment
+            })
+
+        # Apply the reorder_columns function to each row and update the DataFrame
+        TCP_table = TCP_Redistributed.apply(extract_contest_info, axis=1)
+
+        #import pdb;pdb.set_trace()
+
         #TCP_Redistributed.to_csv('PostRedistributionTPPMargins2024_InverseWeighted.csv')
 
 
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
 
-    return TCP_Redistributed
+    return TCP_table
 
 
 new_div_list = new_seats_year_dict[data_year]
 abolished_div_list = abolished_divs_dict[data_year]
-perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, old_divs_set, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, census_year, new_div_list, abolished_div_list, redistribution_type = redistribution_type, ON_add=ON_add)
+TCP_table = perform_redistribution_effects(Redist_Div_First_Prefs_By_PP_dict_wide, Div_First_Prefs_By_PP_dict_wide, Div_SA1_By_PP_dict_wide, old_divs_set, PP_coords, SA1_centroids, SA1s_giver_div_dict, redistribution_SA1s_dict, census_year, new_div_list, abolished_div_list, redistribution_type = redistribution_type, ON_add=ON_add)
+
+
+
+
+make_table = 1
+
+def style_contest_table_dynamic(df):
+    # Define base column colors
+
+    colour_map = {
+        'ALP': '#ffa6a6',
+        'COAL': '#c3d7ea',
+        'LIB': '#c3d7ea',
+        'GRN': '#84edab', 
+        'IND': '#918e8e', 
+        'NAT':  '#afd095', 
+        'CLP': '#ffb66c'
+    }
+
+    # Define row-wise color for "Contest Comments" based on party pairs
+    def highlight_by_parties(row):
+        styles = [''] * len(row)
+
+        # Default background for ALP and COAL columns
+        styles[1] = f'background-color: {colour_map.get("ALP", "#fdd")}'
+        styles[2] = f'background-color: {colour_map.get("COAL", "#ddf")}'
+
+        if row["Contest Comments"]:
+            try:
+                parties = row["Contest Comments"].split(" vs ")
+                parties.sort()  # Alphabetical
+
+                if len(parties) == 2:
+                    styles[1] = f'background-color: {colour_map.get(parties[0], "#eee")}'
+                    styles[2] = f'background-color: {colour_map.get(parties[1], "#eee")}'
+            except Exception:
+                pass
+        return styles
+
+    styled = (
+        df.style
+        .apply(highlight_by_parties, axis=1)
+        .format({'ALP': '{:.1f}', 'COAL': '{:.1f}'})
+        .hide(axis="index")  # This hides the index column (removes row numbering)
+        .set_table_attributes('class="sortable" style="border-collapse: collapse; table-layout: auto;"')
+        .set_properties(**{
+        'border': '1px solid #ccc',
+        'padding': '20px',
+        'font-family': 'Arial, sans-serif',  # Set a nicer font
+        'font-size': '14px'  # Increase the font size slightly
+        })
+        .set_table_styles([  # Notice the list here
+        {
+            'selector': 'th',
+            'props': [
+                ('font-family', 'Arial, sans-serif'),
+                ('font-size', '16px'),
+                ('font-weight', 'bold'),
+                ('text-align', 'center')
+            ]
+        }
+    ])
+    )
+
+    container_style = """
+    <html>
+    <head>
+        <style>
+            html, body {
+                margin: 0;
+                padding: 0;
+                overflow: visible;
+                font-family: Arial, sans-serif;
+            }
+            .table-container {
+                width: 100%;
+                display: flex;
+                justify-content: center;
+                padding: 20px;
+            }
+        </style>
+        <script>
+            window.addEventListener('load', function () {
+                window.parent.postMessage({ frameHeight: document.body.scrollHeight }, '*');
+            });
+            window.addEventListener('resize', function () {
+                window.parent.postMessage({ frameHeight: document.body.scrollHeight }, '*');
+            });
+        </script>
+    </head>
+    <body>
+        <div class="table-container">
+    """
+    html = styled.to_html()
+    sortable_script = """
+    <script>
+document.querySelectorAll('th').forEach(headerCell => {
+    headerCell.addEventListener('click', () => {
+        const table = headerCell.closest('table');
+        const tbody = table.querySelector('tbody'); // Get tbody (body rows only)
+        const rows = Array.from(tbody.rows); // Get all rows in tbody
+
+        const index = Array.prototype.indexOf.call(headerCell.parentElement.children, headerCell);
+        const ascending = !headerCell.classList.contains('asc');
+
+        // Clear arrows in all headers
+        table.querySelectorAll('th').forEach(th => {
+            th.innerHTML = th.innerHTML.replace(/ ↑| ↓/, '');
+        });
+
+        // Toggle sort direction
+        if (ascending) {
+            headerCell.innerHTML += ' ↑';
+        } else {
+            headerCell.innerHTML += ' ↓';
+        }
+
+        // Sort the rows based on the clicked column
+        rows.sort((a, b) => {
+            const aText = a.children[index].innerText;
+            const bText = b.children[index].innerText;
+            return ascending
+                ? aText.localeCompare(bText, undefined, { numeric: true })
+                : bText.localeCompare(aText, undefined, { numeric: true });
+        });
+
+        // Append sorted rows back to tbody
+        rows.forEach(row => tbody.appendChild(row));
+
+        // Manage the sorting direction classes
+        table.querySelectorAll('th').forEach(th => th.classList.remove('asc', 'desc'));
+        headerCell.classList.toggle('asc', ascending);
+        headerCell.classList.toggle('desc', !ascending);
+    });
+});
+</script>
+    """
+
+    return container_style + html + sortable_script
+
+
+if make_table:
+    TCP_table = TCP_table.reset_index().rename(columns={'index': 'Electorate'})
+    html = style_contest_table_dynamic(TCP_table)
+    with open("Redistribution_TCP.html", "w") as f:
+        f.write(html)

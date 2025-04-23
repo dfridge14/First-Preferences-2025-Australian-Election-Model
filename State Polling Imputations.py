@@ -31,6 +31,7 @@ base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else 
 os.chdir(base_dir)
 
 election_year = '2025'
+Day = 90
 
 
 # Get ALR values
@@ -192,7 +193,7 @@ if election_year != '2025':
 else:
 
 
-    StatePolling = pd.read_csv("2025StatePollingWeightedAverage_rel_to_Nat.csv", index_col=None)
+    StatePolling = pd.read_csv(f"2025StatePollingWeightedAverage_rel_to_Nat_Day_{Day}.csv", index_col=None)
 
     StatePolling.loc[:,'Election_year'] = StatePolling['Election'].str.extract(r'(\d{4})')[0]
     StatePolling.loc[:,'State'] = StatePolling['Election'].str.extract(r'\d{4}([A-Z]+)')[0]

@@ -36,6 +36,7 @@ ref_col = 'COAL'
 # manage removal of data point
 curr_election_year = '2025'
 remove_election_year = 1
+Day = 90
 
 
 
@@ -112,13 +113,12 @@ for curr_election_year in ['2016','2019','2022','2025']:
 
         if Type == 'Polling':
             # 1. Correlation estimate of 3x3 - 6 GRW 2007-2022 + 14 State Elections + 15 State Results
-
             
 
             FederalStatePolls = pd.read_csv("StatePollingWeightedAverage.csv", index_col = None).iloc[:,:5].set_index('Election')
             StateElectionsPolls = pd.read_csv("StateElectionsWeightedPollingAverage.csv", index_col = None).iloc[:,:5].set_index('Election')
             OldFederalElectionPollingAverage = pd.read_csv("OldFederalElectionPollingAverage.csv", index_col = None).iloc[:,:5].set_index('Election')
-            NationalElectionPollingAveragesGRW = pd.read_csv("NationalElectionPollingAveragesGRW.csv", index_col = None).set_index('Election')
+            NationalElectionPollingAveragesGRW = pd.read_csv(f"NationalElectionPollingAveragesGRW_Day_{Day}.csv", index_col = None).set_index('Election')
 
 
             FederalStateResults =  pd.read_csv("StateFederalResults.csv", index_col = None).set_index('Election')
@@ -333,21 +333,21 @@ for curr_election_year in ['2016','2019','2022','2025']:
                 if curr_election_year == '2016':
                     CAGO_Polling_2016_corr, CAGO_Polling_2016_cov = corr_matrix,cov_matrix
                     CAGO_Polling_2016_cov = pd.DataFrame(CAGO_Polling_2016_cov, index = CAGO_cols, columns = CAGO_cols)
-                    CAGO_Polling_2016_cov.to_csv("PollingErrorALRCovarianceNational2016.csv", index = True)
+                    CAGO_Polling_2016_cov.to_csv(f"PollingErrorALRCovarianceNational2016_Day_{Day}.csv", index = True)
 
                 elif curr_election_year == '2019':
                     CAGO_Polling_2019_corr, CAGO_Polling_2019_cov = extend_corr_matrix_to_5x5(corr_matrix, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
-                    CAGO_Polling_2019_cov.to_csv("PollingErrorALRCovarianceNational2019.csv", index = True)
+                    CAGO_Polling_2019_cov.to_csv(f"PollingErrorALRCovarianceNational2019_Day_{Day}.csv", index = True)
 
 
                 elif curr_election_year == '2022':
                     CAGO_Polling_2022_corr, CAGO_Polling_2022_cov = extend_corr_matrix_to_5x5(corr_matrix, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
-                    CAGO_Polling_2022_cov.to_csv("PollingErrorALRCovarianceNational2022.csv", index = True)
+                    CAGO_Polling_2022_cov.to_csv(f"PollingErrorALRCovarianceNational2022_Day_{Day}.csv", index = True)
 
 
                 elif curr_election_year == '2025':
                     CAGO_Polling_2025_corr, CAGO_Polling_2025_cov = extend_corr_matrix_to_5x5(corr_matrix, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
-                    CAGO_Polling_2025_cov.to_csv("PollingErrorALRCovarianceNational2025.csv", index = True)
+                    CAGO_Polling_2025_cov.to_csv(f"PollingErrorALRCovarianceNational2025_Day_{Day}.csv", index = True)
 
             elif Type == 'Election_swing':
                 ON_UAPP_variances = Election_swing_ON_UAPP_ALR_variances[curr_election_year]

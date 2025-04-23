@@ -416,6 +416,8 @@ Reallocated_polls_ALR = np.log(Reallocated_polls.drop(columns=[ref_col]).div(Rea
 Prior_estimates_Reallocated_ALR = np.log(Prior_estimates_Reallocated.drop(columns=[ref_col]).div(Prior_estimates_Reallocated[ref_col], axis=0))
 
 Swing_ALR = Reallocated_polls_ALR - Prior_estimates_Reallocated_ALR.loc[Reallocated_polls_ALR.index]
+
+# remove ON_boosts where no ON finally
 import pdb;pdb.set_trace()
 
 
