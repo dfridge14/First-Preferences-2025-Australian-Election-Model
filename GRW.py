@@ -38,7 +38,7 @@ SAMPLE_ERROR_SCALING_FACTOR = 2
 
 
 num_polling_days = 100
-DAYS_TO_ELECTION = 10
+DAYS_TO_ELECTION = 2
 
 import arviz as az
 
@@ -284,6 +284,8 @@ for party in National_polls.columns[2:]:
     if party == 'OTH':
         continue
 
+    
+
     # Step 1: Load Data (Placeholder, replace with actual data)
     df = National_polls[['Days since last election','Sample size',party]] # Columns: [Days since last election, Sample size, COAL, ALP, GRN, party_4,...,Other]
 
@@ -292,6 +294,8 @@ for party in National_polls.columns[2:]:
 
     if party == 'UAPP':
         prior_poll_avg = df.loc[df['Days since last election'] < starting_point,].iloc[:,2:].mean() if election_year == '2022' else 0.04 # for 2019
+    elif party == 'TOP':
+        prior_poll_avg = 0.015 # mix of 1% and 2%
     else:
         prior_poll_avg = df.loc[df['Days since last election'] < starting_point,].iloc[-10:,2:].mean()
 
@@ -327,6 +331,8 @@ for party in National_polls.columns[2:]:
 
 
 
+
+
     with pm.Model() as model:
 
         init_dist = pm.Normal.dist(mu=prior_poll_avg, sigma=0.02)  # Adjust sigma based on uncertainty
@@ -337,13 +343,13 @@ for party in National_polls.columns[2:]:
 
 
         # Latent vote share following a Gaussian random walk
-        vote_trend = pm.GaussianRandomWalk("vote_trend", sigma=sigma_drift_prior[party], shape=day_of_interest+1, init_dist=init_dist)
+        vote_trend = pm.GaussianRandomWalk("vote_trend", sigma=sigma, shape=day_of_interest+1, init_dist=init_dist)
 
         # Observed polls (Normal likelihood with poll-dependent variance)
         #poll_sd = pm.Deterministic("poll_sd", agg_polls["poll_sd"])
         observed = pm.Normal("observed", mu=vote_trend[agg_polls["Day_index"].values], sigma=SAMPLE_ERROR_SCALING_FACTOR*agg_polls["poll_sd"], observed=agg_polls["vote_share_weighted"])
 
-        trace = pm.sample(1000, tune=1000, chains=4, cores=4, target_accept=0.95)
+        trace = pm.sample(2000, tune=2000, chains=4, cores=4, target_accept=0.95)
 
 
     x_posterior = trace.posterior["vote_trend"].values

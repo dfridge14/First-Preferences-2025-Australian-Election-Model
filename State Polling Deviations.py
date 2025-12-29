@@ -263,7 +263,7 @@ elif Type == 'Polling':
 
     print(National_poll_ALR.iloc[:,2:] - National_result_ALR.iloc[:,2:])
 
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
 
 
@@ -367,7 +367,7 @@ elif Type == 'Polling':
                 grouped_by_year  = Average_precisions.loc[Average_precisions['Year'] == year,]
                 grouped_by_year = grouped_by_year.loc[grouped_by_year['Scope'] != 'TAS',]
                 min_precision = grouped_by_year['Mean_precision'].min()
-                import pdb;pdb.set_trace()
+                #import pdb;pdb.set_trace()
 
                 for missing_state in missing_states:
                     Average_precisions = pd.concat([Average_precisions,pd.DataFrame([[year, missing_state, min_precision / 2]], columns = ['Year', 'Scope',"Mean_precision"])])
@@ -379,19 +379,19 @@ elif Type == 'Polling':
 
             Precisions_by_year = Average_precisions.groupby('Year')['Mean_precision'].agg('mean')/Average_precisions.groupby('Year')['Mean_precision'].agg('mean').sum()
             Precisions_by_year_weighting = ((Precisions_by_year/0.25)**1.5).to_frame() # divide by mean, intermediate of linear and quadratic
-
+            import pdb;pdb.set_trace()
             Precisions_by_year_weighting.to_csv("State_Polling_Precisions_by_Year.csv", index = True)
 
 
 
-            import pdb;pdb.set_trace()
+            
 
 
             
             
 
 
-        import pdb;pdb.set_trace()
+        #import pdb;pdb.set_trace()
 
         # normalise weights
         observation_precision_weights = precision_weights.mean(axis=1).reset_index(drop=True)

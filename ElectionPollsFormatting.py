@@ -146,7 +146,7 @@ def parse_date_range(date_str):
 
 
 election_year = '2025'
-Polling_type = 'National' # National, Electorate, State Election, State
+Polling_type = 'State' # National, Electorate, State Election, State
 Day = 90
 
 last_election_date = {'2025': "21/05/22", '2022':"18/05/19", '2019':"02/07/16", '2016':"07/09/13", '2013':"21/08/10"}
@@ -496,7 +496,7 @@ elif Polling_type == 'State':
             State_polling_avg.loc[:,'Election'] = Election_name
             Election_result = state_polling.iloc[:1,4:]
             Election_result.loc[:,'Election'] = Election_name
-            #import pdb;pdb.set_trace()
+            import pdb;pdb.set_trace()
 
             State_polling_avg = pd.concat([State_polling_avg, avg_stds], axis = 1)
             

@@ -123,7 +123,7 @@ def get_Prior_estimates_df(election_year, dont_add_ON = False):
 
 def get_results_df(election_year, to_Fundamentals = True):
     Actual_results = pd.read_csv(f"{election_year}HouseDOPByDivision.csv", skiprows=1, index_col = None).rename(columns={'DivisionNm':'div_nm'})
-    # COUntNUmber ==0, Pref Percent & decide on format - long or wide? Will generate swings for each, so wide is best
+    # CountNUmber ==0, Pref Percent & decide on format - long or wide? Will generate swings for each, so wide is best
 
 
     # Need the following: dict of new_div: party_First_Pref_votes_in_alphabetical_order (separate INDXs and COALs)
@@ -180,7 +180,16 @@ def get_results_df(election_year, to_Fundamentals = True):
 
     #Fundamentals_results_df.index = election_year +  Fundamentals_results_df.index
 
+
     return Fundamentals_results_df, Actual_results_dict
+
+
+
+# test, get data for 2025!
+A, B = get_results_df('2025', to_Fundamentals = False)
+
+import pdb; pdb.set_trace()
+
 
 def remove_ON_back_to_its_country(Prior_estimates_df, election_year):
 
@@ -727,6 +736,7 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, df_t = 0, 
         day_z_polling_avg = day_z_polling_avg[['COAL','ALP','GRN','OTH']]
     elif election_year == '2025':
         day_z_polling_avg = day_z_polling_avg.rename(columns = {'UAPP':'TOP'})
+        #day_z_polling_avg.iloc[0,:] = 0.39,0.305,0.12,0.07,0.01,0.105
 
     #print(day_z_polling_avg)
 
@@ -1038,7 +1048,6 @@ def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, Results_dict, 
 
 
         if div in NP_ratios_curr['div_nm'].unique():
-            #import pdb;pdb.set_trace()
             COAL_votes = combined[:,0]
 
             if 'COALLP' in prior_row.columns:
@@ -1050,6 +1059,13 @@ def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, Results_dict, 
                 NP_est = (prior_row['NP'] /  prior_row[['LP','NP']].sum(axis=1)).iloc[0]
             else:
                 NP_est = NP_ratios_curr.loc[NP_ratios_curr['div_nm']==div,'final_estimate'].iloc[0]
+
+            # current hack for 2025 Nationals:
+            if (election_year == '2025') & (div in ['Bullwinkel','Forrest',"O'Connor"]):
+                #import pdb;pdb.set_trace()
+                NP_est = NP_ratios_curr.loc[NP_ratios_curr['div_nm']==div,'final_estimate'].iloc[0]
+
+
 
             alpha = np.array([1-NP_est,NP_est]) * alpha_scalar/LP_NP_VOLATILITY_FACTOR
             splits = np.random.dirichlet(alpha, size=sim.shape[0])
@@ -1136,6 +1152,8 @@ def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, Results_dict, 
         party_name_dict[div] = Ballot_order  # add names to avoid confusion in future!
 
     return final_sim, party_name_dict
+
+
 
 
 
@@ -1527,7 +1545,7 @@ def First_Preference_Model_Simulation(election_year, w, alpha, v, s, beta, n_sim
 
     return final_simulated_votes, Results_dict
 
-Method = 'Simulation' # 'Validation' 'Simulation'
+Method = None # 'Validation' 'Simulation'
 coverage_level = 0.95
 
 
@@ -1561,8 +1579,16 @@ if Method == 'Validation':
 elif Method =='Simulation':
 
     election_year = '2025'
+        
+    if election_year == '2022':
+        1
+        #w, alpha, s, v, beta =0.95,30,0.9,0.5,0.4
+    elif election_year == '2019':
+        w, alpha, s, v, beta = 0.9,20,0.65,0.2,0.6
 
-    final_simulated_votes, Results_dict =  First_Preference_Model_Simulation(election_year = '2025', w = w, alpha = alpha, v = v, s = s, beta = beta, n_simulations = n_simulations)
+    elif election_year == '2016':
+        w, alpha, s, v, beta = 0.85,20,0.7,0.05,0.8
+    final_simulated_votes, Results_dict =  First_Preference_Model_Simulation(election_year = election_year, w = w, alpha = alpha, v = v, s = s, beta = beta, n_simulations = n_simulations)
 
     
 
@@ -2315,7 +2341,7 @@ def make_TCP_pair_category_dict(election_year):
             result_dict[div].iloc[:,idx] = result_dict[div]['ON']
 
         # Macnamara - Josh Burns Open Preference in 2025
-        result_dict['Macnamara'].loc[[5],'ALP'] += 5
+        result_dict['Macnamara'].loc[[5],'ALP'] += 6.6
 
         #import pdb;pdb.set_trace()
 
@@ -2698,7 +2724,7 @@ def plot_calibration_curve(calibration_dict, title='Calibration Curve'):
 
 
 
-TPP_Method = 'None' # 'Validation' 'Simulation'
+TPP_Method = None # 'Validation' 'Simulation'
 
 if TPP_Method == 'Validation':
 
@@ -2784,15 +2810,15 @@ if TPP_Method == 'Validation':
     # Grid: [2:12]^2 : [{'heldout_year': '2016', 'best_sigma_ind': 1, 'best_sigma_joint': 1, 'test_obj_score': 0.4148815591389979, 'test_calibration': {(30, 40): 0.0, (40, 50): 0.0, (50, 60): 0.35714285714285715, (60, 70): 0.8421052631578947, (70, 80): 0.7272727272727273, (80, 90): 0.9473684210526315, (90, 95): 1.0, (95, 99): 0.9583333333333334, (99, 100): 1.0}}, {'heldout_year': '2019', 'best_sigma_ind': 1, 'best_sigma_joint': 1, 'test_obj_score': 0.2574570834361045, 'test_calibration': {(30, 40): nan, (40, 50): 0.0, (50, 60): 0.75, (60, 70): 0.7272727272727273, (70, 80): 0.7777777777777778, (80, 90): 0.8235294117647058, (90, 95): 1.0, (95, 99): 0.926829268292683, (99, 100): 1.0}}, {'heldout_year': '2022', 'best_sigma_ind': 1, 'best_sigma_joint': 1, 'test_obj_score': 0.26535128532321933, 'test_calibration': {(30, 40): nan, (40, 50): 0.0, (50, 60): 0.3333333333333333, (60, 70): 0.7692307692307693, (70, 80): 0.7142857142857143, (80, 90): 0.8518518518518519, (90, 95): 0.9444444444444444, (95, 99): 0.972972972972973, (99, 100): 1.0}}]
     # [{'heldout_year': '2016', 'best_sigma_ind': 0.5, 'best_sigma_joint': 6.5, 'test_obj_score': 0.0431912886651867, 'test_calibration': {(40, 60): 0.42857142857142855, (60, 70): 0.7894736842105263, (70, 80): 0.6956521739130435, (80, 90): 0.95, (90, 95): 1.0, (95, 99): 0.9642857142857143, (99, 100): 1.0}}, {'heldout_year': '2019', 'best_sigma_ind': 0.5, 'best_sigma_joint': 2.0, 'test_obj_score': 0.05617569509522556, 'test_calibration': {(40, 60): 0.7272727272727273, (60, 70): 0.7, (70, 80): 0.75, (80, 90): 0.8666666666666667, (90, 95): 0.9230769230769231, (95, 99): 0.9285714285714286, (99, 100): 1.0}}, {'heldout_year': '2022', 'best_sigma_ind': 0.5, 'best_sigma_joint': 6.0, 'test_obj_score': 0.020847464107653906, 'test_calibration': {(40, 60): 0.4166666666666667, (60, 70): 0.7272727272727273, (70, 80): 0.7142857142857143, (80, 90): 0.7692307692307693, (90, 95): 0.9333333333333333, (95, 99): 0.9761904761904762, (99, 100): 1.0}}]
     
-    # {'2016': {'w': 0.8500000000000001, 'alpha': 20.0, 's': 0.75, 'v': 0.1, 'beta': 0.8, 'val_score': 3.1886505715847515, 'test_mae': 3.4538902844200066, 'test_coverage': 0.9275653923541247}, '2019': {'w': 0.9, 'alpha': 20.0, 's': 0.75, 'v': 0.1, 'beta': 0.6000000000000001, 'val_score': 3.3291967680158114, 'test_mae': 3.2397858737616434, 'test_coverage': 0.9356060606060606}, '2022': {'w': 0.9, 'alpha': 20.0, 's': 0.8, 'v': 0.05, 'beta': 0.4, 'val_score': 3.3894457195184042, 'test_mae': 3.087975018296332, 'test_coverage': 0.9251870324189526}}
+    # Final: {'2016': {'w': 0.8500000000000001, 'alpha': 20.0, 's': 0.75, 'v': 0.1, 'beta': 0.8, 'val_score': 3.1886505715847515, 'test_mae': 3.4538902844200066, 'test_coverage': 0.9275653923541247}, '2019': {'w': 0.9, 'alpha': 20.0, 's': 0.75, 'v': 0.1, 'beta': 0.6000000000000001, 'val_score': 3.3291967680158114, 'test_mae': 3.2397858737616434, 'test_coverage': 0.9356060606060606}, '2022': {'w': 0.9, 'alpha': 20.0, 's': 0.8, 'v': 0.05, 'beta': 0.4, 'val_score': 3.3894457195184042, 'test_mae': 3.087975018296332, 'test_coverage': 0.9251870324189526}}
     import pdb;pdb.set_trace()
 
 elif TPP_Method == 'Simulation':
 
-    sigma_joint, sigma_ind = 4.2, 0.5
+    sigma_joint, sigma_ind = 3.5, 0.5 # 4.2, 0.5
 
 
-    election_year = '2025'
+    election_year = '2022'
 
     final_simulated_votes, Results_dict =  First_Preference_Model_Simulation(election_year, w, alpha, v, s, beta, n_simulations)
 
@@ -2820,71 +2846,82 @@ elif TPP_Method == 'Simulation':
 
 # for 2025:
 
-proportions_transferred_to_first = make_TCP_pair_category_dict(election_year = '2025')
+if TPP_Method:
+
+    election_year = '2025'
+
+    proportions_transferred_to_first = make_TCP_pair_category_dict(election_year = election_year)
 
 
-import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
-sigma_joint = 4.2
-sigma_ind = 0.5
-
-
-per_electorate_winners, per_simulation_winners = distribution_to_top_2(final_simulated_votes, proportions_transferred_to_first, Results_dict, party_to_category_centered_IND, sigma_joint, sigma_ind)
+    sigma_joint = 4.2 #4.2
+    sigma_ind = 0.5
 
 
-
-COAL_PARTIES = {"LNP", "LP", "NP", "CLP"}
-ALP_NAME = "ALP"
-IND_PARTIES = {'IND1','IND2','IND3','IND4','IND5'}
-
-# Initialize counters
-alp_majority_count = 0
-coal_majority_count = 0
-alp_lead_count = 0
-coal_lead_count = 0
-hung_count = 0
-
-alp_avg = 0
-coal_avg = 0
-grn_avg = 0
-ind_avg = 0
-
-# Loop over simulations
-for i, sim_results in enumerate(per_simulation_winners):
-    alp_seats = sum(1 for winner in sim_results if winner == ALP_NAME)
-    coal_seats = sum(1 for winner in sim_results if winner in COAL_PARTIES)
-    ind_seats = sum(1 for winner in sim_results if winner in IND_PARTIES)
-    grn_seats = sum(1 for winner in sim_results if winner == 'GRN')
-
-    alp_avg += alp_seats
-    coal_avg += coal_seats
-    grn_avg += grn_seats
-    ind_avg += ind_seats
-    
-    if alp_seats >= 76:
-        alp_majority_count += 1
-    elif coal_seats >= 76:
-        coal_majority_count += 1
-    elif alp_seats > coal_seats:
-        alp_lead_count += 1
-    elif coal_seats > alp_seats:
-        coal_lead_count += 1
-    else:
-        hung_count += 1
-
-    print(coal_seats, alp_seats)
+    per_electorate_winners, per_simulation_winners = distribution_to_top_2(final_simulated_votes, proportions_transferred_to_first, Results_dict, party_to_category_centered_IND, sigma_joint, sigma_ind)
 
 
-# Compute probabilities
-total_simulations = len(per_simulation_winners)
-alp_prob = alp_majority_count / total_simulations
-coal_prob = coal_majority_count / total_simulations
-alp_lead_prob = alp_lead_count / total_simulations
-coal_lead_prob = coal_lead_count / total_simulations
-hung_prob = hung_count / total_simulations
 
-print(f"ALP majority probability: {alp_prob:.3f}")
-print(f"COAL majority probability: {coal_prob:.3f}")
+    COAL_PARTIES = {"LNP", "LP", "NP", "CLP"}
+    ALP_NAME = "ALP"
+    IND_PARTIES = {'IND1','IND2','IND3','IND4','IND5'}
+
+    # Initialize counters
+    alp_majority_count = 0
+    coal_majority_count = 0
+    alp_lead_count = 0
+    coal_lead_count = 0
+    hung_count = 0
+
+    alp_avg = 0
+    coal_avg = 0
+    grn_avg = 0
+    ind_avg = 0
+
+    alp_seat_list = []
+    coal_seat_list = []
+
+
+    # Loop over simulations
+    for i, sim_results in enumerate(per_simulation_winners):
+        alp_seats = sum(1 for winner in sim_results if winner == ALP_NAME)
+        coal_seats = sum(1 for winner in sim_results if winner in COAL_PARTIES)
+        ind_seats = sum(1 for winner in sim_results if winner in IND_PARTIES)
+        grn_seats = sum(1 for winner in sim_results if winner == 'GRN')
+
+        coal_seat_list.append(coal_seats)
+        alp_seat_list.append(alp_seats)
+
+        alp_avg += alp_seats
+        coal_avg += coal_seats
+        grn_avg += grn_seats
+        ind_avg += ind_seats
+        
+        if alp_seats >= 76:
+            alp_majority_count += 1
+        elif coal_seats >= 76:
+            coal_majority_count += 1
+        elif alp_seats > coal_seats:
+            alp_lead_count += 1
+        elif coal_seats > alp_seats:
+            coal_lead_count += 1
+        else:
+            hung_count += 1
+
+        print(coal_seats, alp_seats)
+
+
+    # Compute probabilities
+    total_simulations = len(per_simulation_winners)
+    alp_prob = alp_majority_count / total_simulations
+    coal_prob = coal_majority_count / total_simulations
+    alp_lead_prob = alp_lead_count / total_simulations
+    coal_lead_prob = coal_lead_count / total_simulations
+    hung_prob = hung_count / total_simulations
+
+    print(f"ALP majority probability: {alp_prob:.3f}")
+    print(f"COAL majority probability: {coal_prob:.3f}")
 
 import pdb;pdb.set_trace()
 
@@ -2978,12 +3015,14 @@ def export_simulation_seat_counts(per_simulation_winners, output_csv="2025_Simul
 
     print(f"✅ Exported seat counts for {len(per_simulation_winners)} simulations to {output_csv}/")
 
+import pdb;pdb.set_trace()
 
+export = 0
 
-
-export_simulations_to_csv(final_simulated_votes, Results_dict, output_dir="2025_Election_FP_Practice")
-export_winner_proportions_to_csv(per_electorate_winners, output_dir="2025_Election_Winner_Proportions")
-export_simulation_seat_counts(per_simulation_winners, output_csv="2025_Simulated_seat_counts.csv")
+if export:
+    export_simulations_to_csv(final_simulated_votes, Results_dict, output_dir="2025_Election_FP_Practice")
+    export_winner_proportions_to_csv(per_electorate_winners, output_dir="2025_Election_Winner_Proportions")
+    export_simulation_seat_counts(per_simulation_winners, output_csv="2025_Simulated_seat_counts.csv")
 
 
 import pdb;pdb.set_trace()

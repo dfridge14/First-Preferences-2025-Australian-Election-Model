@@ -22,6 +22,7 @@ sys.excepthook = exception_handler
 
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
+from collections import defaultdict
 
 
 

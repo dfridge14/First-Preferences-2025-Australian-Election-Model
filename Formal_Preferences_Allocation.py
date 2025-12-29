@@ -59,7 +59,7 @@ final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007
 
 
 is_redistribution = 0
-data_year = '2013'
+data_year = '2022'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 
 new_seats_year_dict = {'2022': ['Bullwinkel'],'2019': ['Hawke'],'2016':['Bean','Fraser'],'2013':['Burt'],'2010':[],'2007':['Wright'],'2004':['Flynn'],'2001':['Bonner','Gorton']}
@@ -1673,7 +1673,8 @@ def get_incumbency_advantage(div, top_party_list, div_to_state_dict, party_categ
             NONINCUMBENT_DISADVANTAGE_dict[p] = average_disadvantage_list_normalised[i]
             i += 1
 
-
+    if div == 'Brisbane':
+        import pdb;pdb.set_trace()
     #import pdb;pdb.set_trace()
 
     return INCUMBENT_ADVANTAGE, NONINCUMBENT_DISADVANTAGE_dict
@@ -4766,7 +4767,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
 
 
-            to_csv = 1
+            to_csv = 0
             if to_csv and not ON_add:
                 output_folder = f"feather New Candidates for {next_year}"
                 os.makedirs(output_folder, exist_ok=True)
@@ -4795,6 +4796,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
                     
 
             import pdb;pdb.set_trace()
+    
 
 
     return Final_allocated_pcts_aggregated_dict, Final_x_HS_df if Incumbent_advantage else First_Prefs_By_PP_Complete_Allocated
