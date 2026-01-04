@@ -122,6 +122,10 @@ def get_Prior_estimates_df(election_year, dont_add_ON = False):
     return Prior_estimates_df, Prior_estimates_dict
 
 def get_results_df(election_year, to_Fundamentals = True):
+
+    # returns Actual_results_dict with results by party per division, and Fundamentals_results_df
+
+
     Actual_results = pd.read_csv(f"{election_year}HouseDOPByDivision.csv", skiprows=1, index_col = None).rename(columns={'DivisionNm':'div_nm'})
     # CountNUmber ==0, Pref Percent & decide on format - long or wide? Will generate swings for each, so wide is best
 
@@ -149,6 +153,7 @@ def get_results_df(election_year, to_Fundamentals = True):
         adjusted_party_names = div_results.apply(
             lambda row: f"{row['PartyAb']}{row['Count']}" if row['PartyAb'] == target else row['PartyAb'], axis=1
         ).reset_index(drop=True)
+
 
         if to_Fundamentals:
             # keep IND together
@@ -185,7 +190,7 @@ def get_results_df(election_year, to_Fundamentals = True):
 
 
 
-# test, get data for 2025!
+# Evaluation: get data for 2025 (disparity in party names:  TOP->CYA, FFP->FFPA, PFP->GRPF, LDP->LTP )
 A, B = get_results_df('2025', to_Fundamentals = False)
 
 import pdb; pdb.set_trace()
@@ -399,8 +404,6 @@ for election_year in election_years:
         )
         for beta_val in beta_list 
     }
-
-#import pdb;pdb.set_trace()
 
 
 
@@ -3044,6 +3047,9 @@ import pdb;pdb.set_trace()
 
 
 # Polling_estimates_from_National.to_csv(f"National_Polling_Estimates_{election_year}_Day_{day_of_interest}.csv", index=True)
+
+
+# compare true results with predicted averages
 
 
 

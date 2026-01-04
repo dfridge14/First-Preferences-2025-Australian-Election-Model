@@ -91,20 +91,12 @@ states_to_redistribute_dict = {'2022': ['NSW','VIC','WA','NT'],'2019': ['VIC','W
 
 
 
-# get state-to-div dict, adjusting for name changes
-div_to_state = pd.read_csv(f"{data_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
-div_to_state_dict = {name_changes_year_dict[data_year].get(div, div): div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
-
-
-
-
-
-
 
 
 
 def abbreviate_party_names(party_names_list, general_party_df):
-    # handle exceptions to party names
+    # handles exceptions to party names
+
     party_abvs_list = []
 
     for party in party_names_list:
@@ -134,10 +126,6 @@ def abbreviate_party_names(party_names_list, general_party_df):
         #import pdb;pdb.set_trace()
 
     return party_abvs_list
-
-
-general_party_df = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", skiprows = 1)
-general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',"PartyAb"] = 'GRN' # handle exceptions, but think GVIC is the only one
 
 
 
@@ -264,17 +252,18 @@ def get_Senate_party_abvs_dict(data_year, div_to_state_dict, to_csv = False):
     return Senate_party_abvs_dict
 
 
+
+# get state-to-div dict, adjusting for name changes
+div_to_state = pd.read_csv(f"{data_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+div_to_state_dict = {name_changes_year_dict[data_year].get(div, div): div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
+
+
+general_party_df = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", skiprows = 1)
+general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',"PartyAb"] = 'GRN' # handle exceptions, but think GVIC is the only one
+
+
 Senate_party_abvs_dict = get_Senate_party_abvs_dict(data_year, div_to_state_dict, to_csv = False)
 
-
-
-
-######### Candidate Pairs stuff
-
-
-DOP_By_PP_Expand = pd.read_csv(f"{data_year}DOP_By_PP_Expand.csv", index_col=None)
-DOP_By_PP_Pref_Percent = pd.read_csv(f"{data_year}DOP_By_PP_Pref_Percent.csv", index_col=None)
-DOP_By_PP_Reduce = pd.read_csv(f"{data_year}DOP_By_PP_Reduce.csv", index_col=None)
 
 
 def convert_to_wide_format(df, df_type):
@@ -316,12 +305,10 @@ def convert_to_wide_format(df, df_type):
     return pivot_df
 
 def compute_ratio_efficient(df):
-    # more efficient version using vectorised operations
+    # computes Transfer Count/Preference Count; more efficient version using vectorised operations
     
     # Pivot table to get values in a single row
     pivot = df.pivot(index=df.columns[:-2].tolist(), columns="CalculationType", values="CalculationValue") # preserve order of parties as BallotPosition is before cand_id
-
-    #import pdb;pdb.set_trace()
 
     # Compute the ratio
     ratio = pivot.get("Transfer Count", 0) / pivot.get("Preference Count", 1).replace(-np.inf, -1).fillna(0)
@@ -337,7 +324,8 @@ def compute_ratio_efficient(df):
     return result
 
 def rename_IND_COAL_PartyAbs(div, DOP_table_wide, COAL_set, div_to_state_dict, Senate_party_abvs_dict, by_pp_id = False):
-    ### apprends div_nm onto any INDXs and changes COAL member parties to COAL or COALNP/COALLP for doubles
+    ### appends div_nm onto any INDXs and changes COAL member parties to COAL or COALNP/COALLP for when both LP and NP contest a seat
+
     if (DOP_table_wide.columns.isin(COAL_set).sum() == 2) & (div_to_state_dict[div] in ['VIC','NSW']): # Both members of Coalition in div!
         #import pdb;pdb.set_trace()
         for party in DOP_table_wide.columns[1+by_pp_id:]:
@@ -374,7 +362,11 @@ def rename_IND_COAL_PartyAbs(div, DOP_table_wide, COAL_set, div_to_state_dict, S
 
 
 def create_wide_DOP_dict(Div_DOP_dict, div_to_state_dict, Senate_party_abvs_dict, DOP_type):
-    ### Processes the data in 4 ways: 1. Fills Blanks (NAFD) with IND 2. Given IND label i.e. IND1,IND2 3. GVIC --> GRN 4. Processes INDs/COAL names correctly
+    ### Processes the data - a dictionary of dfs about Elimination Order, Expand, PrefPercent and Reduce - in 4 ways: 
+    # 1. Fills Blanks (NAFD) with IND 
+    # 2. Given IND numeric label i.e. IND1,IND2 
+    # 3. GVIC --> GRN 
+    # 4. Processes INDs/COAL names correctly
 
     ### In future simplify the function by reducing duplication
     
@@ -607,6 +599,12 @@ def convert_long_to_wide_format(DOP_table_long, div_to_state_dict, Senate_party_
     return DOP_By_PP_dict
 
 
+
+######### Candidate Pairs stuff
+DOP_By_PP_Expand = pd.read_csv(f"{data_year}DOP_By_PP_Expand.csv", index_col=None)
+DOP_By_PP_Pref_Percent = pd.read_csv(f"{data_year}DOP_By_PP_Pref_Percent.csv", index_col=None)
+DOP_By_PP_Reduce = pd.read_csv(f"{data_year}DOP_By_PP_Reduce.csv", index_col=None)
+
 # create wide format eliminaation_order_dict
 DOP_By_Division = pd.read_csv(f"{data_year}HouseDOPByDivision.csv", skiprows=1)
 DOP_By_Division.rename(columns={'DivisionNm': 'div_nm', 'CandidateID': 'cand_id'}, inplace=True)
@@ -624,12 +622,6 @@ DOP_div_reduce_dict = create_wide_DOP_dict(Div_DOP_dict, div_to_state_dict, Sena
 DOP_By_PP_Pref_Percent_wide_dict = convert_long_to_wide_format(DOP_By_PP_Pref_Percent, div_to_state_dict, Senate_party_abvs_dict)
 DOP_By_PP_Expand_wide_dict = convert_long_to_wide_format(DOP_By_PP_Expand, div_to_state_dict, Senate_party_abvs_dict)
 DOP_By_PP_Reduce_wide_dict = convert_long_to_wide_format(DOP_By_PP_Reduce, div_to_state_dict, Senate_party_abvs_dict)
-
-
-
-
-
-
 
 
 
