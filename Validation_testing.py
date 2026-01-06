@@ -121,6 +121,7 @@ def get_Prior_estimates_df(election_year, dont_add_ON = False):
 
     return Prior_estimates_df, Prior_estimates_dict
 
+
 def get_results_df(election_year, to_Fundamentals = True):
 
     # returns Actual_results_dict with results by party per division, and Fundamentals_results_df
@@ -407,7 +408,9 @@ for election_year in election_years:
 
 
 
-def simulate_Polling_Fundamentals_model(n_simulations, election_year, df_t = 0, v = 0.1, s = 0.6, beta = 0.5):
+def simulate_Polling_Fundamentals_model(n_simulations, election_year, df_t = 0, v = 0.1, s = 0.6, beta = 0.5, forced_polling_average = []):
+
+    # forced_polling_average allows input of list of 6 vote proportions summing to 1 for [ALP, COAL, GRN, ON, TOP, OTH]
 
     dist = "Normal" if df_t == 0 else "t"
     #print(dist)
@@ -596,6 +599,7 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, df_t = 0, 
 
 
     if election_year in ['2016','2019','2022','2025']:
+        last_election_year = str(int(election_year) - 3)
         last_election_vote_totals = pd.read_csv(f"{last_election_year}HouseVotesCountedByDivision.csv", skiprows=1, index_col=None).rename(columns={'DivisionNm':'old_div'})[['old_div', 'TotalVotes']]
         redistribution_df = pd.read_csv(f'Correspondence_CED_{str(int(election_year)-4)}_{str(int(election_year)-1)}.csv', index_col = None)
 
@@ -632,7 +636,7 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, df_t = 0, 
 
 
 
-    # test for variability of seat results corrected for state swings - Obtain
+    # test for variability of seat results corrected for state swings - Obtain Electorate residual CovMs
 
     def test_variability_of_Electorate_Residuals(new_vote_totals_states, year_to_remove):
 
@@ -731,17 +735,28 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, df_t = 0, 
 
     Day = 90
 
-    day_z_polling_avg_df = pd.read_csv(f"National_Day_{Day}_Polls.csv")
+    if election_year in ['2016','2019','2025']:
+        day_z_polling_avg_df = pd.read_csv(f"National_Day_{Day}_Polls.csv")
 
-    day_z_polling_avg = day_z_polling_avg_df.loc[day_z_polling_avg_df['Election'] == int(election_year),].drop('Election', axis = 1).reset_index(drop=True)
+        day_z_polling_avg = day_z_polling_avg_df.loc[day_z_polling_avg_df['Election'] == int(election_year),].drop('Election', axis = 1).reset_index(drop=True)
 
-    if election_year == '2016':
-        day_z_polling_avg = day_z_polling_avg[['COAL','ALP','GRN','OTH']]
+        if election_year == '2016':
+            day_z_polling_avg = day_z_polling_avg[['COAL','ALP','GRN','OTH']]
+
     elif election_year == '2025':
-        day_z_polling_avg = day_z_polling_avg.rename(columns = {'UAPP':'TOP'})
-        #day_z_polling_avg.iloc[0,:] = 0.39,0.305,0.12,0.07,0.01,0.105
+        day_z_polling_avg_df = pd.read_csv(f"National_Day_{Day}_Polls.csv")
 
-    #print(day_z_polling_avg)
+        day_z_polling_avg = day_z_polling_avg_df.loc[day_z_polling_avg_df['Election'] == int(election_year),].drop('Election', axis = 1).reset_index(drop=True)
+        day_z_polling_avg = day_z_polling_avg.rename(columns = {'UAPP':'TOP'})
+
+        # try arbitrary polling average for experiments
+        if forced_polling_average:
+
+            if np.array(forced_polling_average):
+                raise ValueError("Vote shares do not sum to 1")
+
+            day_z_polling_avg.iloc[0,:] = forced_polling_average # 0.39,0.305,0.12,0.07,0.01,0.105
+
 
 
 
@@ -755,7 +770,6 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, df_t = 0, 
 
                         # 0.346862  0.319669  0.128995  0.071243  0.016797  0.116434
 
-    #import pdb;pdb.set_trace()
 
     
     state_poll_dev_alr = pd.read_csv("State_Polling_Deviations_from_National.csv", index_col=None)
@@ -1566,9 +1580,9 @@ elif Day == 90:
     # Another: close results! {'2016': {'w': 0.8500000000000001, 'alpha': 20.0, 's': 0.75, 'v': 0.1, 'beta': 0.8, 'val_score': 3.1886505715847515, 'test_mae': 3.4538902844200066, 'test_coverage': 0.9275653923541247}, '2019': {'w': 0.9, 'alpha': 20.0, 's': 0.75, 'v': 0.1, 'beta': 0.6000000000000001, 'val_score': 3.3291967680158114, 'test_mae': 3.2397858737616434, 'test_coverage': 0.9356060606060606}, '2022': {'w': 0.9, 'alpha': 20.0, 's': 0.8, 'v': 0.05, 'beta': 0.4, 'val_score': 3.3894457195184042, 'test_mae': 3.087975018296332, 'test_coverage': 0.9251870324189526}}
     w = 0.9
     alpha = 22
+    v = 0.15
     s = 0.75
     beta = 0.5
-    v = 0.15
     
 if Method == 'Validation':
     validation = {}

@@ -38,7 +38,7 @@ az.style.use("arviz-darkgrid")
 az.rcParams['plot.max_subplots'] = 100
 
 
-base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Test of Aus Election Code"
 os.chdir(base_dir)
 
 start_time = time.time()

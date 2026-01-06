@@ -60,11 +60,12 @@ def get_ALR_deviations_from_National(State_Polling_CAGO, ref_col, include_ON = 0
 
 def impute_missing_polling(missing_states, State_Correlation_Matrix, State_Polling_CAGO_ALR_swing, National_State_ALR_df_last):
     """
-    Impute the missing polling based on swings and correlations with other states.
+    Impute the missing polling in ALR space based on correlations with other states.
     
-    state_name: The state for which polling needs to be imputed.
-    correlation_matrix: The state-to-state correlation matrix.
-    State_Polling_CAGO: The DataFrame containing state polling and swings.
+    missing_states: list of states for which polling needs to be imputed.
+    State_Correlation_Matrix: The state-to-state correlation matrix.
+    State_Polling_CAGO_ALR_swing: The DataFrame containing available state polling swings in ALR
+    National_State_ALR_df_last: The DataFrame containing the previous election's state vote proportions in ALR
     
     Returns the imputed polling value.
     """
@@ -95,7 +96,6 @@ def impute_missing_polling(missing_states, State_Correlation_Matrix, State_Polli
 
         imputed_pollings.append(pd.DataFrame([imputed_polling], index = [state], columns = State_Polling_CAGO_ALR_swing.columns[:3]))
 
-    # Combine results into a DataFrame
     imputed_polling_df = pd.concat(imputed_pollings)
 
     
@@ -104,29 +104,27 @@ def impute_missing_polling(missing_states, State_Correlation_Matrix, State_Polli
 
 
 def alr_to_simplex_vectorized(df, ref_col):
-    """Inverse ALR transformation for an entire DataFrame in a vectorized way."""
-    # Convert the DataFrame to a numpy array for vectorized operations
+    """Inverse ALR transformation for entire df"""
+
+    # Convert to numpy, apply inverse ALR transformation
     alr_vals = df.values
-    
-    # Apply the inverse ALR transformation across all values
-    exp_vals = np.exp(alr_vals)
+    exp_vals = np.exp(alr_vals) 
 
-    # Compute the reference category correctly
+    # Compute the reference category and other values
     ref_vals = 1 / (1 + np.sum(exp_vals, axis=1, keepdims=True))  # Shape: (n_samples, 1)
-
-    # Compute all components
     simplex_vals = np.concatenate((exp_vals * ref_vals, ref_vals), axis=1)  # Shape: (n_samples, D)
     
-    # Create new column names, appending a reference category
+    # Return as df with full columns
     new_columns = df.columns.tolist() + [ref_col]
     
-    # Return as a DataFrame with the original indices and new columns
     return pd.DataFrame(simplex_vals, columns=new_columns, index=df.index)
 
 
 
 
 if election_year != '2025':
+
+    # use global state polling average file
 
     StatePolling = pd.read_csv("StatePollingWeightedAverage_rel_to_Nat.csv", index_col=None)
 
@@ -185,13 +183,12 @@ if election_year != '2025':
 
     import pdb;pdb.set_trace()
 
-    #State_Polling_Deviations_from_National.to_csv("State_Polling_Deviations_from_National.csv", index=False)
+    State_Polling_Deviations_from_National.to_csv("State_Polling_Deviations_from_National.csv", index=False)
 
 
 
 
 else:
-
 
     StatePolling = pd.read_csv(f"2025StatePollingWeightedAverage_rel_to_Nat_Day_{Day}.csv", index_col=None)
 

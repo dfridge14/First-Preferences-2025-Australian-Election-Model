@@ -2339,6 +2339,11 @@ def full_redistribution_candidate_change(Formal_prefs_dict, Senate_parties_by_di
 
         div1, div2 = Redistribution_pairs_df.iloc[i].tolist() # get giver and receiver for pair i
 
+        if div1 == 'Lingiari':
+            import pdb; pdb.set_trace()
+        else:
+            continue
+
         votes_to_reduce = votes_to_reduce_dict[div1] if votes_to_reduce_dict else pd.DataFrame()
 
         Senate_parties = Senate_parties_by_div.loc[Senate_parties_by_div['div_nm'] == div1,"PartyAbList"].iloc[0]
@@ -3018,7 +3023,7 @@ def reduce_to_Omnipresent_parties(Formal_prefs_dict, Senate_parties_by_div, list
     import pdb;pdb.set_trace()
 
 
-    Omnipresent_parties_df.to_csv(f'{data_year}OmnipresentPartiesByPP.csv', index=False)
+    #Omnipresent_parties_df.to_csv(f'{data_year}OmnipresentPartiesByPP.csv', index=False)
 
     print(simplerd, simpleindrd, complexrd)
     print(time.time() - start, 'seconds')
@@ -4260,7 +4265,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
     print("done", time.time() - start)
     # make list of senate parties for check if they match house ones
     Senate_parties_by_div =  pd.DataFrame(list(Senate_party_abvs_dict.items()), columns=["div_nm", "PartyAbList"])
-    Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) # currently off
+    #Senate_parties_by_div.to_csv(f"{data_year}Senate_parties_by_div.csv", index=False) # currently off
 
     Incumbent_advantage = 0
     get_IND_defection_proportions = 0
@@ -4309,7 +4314,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
         import pdb;pdb.set_trace()
 
-        Final_x_HS_df.to_csv(f"{data_year}Final_{x}_HS_df.csv", index=False)
+        #Final_x_HS_df.to_csv(f"{data_year}Final_{x}_HS_df.csv", index=False)
 
     else:
         Incumbency_by_div = pd.read_csv(f"{data_year}Incumbents.csv", index_col = None)
@@ -4402,7 +4407,7 @@ def whole_procedure(Formal_prefs_dict,general_party_df, Senate_party_abvs_dict, 
 
             proportions_transferred_df = pd.concat(proportions_transferred_list)
 
-            proportions_transferred_df.to_csv(f"Defection_proportions_to_C200_IND_{data_year}.csv", index = True)
+            #proportions_transferred_df.to_csv(f"Defection_proportions_to_C200_IND_{data_year}.csv", index = True)
 
 
             import pdb;pdb.set_trace()

@@ -5,6 +5,11 @@ import os,time
 from datetime import datetime
 from pathlib import Path
 
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+import scipy.stats as stats
+
 from pingouin import multivariate_normality
 
 
@@ -31,17 +36,17 @@ base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else 
 os.chdir(base_dir)
 
 Type = 'Election_swing' # Election_swing Polling
-ref_col = 'ALP' # 'COAL'
+ref_col = 'COAL' # 'COAL'
 
-# manage removal of data point
+# manage removal of data for given election_year
 curr_election_year = '2025'
-remove_election_year = 1
+REMOVE_ELECTION_YEAR = 1
 Day = 90
 
 
 
 def extend_corr_matrix_to_5x5(corr_matrix_3x3, var4, var5, cov_matrix_3x3, ref_col):
-    # Extends to 5x5 corr and covMs through rickety imputation, checking for positive definiteness and adding column names, reutrning 5x5 df
+    # Extends to 5x5 corr and covMs through imputation, checking for positive definiteness and adding column names, returning 5x5 df
 
     # expands to 5x5
     R5 = np.pad(corr_matrix_3x3, ((0, 2), (0, 2)), mode='constant', constant_values=0)
@@ -136,284 +141,284 @@ def extend_corr_matrix_to_5x5(corr_matrix_3x3, var4, var5, cov_matrix_3x3, ref_c
 
 
 
-for curr_election_year in ['2016','2019','2022','2025']:
+def estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = 90, plot_histogram = False):
 
-    election_year_to_remove = curr_election_year if remove_election_year else ' '
+    # Inputs alr reference column (default Coalition) and Day = {100 - days until election}
+    # Uses historical federal and state polling data to estimate ALR-Covariance between main parties after applying reference column
 
+    for curr_election_year in ['2016','2019','2022','2025']:
 
-    for Type in ['Polling','Election_swing']:
-
-        if Type == 'Polling':
-            # 1. Correlation estimate of 3x3 - 6 GRW 2007-2022 + 14 State Elections + 15 State Results
-            
-
-            FederalStatePolls = pd.read_csv("StatePollingWeightedAverage.csv", index_col = None).iloc[:,:5].set_index('Election')
-            StateElectionsPolls = pd.read_csv("StateElectionsWeightedPollingAverage.csv", index_col = None).iloc[:,:5].set_index('Election')
-            OldFederalElectionPollingAverage = pd.read_csv("OldFederalElectionPollingAverage.csv", index_col = None).iloc[:,:5].set_index('Election')
-            NationalElectionPollingAveragesGRW = pd.read_csv(f"NationalElectionPollingAveragesGRW_Day_{Day}.csv", index_col = None).set_index('Election')
+        election_year_to_remove = curr_election_year if REMOVE_ELECTION_YEAR else ' '
 
 
-            FederalStateResults =  pd.read_csv("StateFederalResults.csv", index_col = None).set_index('Election')
-            StateElectionResults = pd.read_csv("StateElectionResults.csv", index_col = None).set_index('Election')
-            OldFederalElectionResults = pd.read_csv("OldFederalElectionResults.csv", index_col = None).set_index('Election')
-            NationalElectionResults = pd.read_csv("NationalElectionResults.csv", index_col = None).set_index('Election')
+        for Type in ['Polling','Election_swing']:
 
-            NationalElectionPollingAveragesGRW.index = NationalElectionPollingAveragesGRW.index.astype(str)
-            NationalElectionResults.index = NationalElectionResults.index.astype(str)
-            OldFederalElectionPollingAverage.index = OldFederalElectionPollingAverage.index.astype(str)
-            OldFederalElectionResults.index = OldFederalElectionResults.index.astype(str)
+            if Type == 'Polling':
+                # 1. Correlation estimate of 3x3 - 6 GRW 2007-2022 + 14 State Elections + 15 State Results
+                
 
-            #Arbitrarily selected State per election
-            Selected_states = ['2022NSW','2019VIC','2016QLD']
-            GRN_OldFederalPolls = OldFederalElectionPollingAverage.rename(columns={'DEM<=1996/GRN':'GRN'})
-            GRN_OldFederalResults = OldFederalElectionResults.rename(columns={'DEM<=1996/GRN':'GRN'})
+                FederalStatePolls = pd.read_csv("StatePollingWeightedAverage.csv", index_col = None).iloc[:,:5].set_index('Election')
+                StateElectionsPolls = pd.read_csv("StateElectionsWeightedPollingAverage.csv", index_col = None).iloc[:,:5].set_index('Election')
+                OldFederalElectionPollingAverage = pd.read_csv("OldFederalElectionPollingAverage.csv", index_col = None).iloc[:,:5].set_index('Election')
+                NationalElectionPollingAveragesGRW = pd.read_csv(f"NationalElectionPollingAveragesGRW_Day_{Day}.csv", index_col = None).set_index('Election')
 
 
-            CAGO_Polling_Avg = pd.concat([FederalStatePolls.iloc[FederalStatePolls.index.isin(Selected_states),], StateElectionsPolls, NationalElectionPollingAveragesGRW, GRN_OldFederalPolls.loc[GRN_OldFederalPolls.index.isin(['2001','2004']),]], ignore_index = False)
-            CAGO_Results = pd.concat([FederalStateResults.iloc[FederalStateResults.index.isin(Selected_states),], StateElectionResults, NationalElectionResults, GRN_OldFederalResults.loc[GRN_OldFederalResults.index.isin(['2001','2004']),]], ignore_index = False)
+                FederalStateResults =  pd.read_csv("StateFederalResults.csv", index_col = None).set_index('Election')
+                StateElectionResults = pd.read_csv("StateElectionResults.csv", index_col = None).set_index('Election')
+                OldFederalElectionResults = pd.read_csv("OldFederalElectionResults.csv", index_col = None).set_index('Election')
+                NationalElectionResults = pd.read_csv("NationalElectionResults.csv", index_col = None).set_index('Election')
 
-            CAGO_Polling_ALR = np.log(CAGO_Polling_Avg.drop(columns=[ref_col]).div(CAGO_Polling_Avg[ref_col], axis=0))
-            CAGO_Results_ALR = np.log(CAGO_Results.drop(columns=[ref_col]).div(CAGO_Results[ref_col], axis=0))
+                NationalElectionPollingAveragesGRW.index = NationalElectionPollingAveragesGRW.index.astype(str)
+                NationalElectionResults.index = NationalElectionResults.index.astype(str)
+                OldFederalElectionPollingAverage.index = OldFederalElectionPollingAverage.index.astype(str)
+                OldFederalElectionResults.index = OldFederalElectionResults.index.astype(str)
 
-            CAGO_ALR_swings = CAGO_Results_ALR - CAGO_Polling_ALR
-            # correct for past polling bias!
-            CAGO_ALR_swings_centered = CAGO_ALR_swings - CAGO_ALR_swings.mean()
+                #Arbitrarily selected State per election
+                Selected_states = ['2022NSW','2019VIC','2016QLD']
+                GRN_OldFederalPolls = OldFederalElectionPollingAverage.rename(columns={'DEM<=1996/GRN':'GRN'})
+                GRN_OldFederalResults = OldFederalElectionResults.rename(columns={'DEM<=1996/GRN':'GRN'})
 
-            if remove_election_year:
-                CAGO_ALR_swings_centered = CAGO_ALR_swings_centered.loc[~(CAGO_ALR_swings_centered.index.str.startswith(election_year_to_remove)),]
 
-            corr_matrix = np.corrcoef(CAGO_ALR_swings_centered.values, rowvar=False)
-            print(corr_matrix)
+                CAGO_Polling_Avg = pd.concat([FederalStatePolls.iloc[FederalStatePolls.index.isin(Selected_states),], StateElectionsPolls, NationalElectionPollingAveragesGRW, GRN_OldFederalPolls.loc[GRN_OldFederalPolls.index.isin(['2001','2004']),]], ignore_index = False)
+                CAGO_Results = pd.concat([FederalStateResults.iloc[FederalStateResults.index.isin(Selected_states),], StateElectionResults, NationalElectionResults, GRN_OldFederalResults.loc[GRN_OldFederalResults.index.isin(['2001','2004']),]], ignore_index = False)
+
+                CAGO_Polling_ALR = np.log(CAGO_Polling_Avg.drop(columns=[ref_col]).div(CAGO_Polling_Avg[ref_col], axis=0))
+                CAGO_Results_ALR = np.log(CAGO_Results.drop(columns=[ref_col]).div(CAGO_Results[ref_col], axis=0))
+
+                CAGO_ALR_swings = CAGO_Results_ALR - CAGO_Polling_ALR
+                # correct for past polling bias!
+                CAGO_ALR_swings_centered = CAGO_ALR_swings - CAGO_ALR_swings.mean()
+
+                if REMOVE_ELECTION_YEAR:
+                    CAGO_ALR_swings_centered = CAGO_ALR_swings_centered.loc[~(CAGO_ALR_swings_centered.index.str.startswith(election_year_to_remove)),]
+
+                corr_matrix = np.corrcoef(CAGO_ALR_swings_centered.values, rowvar=False)
+                print(corr_matrix)
+                #import pdb;pdb.set_trace()
+
+
+
+                # VARIANCE ESTIMATION
+
+
+                CAGO_variance_estimation_polls = pd.concat([CAGO_Polling_Avg,GRN_OldFederalPolls.iloc[:-2]])
+                CAGO_variance_estimation_results = pd.concat([CAGO_Results,GRN_OldFederalResults.iloc[:-2]])
+
+                # extract GRN from before 2004 - very different party vote share today to back then!
+                CAGO_variance_estimation_polls.loc[CAGO_variance_estimation_polls.index.isin(['1987','1990','1993','1996','1998','2001']),'GRN'] = np.nan
+                CAGO_variance_estimation_results.loc[CAGO_variance_estimation_results.index.isin(['1987','1990','1993','1996','1998','2001']),'GRN'] = np.nan
+
+
+                CAGO_Variance_Polling_ALR = np.log(CAGO_variance_estimation_polls.drop(columns=[ref_col]).div(CAGO_variance_estimation_polls[ref_col], axis=0))
+                CAGO_Variance_Results_ALR = np.log(CAGO_variance_estimation_results.drop(columns=[ref_col]).div(CAGO_variance_estimation_results[ref_col], axis=0))
+
+
+
+                CAGO_Variance_estimation_swings = CAGO_Variance_Results_ALR - CAGO_Variance_Polling_ALR
+                CAGO_Variance_estimation_swings_centered = CAGO_Variance_estimation_swings - CAGO_Variance_estimation_swings.mean()
+
+
+                # Suggested weighting scheme of polling data - 3 Federal states = 0.3, State election = 0.5, Recent Federal election = 1, 2001/2004 federal: 0.6, Pre-2000 federal: 0.5
+                weights = np.array([0.3,0.3,0.3,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,1,1,1,1,1,1,0.6,0.6,0.5,0.5,0.5,0.5,0.5])
+
+                # remove data from current election
+                if election_year_to_remove and election_year_to_remove != '2025':
+                    if election_year_to_remove == '2016':
+                        indices = [4,5,14,15,20,21,22,23,24,25,26,27,28,29]
+                    if election_year_to_remove == '2019':
+                        indices = [2,3,4,5,7,9,10,14,15,16,19,20,21,22,23,24,25,26,27,28,29]
+                    if election_year_to_remove == '2022':
+                        indices = [0,2,3,4,5,7,9,10,12,14,15,16,18,19,20,21,22,23,24,25,26,27,28,29]
+
+                    weights = weights[indices]
+                    CAGO_Variance_estimation_swings_centered = CAGO_Variance_estimation_swings_centered.iloc[indices]
+
+
+
+            elif Type == 'Election_swing':
+                Election_swings_df = pd.read_csv("ElectionSwings.csv", index_col=None).set_index("Election")
+                Election_results_curr = Election_swings_df.iloc[:,:4]
+                Election_results_prev = Election_swings_df.iloc[:,4:]
+                Election_results_curr_ALR = np.log(Election_results_curr.drop(columns=[ref_col]).div(Election_results_curr[ref_col], axis=0))
+                Election_results_prev_ALR = np.log(Election_results_prev.drop(columns=[ref_col+'_prev']).div(Election_results_prev[ref_col+'_prev'], axis=0))
+                Election_swings_ALR = Election_results_curr_ALR - Election_results_prev_ALR.values
+
+                Election_swings_ALR_centered = Election_swings_ALR - Election_swings_ALR.mean()
+                Election_swings_ALR_centered_after_1996 = Election_swings_ALR_centered.loc[~(Election_swings_ALR_centered.index.isin(['1987','1990','1993','1996'])),]
+
+
+                if REMOVE_ELECTION_YEAR:
+                    CAGO_ALR_swings_centered = Election_swings_ALR_centered_after_1996.loc[~(Election_swings_ALR_centered_after_1996.index.str.startswith(election_year_to_remove)),]
+
+                corr_matrix_Elec = np.corrcoef(Election_swings_ALR_centered_after_1996.values, rowvar=False)
+                print(corr_matrix_Elec)
+
+                Election_swings_ALR_for_Var = Election_swings_ALR.copy()
+                Election_swings_ALR_for_Var.loc[Election_swings_ALR_for_Var.index.isin(['1987','1990','1993','1996','1998','2001']),'GRN'] = np.nan
+                Election_swings_ALR_for_Var_centered = Election_swings_ALR_for_Var - Election_swings_ALR_for_Var.mean()
+
+                # 1 to post-2004 elections, 0.5 to state elections, 0.6 to 2004/2001, 0.5 to 20th century elecs
+                weights = np.array([1,1,1,1,1,1,0.6,0.6] + [0.5]*24)
+
+                if election_year_to_remove and election_year_to_remove != '2025':
+                    if election_year_to_remove == '2016':
+                        indices = [3,4,5,6,7,8,9,10,11,12,15,18,19,22,23,27]
+                    if election_year_to_remove == '2019':
+                        indices = [2,3,4,5,6,7,8,9,10,11,12,14,15,17,18,19,21,22,23,26,27,29]
+                    if election_year_to_remove == '2022':
+                        indices = [1,2,3,4,5,6,7,8,9,10,11,12,14,15,17,18,19,21,22,23,25,26,27,29,31]
+
+                    weights = weights[indices]
+                    Election_swings_ALR_for_Var_centered = Election_swings_ALR_for_Var_centered.iloc[indices]
+
+
+
+            CAGO_Variance_estimation_swings_centered = CAGO_Variance_estimation_swings_centered if Type == 'Polling' else Election_swings_ALR_for_Var_centered
+
+
+            def weighted_nanstd(data, weights):
+                # estimates variances while respecting np.nan for GRN before 2004
+                weighted_std = []
+
+                for i in range(data.shape[1]):
+                    col = data[:, i]
+                    mask = ~np.isnan(col)
+                    w = weights[mask]
+                    x = col[mask]
+                    w /= w.sum()  # normalize weights
+                    mean = np.sum(w * x)
+                    var = np.sum(w * (x - mean)**2)
+                    weighted_std.append(np.sqrt(var))
+                return np.array(weighted_std)
+
+            weighted_std = weighted_nanstd(CAGO_Variance_estimation_swings_centered.values, weights)
+
+            correlation_matrix = corr_matrix if Type == 'Polling' else corr_matrix_Elec
+
+            cov_matrix = np.outer(weighted_std, weighted_std) * correlation_matrix
+            print(cov_matrix)
+
             #import pdb;pdb.set_trace()
 
+            # test for multivariate normality (vs t)
+            result = multivariate_normality(CAGO_Variance_estimation_swings_centered.dropna(), alpha=0.05)
+            print(result)
 
 
-            # VARIANCE ESTIMATION
+            CAGO_Variance_estimation_swings_centered.dropna().hist(bins=20, figsize=(10, 4), density=True)
+
+            if plot_histogram:
+                plt.suptitle("Histogram of ALR Swings (w/ KDE overlay)", y=1.02)
+                plt.tight_layout()
+                plt.show()
+                for col in CAGO_Variance_estimation_swings_centered.dropna().columns:
+                    sns.kdeplot(CAGO_Variance_estimation_swings_centered.dropna()[col], fill=True, label=col)
+                plt.title("KDEs of ALR Swings")
+                plt.legend()
+                plt.show()
+
+            # passes test - looks reasonably normal!
 
 
-            CAGO_variance_estimation_polls = pd.concat([CAGO_Polling_Avg,GRN_OldFederalPolls.iloc[:-2]])
-            CAGO_variance_estimation_results = pd.concat([CAGO_Results,GRN_OldFederalResults.iloc[:-2]])
-            # extract GRN from before 2004 - very different party vote share today to back then!
-            CAGO_variance_estimation_polls.loc[CAGO_variance_estimation_polls.index.isin(['1987','1990','1993','1996','1998','2001']),'GRN'] = np.nan
-            CAGO_variance_estimation_results.loc[CAGO_variance_estimation_results.index.isin(['1987','1990','1993','1996','1998','2001']),'GRN'] = np.nan
-
-
-            CAGO_Variance_Polling_ALR = np.log(CAGO_variance_estimation_polls.drop(columns=[ref_col]).div(CAGO_variance_estimation_polls[ref_col], axis=0))
-            CAGO_Variance_Results_ALR = np.log(CAGO_variance_estimation_results.drop(columns=[ref_col]).div(CAGO_variance_estimation_results[ref_col], axis=0))
-
-
-
-            CAGO_Variance_estimation_swings = CAGO_Variance_Results_ALR - CAGO_Variance_Polling_ALR
-            CAGO_Variance_estimation_swings_centered = CAGO_Variance_estimation_swings - CAGO_Variance_estimation_swings.mean()
-
-            weights = np.array([0.3,0.3,0.3,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,1,1,1,1,1,1,0.6,0.6,0.5,0.5,0.5,0.5,0.5])
-            #import pdb;pdb.set_trace()
-
-            if election_year_to_remove and election_year_to_remove != '2025':
-                if election_year_to_remove == '2016':
-                    indices = [4,5,14,15,20,21,22,23,24,25,26,27,28,29]
-                if election_year_to_remove == '2019':
-                    indices = [2,3,4,5,7,9,10,14,15,16,19,20,21,22,23,24,25,26,27,28,29]
-                if election_year_to_remove == '2022':
-                    indices = [0,2,3,4,5,7,9,10,12,14,15,16,18,19,20,21,22,23,24,25,26,27,28,29]
-
-                weights = weights[indices]
-                CAGO_Variance_estimation_swings_centered = CAGO_Variance_estimation_swings_centered.iloc[indices]
+            clean_df = CAGO_Variance_estimation_swings_centered.dropna()
 
 
 
-        elif Type == 'Election_swing':
-            Election_swings_df = pd.read_csv("ElectionSwings.csv", index_col=None).set_index("Election")
-            Election_results_curr = Election_swings_df.iloc[:,:4]
-            Election_results_prev = Election_swings_df.iloc[:,4:]
-            Election_results_curr_ALR = np.log(Election_results_curr.drop(columns=[ref_col]).div(Election_results_curr[ref_col], axis=0))
-            Election_results_prev_ALR = np.log(Election_results_prev.drop(columns=[ref_col+'_prev']).div(Election_results_prev[ref_col+'_prev'], axis=0))
-            Election_swings_ALR = Election_results_curr_ALR - Election_results_prev_ALR.values
+            if curr_election_year != '2025':
+                continue
+            if Type == 'Polling':
+                continue
 
-            Election_swings_ALR_centered = Election_swings_ALR - Election_swings_ALR.mean()
-            Election_swings_ALR_centered_after_1996 = Election_swings_ALR_centered.loc[~(Election_swings_ALR_centered.index.isin(['1987','1990','1993','1996'])),]
+            # Simulate 1000000 samples from multivariate normal in ALR space
+            n_samples = 1000000
+            alr_samples = np.random.multivariate_normal(mean=np.zeros(3), cov=cov_matrix, size=n_samples)
+            alr_samples_df = pd.DataFrame(alr_samples, columns = [p for p in ['COAL','ALP','GRN','OTH'] if p != ref_col])
 
-
-            if remove_election_year:
-                CAGO_ALR_swings_centered = Election_swings_ALR_centered_after_1996.loc[~(Election_swings_ALR_centered_after_1996.index.str.startswith(election_year_to_remove)),]
-
-            corr_matrix_Elec = np.corrcoef(Election_swings_ALR_centered_after_1996.values, rowvar=False)
-            print(corr_matrix_Elec)
-
-            Election_swings_ALR_for_Var = Election_swings_ALR.copy()
-            Election_swings_ALR_for_Var.loc[Election_swings_ALR_for_Var.index.isin(['1987','1990','1993','1996','1998','2001']),'GRN'] = np.nan
-            Election_swings_ALR_for_Var_centered = Election_swings_ALR_for_Var - Election_swings_ALR_for_Var.mean()
-
-            # 1 to post-2004 elections, 0.5 to state elections, 0.6 to 2004/2001, 0.5 to 20th century elecs
-            weights = np.array([1,1,1,1,1,1,0.6,0.6] + [0.5]*24)
-
-            if election_year_to_remove and election_year_to_remove != '2025':
-                if election_year_to_remove == '2016':
-                    indices = [3,4,5,6,7,8,9,10,11,12,15,18,19,22,23,27]
-                if election_year_to_remove == '2019':
-                    indices = [2,3,4,5,6,7,8,9,10,11,12,14,15,17,18,19,21,22,23,26,27,29]
-                if election_year_to_remove == '2022':
-                    indices = [1,2,3,4,5,6,7,8,9,10,11,12,14,15,17,18,19,21,22,23,25,26,27,29,31]
-
-                weights = weights[indices]
-                Election_swings_ALR_for_Var_centered = Election_swings_ALR_for_Var_centered.iloc[indices]
-
-
-
-            #import pdb;pdb.set_trace()
-
-
-        CAGO_Variance_estimation_swings_centered = CAGO_Variance_estimation_swings_centered if Type == 'Polling' else Election_swings_ALR_for_Var_centered
-
-
-        def weighted_nanstd(data, weights):
-            # estimates variances while respecting np.nan for GRN before 2004
-            weighted_std = []
-            #import pdb;pdb.set_trace()
-
-            for i in range(data.shape[1]):
-                col = data[:, i]
-                mask = ~np.isnan(col)
-                w = weights[mask]
-                x = col[mask]
-                w /= w.sum()  # normalize weights
-                mean = np.sum(w * x)
-                var = np.sum(w * (x - mean)**2)
-                weighted_std.append(np.sqrt(var))
-            return np.array(weighted_std)
-
-        weighted_std = weighted_nanstd(CAGO_Variance_estimation_swings_centered.values, weights)
-
-        correlation_matrix = corr_matrix if Type == 'Polling' else corr_matrix_Elec
-
-        cov_matrix = np.outer(weighted_std, weighted_std) * correlation_matrix
-        print(cov_matrix)
-
-        #import pdb;pdb.set_trace()
-
-        # test for multivariate normality (vs t)
-        result = multivariate_normality(CAGO_Variance_estimation_swings_centered.dropna(), alpha=0.05)
-        print(result)
-
-        import pandas as pd
-        import seaborn as sns
-        import matplotlib.pyplot as plt
-        import scipy.stats as stats
-
-        CAGO_Variance_estimation_swings_centered.dropna().hist(bins=20, figsize=(10, 4), density=True)
-        plt.suptitle("Histogram of ALR Swings (w/ KDE overlay)", y=1.02)
-        plt.tight_layout()
-        #plt.show()
-        for col in CAGO_Variance_estimation_swings_centered.dropna().columns:
-            sns.kdeplot(CAGO_Variance_estimation_swings_centered.dropna()[col], fill=True, label=col)
-        plt.title("KDEs of ALR Swings")
-        plt.legend()
-        #plt.show()
-        # Clean dataframe
-        clean_df = CAGO_Variance_estimation_swings_centered.dropna()
-
-        # passes test - looks reasonably normal!
-
-
-        if curr_election_year != '2025':
-            continue
-        if Type == 'Polling':
-            continue
-        import pdb;pdb.set_trace()
-
-        # Simulate 1000000 samples from multivariate normal in ALR space
-        n_samples = 1000000
-        alr_samples = np.random.multivariate_normal(mean=np.zeros(3), cov=cov_matrix, size=n_samples)
-        alr_samples_df = pd.DataFrame(alr_samples, columns = [p for p in ['COAL','ALP','GRN','OTH'] if p != ref_col])
-
-        alr_prediction_df = CAGO_Variance_Polling_ALR.loc['2022'] + alr_samples_df if Type == 'Polling' else Election_results_curr_ALR.loc['2019'] + alr_samples_df
+            alr_prediction_df = CAGO_Variance_Polling_ALR.loc['2022'] + alr_samples_df if Type == 'Polling' else Election_results_curr_ALR.loc['2019'] + alr_samples_df
 
 
 
 
-        def alr_to_simplex_vectorized(df, ref_col):
-            """Inverse ALR transformation for an entire DataFrame in a vectorized way."""
-            # Convert the DataFrame to a numpy array for vectorized operations
-            alr_vals = df.values
             
-            # Apply the inverse ALR transformation across all values
-            exp_vals = np.exp(alr_vals)
+            def alr_to_simplex_vectorized(df, ref_col):
+                """Inverse ALR transformation for entire df"""
 
-            # Compute the reference category correctly
-            ref_vals = 1 / (1 + np.sum(exp_vals, axis=1, keepdims=True))  # Shape: (n_samples, 1)
+                # Convert to numpy, apply inverse ALR transformation
+                alr_vals = df.values
+                exp_vals = np.exp(alr_vals) 
 
-            # Compute all components
-            simplex_vals = np.concatenate((exp_vals * ref_vals, ref_vals), axis=1)  # Shape: (n_samples, D)
-            
-            # Create new column names, appending a reference category
-            new_columns = df.columns.tolist() + [ref_col]
-            
-            # Return as a DataFrame with the original indices and new columns
-            return pd.DataFrame(simplex_vals, columns=new_columns, index=df.index)
-
-
-        # Convert each ALR sample back to the 4D probability space
-        prob_samples = alr_to_simplex_vectorized(alr_prediction_df, ref_col=ref_col)
-        stds = np.sqrt(prob_samples.var())
-        print("stds", stds)
-
-        import pdb;pdb.set_trace()
+                # Compute the reference category and other values
+                ref_vals = 1 / (1 + np.sum(exp_vals, axis=1, keepdims=True))  # Shape: (n_samples, 1)
+                simplex_vals = np.concatenate((exp_vals * ref_vals, ref_vals), axis=1)  # Shape: (n_samples, D)
+                
+                # Return as df with full columns
+                new_columns = df.columns.tolist() + [ref_col]
+                
+                return pd.DataFrame(simplex_vals, columns=new_columns, index=df.index)
 
 
-        if remove_election_year:
-
-            Election_swing_ON_UAPP_ALR_variances = {'2016':0.0751,'2019':0.0904,'2022':0.0901,'2025':0.0944}
-            Polling_swing_ON_UAPP_ALR_variances = {'2016':0.0136,'2019':0.0139,'2022':0.0309,'2025':0.0343}
-
-            CAGO_cols = [p for p in ['COAL','ALP','GRN','OTH'] if p != ref_col]
+            # Convert each ALR sample back to the 4D probability space
+            prob_samples = alr_to_simplex_vectorized(alr_prediction_df, ref_col=ref_col)
+            stds = np.sqrt(prob_samples.var())
+            print("stds", stds)
 
             import pdb;pdb.set_trace()
 
-            if Type == 'Polling':
-                ON_UAPP_variances = Polling_swing_ON_UAPP_ALR_variances[curr_election_year]
 
-                if curr_election_year == '2016':
-                    CAGO_Polling_2016_corr, CAGO_Polling_2016_cov = corr_matrix,cov_matrix
-                    CAGO_Polling_2016_cov = pd.DataFrame(CAGO_Polling_2016_cov, index = CAGO_cols, columns = CAGO_cols)
-                    CAGO_Polling_2016_cov.to_csv(f"PollingErrorALRCovarianceNational2016_Day_{Day}_{ref_col}.csv", index = True)
+            if REMOVE_ELECTION_YEAR:
 
-                elif curr_election_year == '2019':
-                    CAGO_Polling_2019_corr, CAGO_Polling_2019_cov = extend_corr_matrix_to_5x5(corr_matrix, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
-                    CAGO_Polling_2019_cov.to_csv(f"PollingErrorALRCovarianceNational2019_Day_{Day}_{ref_col}.csv", index = True)
+                Election_swing_ON_UAPP_ALR_variances = {'2016':0.0751,'2019':0.0904,'2022':0.0901,'2025':0.0944}
+                Polling_swing_ON_UAPP_ALR_variances = {'2016':0.0136,'2019':0.0139,'2022':0.0309,'2025':0.0343}
 
+                CAGO_cols = [p for p in ['COAL','ALP','GRN','OTH'] if p != ref_col]
 
-                elif curr_election_year == '2022':
-                    CAGO_Polling_2022_corr, CAGO_Polling_2022_cov = extend_corr_matrix_to_5x5(corr_matrix, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
-                    CAGO_Polling_2022_cov.to_csv(f"PollingErrorALRCovarianceNational2022_Day_{Day}_{ref_col}.csv", index = True)
+                import pdb;pdb.set_trace()
 
+                if Type == 'Polling':
+                    ON_UAPP_variances = Polling_swing_ON_UAPP_ALR_variances[curr_election_year]
 
-                elif curr_election_year == '2025':
-                    CAGO_Polling_2025_corr, CAGO_Polling_2025_cov = extend_corr_matrix_to_5x5(corr_matrix, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
-                    CAGO_Polling_2025_cov.to_csv(f"PollingErrorALRCovarianceNational2025_Day_{Day}_{ref_col}.csv", index = True)
+                    if curr_election_year == '2016':
+                        CAGO_Polling_2016_corr, CAGO_Polling_2016_cov = corr_matrix,cov_matrix
+                        CAGO_Polling_2016_cov = pd.DataFrame(CAGO_Polling_2016_cov, index = CAGO_cols, columns = CAGO_cols)
+                        CAGO_Polling_2016_cov.to_csv(f"PollingErrorALRCovarianceNational2016_Day_{Day}_{ref_col}.csv", index = True)
 
-            elif Type == 'Election_swing':
-                ON_UAPP_variances = Election_swing_ON_UAPP_ALR_variances[curr_election_year]
+                    elif curr_election_year == '2019':
+                        CAGO_Polling_2019_corr, CAGO_Polling_2019_cov = extend_corr_matrix_to_5x5(corr_matrix, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
+                        CAGO_Polling_2019_cov.to_csv(f"PollingErrorALRCovarianceNational2019_Day_{Day}_{ref_col}.csv", index = True)
 
 
-                if curr_election_year == '2016':
-                    CAGO_swing_2016_corr, CAGO_swing_2016_cov = corr_matrix,cov_matrix
-                    CAGO_swing_2016_cov = pd.DataFrame(CAGO_swing_2016_cov, index = CAGO_cols, columns = CAGO_cols)
-                    CAGO_swing_2016_cov.to_csv(f"ElectionErrorALRCovarianceNational2016_{ref_col}.csv", index = True)
+                    elif curr_election_year == '2022':
+                        CAGO_Polling_2022_corr, CAGO_Polling_2022_cov = extend_corr_matrix_to_5x5(corr_matrix, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
+                        CAGO_Polling_2022_cov.to_csv(f"PollingErrorALRCovarianceNational2022_Day_{Day}_{ref_col}.csv", index = True)
 
 
-                elif curr_election_year == '2019':
-                    CAGO_swing_2019_corr, CAGO_swing_2019_cov = extend_corr_matrix_to_5x5(corr_matrix_Elec, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
-                    CAGO_swing_2019_cov.to_csv(f"ElectionErrorALRCovarianceNational2019_{ref_col}.csv", index = True)
+                    elif curr_election_year == '2025':
+                        CAGO_Polling_2025_corr, CAGO_Polling_2025_cov = extend_corr_matrix_to_5x5(corr_matrix, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
+                        CAGO_Polling_2025_cov.to_csv(f"PollingErrorALRCovarianceNational2025_Day_{Day}_{ref_col}.csv", index = True)
+
+                elif Type == 'Election_swing':
+                    ON_UAPP_variances = Election_swing_ON_UAPP_ALR_variances[curr_election_year]
 
 
-                elif curr_election_year == '2022':
-                    CAGO_swing_2022_corr, CAGO_swing_2022_cov = extend_corr_matrix_to_5x5(corr_matrix_Elec, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
-                    CAGO_swing_2022_cov.to_csv(f"ElectionErrorALRCovarianceNational2022_{ref_col}.csv", index = True)
+                    if curr_election_year == '2016':
+                        CAGO_swing_2016_corr, CAGO_swing_2016_cov = corr_matrix,cov_matrix
+                        CAGO_swing_2016_cov = pd.DataFrame(CAGO_swing_2016_cov, index = CAGO_cols, columns = CAGO_cols)
+                        CAGO_swing_2016_cov.to_csv(f"ElectionErrorALRCovarianceNational2016_{ref_col}.csv", index = True)
 
 
-                elif curr_election_year == '2025':
-                    CAGO_swing_2025_corr, CAGO_swing_2025_cov = extend_corr_matrix_to_5x5(corr_matrix_Elec, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
-                    CAGO_swing_2025_cov.to_csv(f"ElectionErrorALRCovarianceNational2025_{ref_col}.csv", index = True)
+                    elif curr_election_year == '2019':
+                        CAGO_swing_2019_corr, CAGO_swing_2019_cov = extend_corr_matrix_to_5x5(corr_matrix_Elec, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
+                        CAGO_swing_2019_cov.to_csv(f"ElectionErrorALRCovarianceNational2019_{ref_col}.csv", index = True)
+
+
+                    elif curr_election_year == '2022':
+                        CAGO_swing_2022_corr, CAGO_swing_2022_cov = extend_corr_matrix_to_5x5(corr_matrix_Elec, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
+                        CAGO_swing_2022_cov.to_csv(f"ElectionErrorALRCovarianceNational2022_{ref_col}.csv", index = True)
+
+
+                    elif curr_election_year == '2025':
+                        CAGO_swing_2025_corr, CAGO_swing_2025_cov = extend_corr_matrix_to_5x5(corr_matrix_Elec, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
+                        CAGO_swing_2025_cov.to_csv(f"ElectionErrorALRCovarianceNational2025_{ref_col}.csv", index = True)
 
 
 
@@ -509,13 +514,8 @@ CAGO_swing_2022_corr = 1
 
 CAGO_swing_2022_cov = 1
 
-# develop systematic way of calculating these!
 
 
-
-# eigenvalue check 
-# np.all(np.linalg.eigvalsh(CAGO_swing_2019_cov) > 0)
-
-CAGO_Polling_2022_corr, CAGO_Polling_2022_cov = extend_corr_matrix_to_5x5(corr_matrix_Elec, 0.09, 0.09, cov_matrix, ref_col)
+#CAGO_Polling_2022_corr, CAGO_Polling_2022_cov = extend_corr_matrix_to_5x5(corr_matrix_Elec, 0.09, 0.09, cov_matrix, ref_col)
 
 import pdb;pdb.set_trace()

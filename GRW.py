@@ -35,10 +35,8 @@ SAMPLE_ERROR_SCALING_FACTOR = 2
 
 
 
-
-
-num_polling_days = 100
-DAYS_TO_ELECTION = 2
+num_polling_days = 100 # length of interval for Gaussian Random Walk
+DAYS_TO_ELECTION = 2 # final model - 2 days before
 
 import arviz as az
 
@@ -276,7 +274,7 @@ day_80_polling_avg =  pd.DataFrame([[0.0]*len(Prior_estimates_df.columns)], colu
 
 National_polls = pd.read_csv(f'NationalPollsforMGRW{election_year}.csv')
 
-sigma_drift_prior = {'COAL':0.004,'ALP':0.004,'GRN':0.002,'OTH':0.003,'ON':0.003,'UAPP':0.003,'TOP':0.003}
+sigma_drift_prior = {'COAL':0.004,'ALP':0.004,'GRN':0.002,'OTH':0.003,'ON':0.003,'UAPP':0.003,'TOP':0.003} # larger relative uncertainty for minor parties ON/UAPP/TOP
 
 
 for party in National_polls.columns[2:]:
