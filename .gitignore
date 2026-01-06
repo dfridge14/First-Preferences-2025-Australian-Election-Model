@@ -4,3 +4,4 @@
 *.shp
 *.shx
 *.xml
+data/generated/

@@ -36,7 +36,7 @@ def exception_handler(type, value, tb):
 sys.excepthook = exception_handler
 
 
-base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Test of Aus Election Code"
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Necessary CSV Files"
 os.chdir(base_dir)
 
 SAMPLE_ERROR_SCALING_FACTOR = 2 # assume polls have double their theoretical error 
@@ -44,6 +44,27 @@ ELECTION_DAYS_SINCE_PREV = {'2007': 1141,'2010':1002, '2013':1113, '2016':1028, 
 
 
 
+
+_CSV_CACHE = {}
+
+_real_read_csv = pd.read_csv
+_real_to_csv = pd.DataFrame.to_csv
+
+def _cached_read_csv(path, *args, **kwargs):
+    key = str(path)
+    if key in _CSV_CACHE:
+        return _CSV_CACHE[key].copy()
+    df = _real_read_csv(path, *args, **kwargs)
+    _CSV_CACHE[key] = df
+    return df.copy()
+
+def _cached_to_csv(self, path, *args, **kwargs):
+    key = str(path)
+    _CSV_CACHE[key] = self.copy()
+    # do NOTHING else (no disk write)
+
+pd.read_csv = _cached_read_csv
+pd.DataFrame.to_csv = _cached_to_csv
 
 
 
@@ -527,13 +548,21 @@ def estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = 90, plot_h
 
 # manage removal of data for given election_year
 REMOVE_ELECTION_YEAR = 1
-ref_col = 'COAL'
-Day = 90
+NO_OF_STATES = 8
+NO_OF_ELECTORATES = {'2016':150,'2019':151,'2022':151,'2025':150}
+DIM_OF_COV_MATRIX = {'2016':3,'2019':5,'2022':5,'2025':5}
 
-estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = Day, plot_histogram = False)
+STATES = ['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA']
+STATE_TO_INDEX = {state: i for i, state in enumerate(STATES)}
 
+COAL_PARTIES = {"LNP", "LP", "NP", "CLP"}
+ALP_NAME = "ALP"
+IND_PARTIES = {'IND1','IND2','IND3','IND4','IND5'}
 
-########################################################################## ESTIMATE STATE ALR COVARIANCE MATRICES, POLLING PRECISION ###################################################################
+TCP_COMBINATION_INDEX = {('ALP','COAL'): 0, ('COAL','IND'):1, ('ALP','IND'):2, ('ALP','Left'):3, ('ALP','Right'):4, ('COAL','Left'):5, ('COAL','Right'):6,  \
+                                ('LP','NP'): 7, ('IND','IND'): 8, ('IND','Right'):9, ('IND','Left'):10, ('Left','Right'):11, ('Left','Left'):12, ('Right','Right'):13, ('COAL','COAL'):14}
+
+Day = 90 # currently acts as global - in future rewrite to make Day fluid
 
 
 def estimate_state_polling_deviations_from_national(ref_col = 'COAL',Type = 'Election_swing', Day = Day, remove_election_year = 0):
@@ -852,12 +881,7 @@ def estimate_state_polling_deviations_from_national(ref_col = 'COAL',Type = 'Ele
 
             curr_year_Polling_swing_covM.to_csv(f'PollingErrorALRCovarianceStateDeviation{curr_election_year}.csv', index = True)
 
-# save Cov matrices for election-to-election swing and for polling error
-for Type in ['Election_swing','Polling']:
-    estimate_state_polling_deviations_from_national(ref_col = 'COAL',Type = Type, remove_election_year = 0)
 
-
-########################################################################## IMPUTE POLLING FROM MISSING STATES ###################################################################
 
 
 def get_ALR_deviations_from_National(State_Polling_CAGO, ref_col, include_ON = 0):
@@ -1066,23 +1090,11 @@ def get_imputed_state_deviations_from_national(ref_col = 'COAL'):
             State_Polling_Deviations_from_National.to_csv(f"2025_State_Polling_Deviations_from_National_Day_{Day}.csv", index=False)
 
 
-get_imputed_state_deviations_from_national(ref_col = 'COAL')
 
 
 
 
 
-
-########################################################################## SIMULATE 2025 FIRST PREFERENCE VOTES ###################################################################
-
-NO_OF_STATES = 8
-NO_OF_ELECTORATES = {'2016':150,'2019':151,'2022':151,'2025':150}
-DIM_OF_COV_MATRIX = {'2016':3,'2019':5,'2022':5,'2025':5}
-
-n_simulations = 1000
-
-states = ['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA']
-state_to_index = {state: i for i, state in enumerate(states)}
 
 def non_uniform_swing_weight_exp(O_series, beta=0.5, start=0.2, k=10):
 
@@ -1136,7 +1148,6 @@ def full_weight_vector(all_divisions, high_others_df, others_column="OTH", divis
     return full_weights
 
 
-
 def get_weights_by_beta(election_years = ['2016','2019','2022','2025'], beta_list = [r for r in np.arange(0,1.01,0.1)]):
 
     weights_by_beta = {}
@@ -1158,7 +1169,7 @@ def get_weights_by_beta(election_years = ['2016','2019','2022','2025'], beta_lis
             div_to_state = div_to_state.loc[Electorate_order_2025.values]
 
 
-        division_state_indices = div_to_state['StateAb'].map(state_to_index).values 
+        division_state_indices = div_to_state['StateAb'].map(STATE_TO_INDEX).values 
 
         all_divisions = div_to_state.index
 
@@ -1181,8 +1192,6 @@ def get_weights_by_beta(election_years = ['2016','2019','2022','2025'], beta_lis
         }
 
     return weights_by_beta
-
-
 
 
 def group_into_Categories(party_votes_shares_df, div, election_year, is_Other = True):
@@ -1224,8 +1233,6 @@ def group_into_Categories(party_votes_shares_df, div, election_year, is_Other = 
 
 
     return Fundamentals_grouped_df
-
-
 
 
 def get_Prior_estimates_df(election_year, dont_add_ON = False):
@@ -1659,7 +1666,7 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_c
     weighted_means = np.sum(State_Simulated_election_error * w, axis=1, keepdims=True)  # Sum over states
     State_Simulated_election_error_centered = State_Simulated_election_error - weighted_means # Subtract the weighted mean from each state: shape still (10000, 8, 5)
 
-    Scaled_precisions_curr = pd.read_csv("State_Polling_Scaled_Precisions.csv", index_col = 0).loc[int(election_year)]
+    Scaled_precisions_curr = pd.read_csv("State_Polling_Scaled_Precisions.csv", index_col = 0).loc[election_year] 
     relative_state_precisions = Scaled_precisions_curr.set_index('Scope', drop = True).drop('Mean_precision', axis = 1)
 
     s_i = s * relative_state_precisions
@@ -1676,9 +1683,7 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_c
 
 
     # reshape State simulations correctly - map to correct div_nms
-    states = ['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA']
-    state_to_index = {state: i for i, state in enumerate(states)}
-    division_state_indices = Div_relative_weights['State'].map(state_to_index).values  # shape (150,)
+    division_state_indices = Div_relative_weights['State'].map(STATE_TO_INDEX).values  # shape (150,)
 
     State_Simulated_polling_error_centered_expanded = State_Simulated_polling_error_centered[np.arange(n_simulations)[:, None], division_state_indices[None, :], :]
     State_Simulated_election_error_centered_expanded = State_Simulated_election_error_centered[np.arange(n_simulations)[:, None], division_state_indices[None, :], :]
@@ -1692,7 +1697,7 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_c
 
     centered_residuals = np.empty_like(Electorate_Residuals_Simulated_error)
 
-    for state_idx in range(len(states)):  # 8 states
+    for state_idx in range(len(STATES)):  # 8 states
 
         div_indices = np.where(division_state_indices == state_idx)[0] #  Find divisions that belong to this state
         weights = Div_relative_weights.iloc[div_indices]['Relative weights'].values.reshape(1, -1, 1) # Get relative weights for these divisions
@@ -1834,7 +1839,7 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_c
     # get 1 - s_i per state
 
     Scaled_national_prior_deviations = (State_prior_alr - National_prior_alr.values).mul(1-s_i.values, axis = 0)
-    Scaled_national_prior_deviations.index = Scaled_national_prior_deviations.index.map(state_to_index)
+    Scaled_national_prior_deviations.index = Scaled_national_prior_deviations.index.map(STATE_TO_INDEX)
     seat_state_alr = Scaled_national_prior_deviations.iloc[division_state_indices]
     Scaled_national_prior_deviations_expanded = np.broadcast_to(seat_state_alr, (n_simulations, NO_OF_ELECTORATES[election_year], DIM_OF_COV_MATRIX[election_year])).copy()
     
@@ -2241,39 +2246,10 @@ def scale_state_polling_precision():
     Average_Precisions.loc[:,"Scaled_Precisions"] = Scaled_Precisions
     Average_Precisions.set_index('Year').to_csv("State_Polling_Scaled_Precisions.csv", index = True)
 
-scale_state_polling_precision() # generate csv of scaled state polling average precisions
-
-Method = 'Simulation' # 'Validation' 'Simulation' 'None'
-coverage_level = 0.95
 
 
-forced_polling_average = [0.3159,0.3443,0.1196,0.0618,0.0299] # TOP shifts -0.136502 -0.233139 -0.235509 -0.22493  1.079983 -0.249903 # [0.26, 0.35, 0.115, 0.14, 0.03]
-forced_polling_average.append(1-np.array(forced_polling_average).sum()) # ensure sum-to-1-constraint
-
-Day = 90
-
-election_year = '2025'
-
-if election_year == '2025':
-    w = 0.9 if not forced_polling_average else 1 # ensure the actual result is the true result
-    alpha = 22
-    v = 0.15
-    s = 0.75
-    beta = 0.5
-if election_year == '2022':
-    w, alpha, s, v, beta =0.95,30,0.9,0.5,0.4
-elif election_year == '2019':
-    w, alpha, s, v, beta = 0.9,20,0.65,0.2,0.6
-
-elif election_year == '2016':
-    w, alpha, s, v, beta = 0.85,20,0.7,0.05,0.8
 
 
-final_simulated_votes, Results_dict =  First_Preference_Model_Simulation(election_year = election_year, Day = Day, ref_col='COAL', w = w, alpha = alpha, v = v, s = s, beta = beta, n_simulations = n_simulations, forced_polling_average = forced_polling_average)
-
-    
-
-########################################################################## SIMULATE 2025 DISTRIBUTION OF PREFERENCES ######################################################################
 
 
 
@@ -2292,21 +2268,9 @@ def make_party_category_dict():
 
         return party_category_dict
 
-party_category_dict = make_party_category_dict()
-
-party_to_category_centered_IND = {
-    k: ('IND' if v == 'Centre' else v)
-    for k, v in party_category_dict.items()
-}
-
-TCP_combination_index = {('ALP','COAL'): 0, ('COAL','IND'):1, ('ALP','IND'):2, ('ALP','Left'):3, ('ALP','Right'):4, ('COAL','Left'):5, ('COAL','Right'):6,  \
-                            ('LP','NP'): 7, ('IND','IND'): 8, ('IND','Right'):9, ('IND','Left'):10, ('Left','Right'):11, ('Left','Left'):12, ('Right','Right'):13, ('COAL','COAL'):14}
 
 
-
-
-
-def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','2022','2025']):
+def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','2022','2025'], party_category_dict={}):
 
     from collections import defaultdict
 
@@ -2319,14 +2283,6 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
 
     replacement_seats_year_dict = {'2022': {'Hasluck':'Bullwinkel'}, '2019':{'Gorton':'Hawke'}, '2016':{'Canberra':'Bean', 'Maribyrnong':'Fraser'}, '2013':{'Hasluck':'Burt'}}
     abolished_divs_dict = {'2022':set(['Higgins','North Sydney']), '2016': set(['Port Adelaide']),'2019':set(['Stirling']),'2013':set(['Charlton'])}
-
-
-
-
-
-
-    TCP_combination_index = {('ALP','COAL'): 0, ('COAL','IND'):1, ('ALP','IND'):2, ('ALP','Left'):3, ('ALP','Right'):4, ('COAL','Left'):5, ('COAL','Right'):6,  \
-                            ('LP','NP'): 7, ('IND','IND'): 8, ('IND','Right'):9, ('IND','Left'):10, ('Left','Right'):11, ('Left','Left'):12, ('Right','Right'):13,('COAL','COAL'):14}
 
 
     data_years = [str(int(year) - 3) for year in election_years]
@@ -2599,7 +2555,7 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
 
     # Iterate over the unique divisions
     for div, group in long_df.groupby('division'):
-        div_result = pd.DataFrame(index=range(len(TCP_combination_index)), columns=Preference_flows_dict_with_categories[div].keys())
+        div_result = pd.DataFrame(index=range(len(TCP_COMBINATION_INDEX)), columns=Preference_flows_dict_with_categories[div].keys())
         
         # Fill the DataFrame with NaN (or 0 if preferred) for all TCP pairs initially
         div_result[:] = None  # Or use np.nan if you prefer NaN
@@ -2611,7 +2567,7 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
         # Iterate over each unique tcp_pair for this division
         for tcp_pair, tcp_group in group.groupby('tcp_pair'):
 
-            if tcp_pair not in TCP_combination_index.keys():
+            if tcp_pair not in TCP_COMBINATION_INDEX.keys():
                 # convert to party category:
                 
                 tcp_pair = tuple(sorted([party_category_dict[p] if p != 'Centre' else 'IND' for p in tcp_pair]))
@@ -2619,7 +2575,7 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
 
 
             # Map tcp_pair to the corresponding row index
-            row_index = TCP_combination_index.get(tcp_pair, None)
+            row_index = TCP_COMBINATION_INDEX.get(tcp_pair, None)
             
             # If the index is not found in mapping, skip (shouldn't happen if mapping is correct)
             if row_index is None:
@@ -2661,7 +2617,7 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
             continue
 
         # first get average of all results with said tcp:
-        i = TCP_combination_index[tcp_pair]
+        i = TCP_COMBINATION_INDEX[tcp_pair]
 
         series_list = []
 
@@ -2687,7 +2643,7 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
 
     for tcp_pair in [('IND','IND'),('Left','Left'),('LP','NP'),('Right','Right'),('COAL','COAL')]:
 
-        i = TCP_combination_index[tcp_pair]
+        i = TCP_COMBINATION_INDEX[tcp_pair]
 
         for div in result_dict.keys():
             #import pdb;pdb.set_trace()
@@ -2698,7 +2654,7 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
 
         # use IND-ALP/COAL i.e. 2 or 1
 
-        i = TCP_combination_index[tcp_pair]
+        i = TCP_COMBINATION_INDEX[tcp_pair]
 
         for div in result_dict.keys():
             #import pdb;pdb.set_trace()
@@ -2739,7 +2695,7 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
 
         # use ALP/COAL
 
-        i = TCP_combination_index[tcp_pair]
+        i = TCP_COMBINATION_INDEX[tcp_pair]
 
         for div in result_dict.keys():
             #import pdb;pdb.set_trace()
@@ -2758,7 +2714,7 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
 
         # use ALP/COAL
 
-        i = TCP_combination_index[tcp_pair]
+        i = TCP_COMBINATION_INDEX[tcp_pair]
 
         for div in result_dict.keys():
             #import pdb;pdb.set_trace()
@@ -3122,7 +3078,7 @@ def distribution_to_top_2(final_simulated_votes, proportions_transferred_to_firs
             
             #top2_category = tuple(sorted([party_category_dict.get(p, 'IND') for p in top2_parties])) # Centre if party is IND1,IND2,IND3 etc.
             #first_idx = [i for i in top2_indices if party_to_category[i] == first_cat][0] # FIXXXX
-            #row_index = TCP_combination_index[tuple(sorted(top2_category))]
+            #row_index = TCP_COMBINATION_INDEX[tuple(sorted(top2_category))]
 
 
             #first_cat = top2_category[0]
@@ -3130,7 +3086,7 @@ def distribution_to_top_2(final_simulated_votes, proportions_transferred_to_firs
             #print("first_idx: ", first_idx)
             
             # Step 3: Fetch transfer proportions
-            row_index = TCP_combination_index[top2_category]
+            row_index = TCP_COMBINATION_INDEX[top2_category]
             transfer_proportions = proportions_df.iloc[row_index].values # shape: (n_parties,)
 
             #transfer_proportions = transfer_proportions.copy()  # don’t overwrite source!
@@ -3169,186 +3125,7 @@ def distribution_to_top_2(final_simulated_votes, proportions_transferred_to_firs
 
 
 
-
-election_year = '2025'
-
-proportions_transferred_to_first = make_TCP_pair_category_dict(election_year = election_year)
-
-
-#import pdb;pdb.set_trace()
-
-sigma_joint = 4.2 #4.2
-sigma_ind = 0.5
-
-
-per_electorate_winners, per_simulation_winners = distribution_to_top_2(final_simulated_votes, proportions_transferred_to_first, Results_dict, party_to_category_centered_IND, sigma_joint, sigma_ind)
-
-
-
-COAL_PARTIES = {"LNP", "LP", "NP", "CLP"}
-ALP_NAME = "ALP"
-IND_PARTIES = {'IND1','IND2','IND3','IND4','IND5'}
-
-# Initialize counters
-alp_majority_count = 0
-coal_majority_count = 0
-alp_lead_count = 0
-coal_lead_count = 0
-hung_count = 0
-
-alp_avg = 0
-coal_avg = 0
-grn_avg = 0
-ind_avg = 0
-
-alp_seat_list = []
-coal_seat_list = []
-
-
-# Loop over simulations
-for i, sim_results in enumerate(per_simulation_winners):
-    alp_seats = sum(1 for winner in sim_results if winner == ALP_NAME)
-    coal_seats = sum(1 for winner in sim_results if winner in COAL_PARTIES)
-    ind_seats = sum(1 for winner in sim_results if winner in IND_PARTIES)
-    grn_seats = sum(1 for winner in sim_results if winner == 'GRN')
-
-    coal_seat_list.append(coal_seats)
-    alp_seat_list.append(alp_seats)
-
-    alp_avg += alp_seats
-    coal_avg += coal_seats
-    grn_avg += grn_seats
-    ind_avg += ind_seats
-    
-    if alp_seats >= 76:
-        alp_majority_count += 1
-    elif coal_seats >= 76:
-        coal_majority_count += 1
-    elif alp_seats > coal_seats:
-        alp_lead_count += 1
-    elif coal_seats > alp_seats:
-        coal_lead_count += 1
-    else:
-        hung_count += 1
-
-Winner_table = pd.DataFrame( per_simulation_winners, columns=Results_dict.keys()).T
-Winner_table["favourite"] = Winner_table.mode(axis=1)[0]
-Winner_table.loc["ALP_count"] = (Winner_table == "ALP").sum(axis=0) 
-Winner_table.loc["COAL_count"] = (Winner_table.isin(['LP','NP','LNP',"CLP"])).sum(axis=0)
-Winner_table.loc["GRN_count"] = (Winner_table =='GRN').sum(axis=0)
-Winner_table.loc["IND_count"] = Winner_table.apply(lambda s: s.str.startswith("IND")).sum(axis=0)
-Winner_table.loc["OTH_count"] = 150 - Winner_table.iloc[-4:,].sum()
-
-print(Winner_table)
-
-print("Average seats: ALP", alp_avg/n_simulations, "COAL:", coal_avg/n_simulations, "GRN:", grn_avg/n_simulations, "IND:", ind_avg/n_simulations)
-
-
-# Compute probabilities
-total_simulations = len(per_simulation_winners)
-alp_prob = alp_majority_count / total_simulations
-coal_prob = coal_majority_count / total_simulations
-alp_lead_prob = alp_lead_count / total_simulations
-coal_lead_prob = coal_lead_count / total_simulations
-hung_prob = hung_count / total_simulations
-
-print(f"ALP majority probability: {alp_prob:.3f}")
-print(f"COAL majority probability: {coal_prob:.3f}")
-
-
-def export_simulations_to_csv(sim_dict, Results_dict, output_dir="2025_Election_FP_Practice"):
-    """
-    sim_dict: dict with keys = electorate names (str), values = (10000 x n_parties) arrays
-    party_names: list of party names in column order (length = n_parties)
-    output_dir: directory to save each electorate's CSV file
-    """
-
-    os.makedirs(output_dir, exist_ok=True)
-
-    for div, sim_array in sim_dict.items():
-        n_sims, n_parties = sim_array.shape
-        df = pd.DataFrame(sim_array, columns=Results_dict[div].columns)
-        df['sim_no'] = df.index
-        long_df = df.melt(id_vars='sim_no', var_name='Party', value_name='First Preference Votes')
-
-        csv_path = os.path.join(output_dir, f"{div.replace(' ', '_')}.csv")
-        long_df.to_csv(csv_path, index=False)
-
-    print(f"✅ Exported {len(sim_dict)} electorates to {output_dir}/")
-
-
-
-def export_winner_proportions_to_csv(winner_dict, output_dir="2025_Election_Winner_Proportions"):
-    """
-    winner_dict: dict with keys = electorate names (str), values = list of winner party names (length = n_sims)
-    output_dir: directory to save each electorate's CSV file
-
-    For each electorate, outputs a CSV with columns:
-    - Party
-    - Win Percentage
-    """
-
-    os.makedirs(output_dir, exist_ok=True)
-
-    for div, winners in winner_dict.items():
-        counts = Counter(winners)
-        total = sum(counts.values())
-        proportions = {party: count / total for party, count in counts.items()}
-
-        df = pd.DataFrame({
-            'Party': list(proportions.keys()),
-            'Win Percentage': list(proportions.values())
-        })
-
-        csv_path = os.path.join(output_dir, f"{div.replace(' ', '_')}.csv")
-        df.to_csv(csv_path, index=False)
-
-    print(f"✅ Exported winner proportions for {len(winner_dict)} electorates to {output_dir}/")
-
-
-
-def export_simulation_seat_counts(per_simulation_winners, output_csv="2025_Simulated_seat_counts.csv"):
-    """
-    Export seat counts per simulation, reduced to 8 meta-party categories.
-    Each row is a simulation; each column is the seat count for a meta-party.
-    """
-    # Define party groupings
-    coal_parties = {'LP', 'NP', 'LNP', 'CLP'}
-    ind_prefixes = {'IND'}  
-    parties_out = ['ALP', 'COAL', 'GRN', 'IND', 'OTH'] # ['ALP', 'COAL', 'GRN', 'IND', 'ON', 'KAP', 'XEN', 'OTH']
-    
-    all_rows = []
-
-    for sim_winners in per_simulation_winners:
-        counts = Counter()
-
-        for party in sim_winners:
-            if party in coal_parties:
-                counts['COAL'] += 1
-            elif any(party.startswith(prefix) for prefix in ind_prefixes):
-                counts['IND'] += 1
-            elif party in parties_out:
-                counts[party] += 1
-            else:
-                counts['OTH'] += 1
-
-        row = [counts.get(party, 0) for party in parties_out]
-        all_rows.append(row)
-
-    import pdb;pdb.set_trace()
-
-
-    # Create DataFrame and export
-    df = pd.DataFrame(all_rows, columns=parties_out)
-    df.to_csv(output_csv, index=False)
-
-    print(f"✅ Exported seat counts for {len(per_simulation_winners)} simulations to {output_csv}/")
-
-
-
-
-
-def seat_distribution_plot():
+def seat_distribution_plot(per_simulation_winners):
 
 
     colour_df = pd.read_csv("Party Colours.csv")
@@ -3713,14 +3490,243 @@ def seat_distribution_plot():
 
     return 1
 
-seat_distribution_plot()
 
-import pdb;pdb.set_trace()
+def export_simulations_to_csv(sim_dict, Results_dict, output_dir="data/generated/2025_Election_First_Preferences"):
+    """
+    sim_dict: dict with keys = electorate names (str), values = (10000 x n_parties) arrays
+    party_names: list of party names in column order (length = n_parties)
+    output_dir: directory to save each electorate's CSV file
+    """
 
-export = 0
+    os.makedirs(output_dir, exist_ok=True)
 
-if export:
-    export_simulations_to_csv(final_simulated_votes, Results_dict, output_dir="2025_Election_First_Preferences")
-    export_winner_proportions_to_csv(per_electorate_winners, output_dir="2025_Election_Winner_Proportions")
-    export_simulation_seat_counts(per_simulation_winners, output_csv="2025_Simulated_seat_counts.csv")
+    for div, sim_array in sim_dict.items():
+        n_sims, n_parties = sim_array.shape
+        df = pd.DataFrame(sim_array, columns=Results_dict[div].columns)
+        df['sim_no'] = df.index
+        long_df = df.melt(id_vars='sim_no', var_name='Party', value_name='First Preference Votes')
+
+        csv_path = os.path.join(output_dir, f"{div.replace(' ', '_')}.csv")
+        long_df.to_csv(csv_path, index=False)
+
+    print(f"✅ Exported {len(sim_dict)} electorates to {output_dir}/")
+
+
+def export_winner_proportions_to_csv(winner_dict, output_dir="data/generated/2025_Election_Winner_Proportions"):
+    """
+    winner_dict: dict with keys = electorate names (str), values = list of winner party names (length = n_sims)
+    output_dir: directory to save each electorate's CSV file
+
+    For each electorate, outputs a CSV with columns:
+    - Party
+    - Win Percentage
+    """
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    for div, winners in winner_dict.items():
+        counts = Counter(winners)
+        total = sum(counts.values())
+        proportions = {party: count / total for party, count in counts.items()}
+
+        df = pd.DataFrame({
+            'Party': list(proportions.keys()),
+            'Win Percentage': list(proportions.values())
+        })
+
+        csv_path = os.path.join(output_dir, f"{div.replace(' ', '_')}.csv")
+        df.to_csv(csv_path, index=False)
+
+    print(f"✅ Exported winner proportions for {len(winner_dict)} electorates to {output_dir}/")
+
+
+def export_simulation_seat_counts(per_simulation_winners, output_csv="2025_Simulated_seat_counts.csv"):
+    """
+    Export seat counts per simulation, reduced to 8 meta-party categories.
+    Each row is a simulation; each column is the seat count for a meta-party.
+    """
+    # Define party groupings
+    coal_parties = {'LP', 'NP', 'LNP', 'CLP'}
+    ind_prefixes = {'IND'}  
+    parties_out = ['ALP', 'COAL', 'GRN', 'IND', 'OTH'] # ['ALP', 'COAL', 'GRN', 'IND', 'ON', 'KAP', 'XEN', 'OTH']
+    
+    all_rows = []
+
+    for sim_winners in per_simulation_winners:
+        counts = Counter()
+
+        for party in sim_winners:
+            if party in coal_parties:
+                counts['COAL'] += 1
+            elif any(party.startswith(prefix) for prefix in ind_prefixes):
+                counts['IND'] += 1
+            elif party in parties_out:
+                counts[party] += 1
+            else:
+                counts['OTH'] += 1
+
+        row = [counts.get(party, 0) for party in parties_out]
+        all_rows.append(row)
+
+    import pdb;pdb.set_trace()
+
+
+    # Create DataFrame and export
+    df = pd.DataFrame(all_rows, columns=parties_out)
+    df.to_csv(output_csv, index=False)
+
+    print(f"✅ Exported seat counts for {len(per_simulation_winners)} simulations to {output_csv}/")
+
+
+def obtain_Winner_table(per_simulation_winners, Results_dict, n_simulations):
+
+        # Initialize counters
+    alp_majority_count = 0
+    coal_majority_count = 0
+    alp_lead_count = 0
+    coal_lead_count = 0
+    hung_count = 0
+
+    alp_avg = 0
+    coal_avg = 0
+    grn_avg = 0
+    ind_avg = 0
+
+    alp_seat_list = []
+    coal_seat_list = []
+
+
+    # Loop over simulations
+    for i, sim_results in enumerate(per_simulation_winners):
+        alp_seats = sum(1 for winner in sim_results if winner == ALP_NAME)
+        coal_seats = sum(1 for winner in sim_results if winner in COAL_PARTIES)
+        ind_seats = sum(1 for winner in sim_results if winner in IND_PARTIES)
+        grn_seats = sum(1 for winner in sim_results if winner == 'GRN')
+
+        coal_seat_list.append(coal_seats)
+        alp_seat_list.append(alp_seats)
+
+        alp_avg += alp_seats
+        coal_avg += coal_seats
+        grn_avg += grn_seats
+        ind_avg += ind_seats
+        
+        if alp_seats >= 76:
+            alp_majority_count += 1
+        elif coal_seats >= 76:
+            coal_majority_count += 1
+        elif alp_seats > coal_seats:
+            alp_lead_count += 1
+        elif coal_seats > alp_seats:
+            coal_lead_count += 1
+        else:
+            hung_count += 1
+
+    Winner_table = pd.DataFrame( per_simulation_winners, columns=Results_dict.keys()).T
+    Winner_table["favourite"] = Winner_table.mode(axis=1)[0]
+    Winner_table.loc["ALP_count"] = (Winner_table == "ALP").sum(axis=0) 
+    Winner_table.loc["COAL_count"] = (Winner_table.isin(['LP','NP','LNP',"CLP"])).sum(axis=0)
+    Winner_table.loc["GRN_count"] = (Winner_table =='GRN').sum(axis=0)
+    Winner_table.loc["IND_count"] = Winner_table.apply(lambda s: s.str.startswith("IND")).sum(axis=0)
+    Winner_table.loc["OTH_count"] = 150 - Winner_table.iloc[-4:,].sum()
+
+    # Compute probabilities
+    total_simulations = len(per_simulation_winners)
+    alp_prob = alp_majority_count / total_simulations
+    coal_prob = coal_majority_count / total_simulations
+    alp_lead_prob = alp_lead_count / total_simulations
+    coal_lead_prob = coal_lead_count / total_simulations
+    hung_prob = hung_count / total_simulations
+
+
+    #print(Winner_table)
+    #print("Average seats: ALP", alp_avg/n_simulations, "COAL:", coal_avg/n_simulations, "GRN:", grn_avg/n_simulations, "IND:", ind_avg/n_simulations)
+    #print(f"ALP majority probability: {alp_prob:.3f}")
+    #print(f"COAL majority probability: {coal_prob:.3f}")
+
+    Average_seats_df = np.round(pd.Series({'ALP': alp_avg, 'COAL': coal_avg, 'GRN': grn_avg, 'IND': ind_avg}) / n_simulations,2)
+    Average_seats_df['OTH'] = 150 - Average_seats_df.sum()
+    
+
+    return Winner_table, Average_seats_df
+
+
+def run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forced_polling_average = [], export_simulation_csvs = 0):
+
+    #forced_polling_average = []#[0.3159,0.3443,0.1196,0.0618,0.0299] # TOP shifts -0.136502 -0.233139 -0.235509 -0.22493  1.079983 -0.249903 # [0.26, 0.35, 0.115, 0.14, 0.03]
+    #forced_polling_average.append(1-np.array(forced_polling_average).sum()) if forced_polling_average else [] # ensure sum-to-1-constraint
+
+    ########################################################################## ESTIMATE STATE ALR COVARIANCE MATRICES, POLLING PRECISION ###################################################################
+
+    Day = 90
+
+    estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = Day, plot_histogram = False)
+
+    # save Cov matrices for election-to-election swing and for polling error
+    for Type in ['Election_swing','Polling']:
+        estimate_state_polling_deviations_from_national(ref_col = 'COAL',Type = Type, remove_election_year = 0)
+
+
+    ########################################################################## IMPUTE POLLING FROM MISSING STATES ###################################################################
+
+    get_imputed_state_deviations_from_national(ref_col = 'COAL')
+
+    ########################################################################## SIMULATE 2025 FIRST PREFERENCE VOTES ###################################################################
+
+    scale_state_polling_precision() # generate csv of scaled state polling average precisions
+
+
+
+    if election_year == '2025':
+        w,alpha,v,s,beta = 0.9 if not forced_polling_average else 1,22,0.15,0.75,0.5 # can set w to 1 ensure the forced result is the true result
+    if election_year == '2022':
+        w, alpha, s, v, beta =0.95,30,0.9,0.5,0.4
+    elif election_year == '2019':
+        w, alpha, s, v, beta = 0.9,20,0.65,0.2,0.6
+    elif election_year == '2016':
+        w, alpha, s, v, beta = 0.85,20,0.7,0.05,0.8
+
+    final_simulated_votes, Results_dict =  First_Preference_Model_Simulation(election_year = election_year, Day = Day, ref_col='COAL', w = w, alpha = alpha, v = v, s = s, beta = beta, n_simulations = n_simulations, forced_polling_average = forced_polling_average)
+
+    ########################################################################## SIMULATE 2025 DISTRIBUTION OF PREFERENCES ######################################################################
+
+    party_category_dict = make_party_category_dict()
+    party_to_category_centered_IND = {k: ('IND' if v == 'Centre' else v) for k, v in party_category_dict.items()}
+
+    proportions_transferred_to_first = make_TCP_pair_category_dict(election_year = election_year, party_category_dict=party_category_dict)
+
+    sigma_joint, sigma_ind = 4.2, 0.5
+
+    per_electorate_winners, per_simulation_winners = distribution_to_top_2(final_simulated_votes, proportions_transferred_to_first, Results_dict, party_to_category_centered_IND, sigma_joint, sigma_ind)
+
+    ##################### Results and exporting data ##############################
+
+    Winner_table, Average_seats = obtain_Winner_table(per_simulation_winners, Results_dict, n_simulations)
+
+    # open plotly plot of seat distribution
+    seat_distribution_plot(per_simulation_winners=per_simulation_winners)
+
+
+
+    if export_simulation_csvs:
+        export_simulations_to_csv(final_simulated_votes, Results_dict, output_dir="data/generated/2025_Election_First_Preferences")
+        export_winner_proportions_to_csv(per_electorate_winners, output_dir="data/generated/2025_Election_Winner_Proportions")
+        export_simulation_seat_counts(per_simulation_winners, output_csv="2025_Simulated_seat_counts.csv")
+
+
+    return {
+    "Winner_table": Winner_table,
+    "Average_seats": Average_seats,
+    "per_electorate_winners": per_electorate_winners,
+    "per_simulation_winners": per_simulation_winners,
+    "Results_dict": Results_dict,
+}
+
+
+if __name__ == "__main__":
+    outputs = run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forced_polling_average = [], export_simulation_csvs = 0)
+
+    print(outputs["Average_seats"])
+
+
 

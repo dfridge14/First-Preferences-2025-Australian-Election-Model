@@ -24,7 +24,7 @@ sys.excepthook = exception_handler
 
 
 
-base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Test of Aus Election Code"
+base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Necessary CSV Files"
 os.chdir(base_dir)
 
 NO_ADDITIONAL_COLUMNS = 2 # Date, SS, UND (possibly also brand add in case of missing ss allocation) - removed UND!!!!!
@@ -79,7 +79,6 @@ def parse_date_range(date_str):
         range_split[1] = range_split[1].strip()
 
         if len(range_split) != 2: # 
-            import pdb;pdb.set_trace()
             raise ValueError("Expected exactly 2 parts separated by a -")
         
         end_date = datetime.strptime(range_split[1], "%d %b %Y")
@@ -137,7 +136,7 @@ def parse_date_range(date_str):
 
         start_date = datetime.strptime(start_date, "%d %b %Y") # format fully
 
-    print(start_date,end_date)
+    #print(start_date,end_date)
 
     median_date = start_date + (end_date - start_date) / 2
 
@@ -190,8 +189,6 @@ def format_election_polls(Polling_type):
                 Opinion_Polls_2022_National.loc[:,['Days since last election','Sample size']] = Opinion_Polls_2022_National.loc[:,['Days since last election','Sample size']].astype(int)  
                 Poll_Swings_National = Opinion_Polls_2022_National.iloc[:-1,]
 
-                import pdb;pdb.set_trace()
-
                 Poll_Swings_National.to_csv(f"NationalPollsforMGRW{election_year}.csv", index=False)
 
             if election_year == '2025':
@@ -215,8 +212,6 @@ def format_election_polls(Polling_type):
                 Opinion_Polls_2022_National.loc[:,['Days since last election','Sample size']] = Opinion_Polls_2022_National.loc[:,['Days since last election','Sample size']].astype(int)  
                 Poll_Swings_National = Opinion_Polls_2022_National.iloc[:-1,]
 
-                import pdb;pdb.set_trace()
-
                 Poll_Swings_National.to_csv(f"NationalPollsforMGRW{election_year}.csv", index=False)
 
 
@@ -228,14 +223,9 @@ def format_election_polls(Polling_type):
 
 
                 median_dates = pd.to_datetime(dates, errors='coerce')
-                import pdb;pdb.set_trace()
-
 
                 last_election_date = datetime.strptime(Opinion_Polls_National.iloc[-1,0], '%m/%d/%y') 
                 days_since_election = (median_dates - last_election_date).dt.days
-
-                import pdb;pdb.set_trace()
-
 
                 Opinion_Polls_National.iloc[:,0] = days_since_election
                 Opinion_Polls_National = Opinion_Polls_National.rename(columns={"Date": "Days since last election"}) 
@@ -250,8 +240,6 @@ def format_election_polls(Polling_type):
 
 
                 # make Other category - bring together KAP,ACP,XEN, Other
-                import pdb;pdb.set_trace()
-
                 Insignificant_parties_2019 = ['XEN','KAP','ACP']
                 #Insignificant_parties_sum = Poll_Swings_National[Insignificant_parties_2019].sum(axis=1)
                 Poll_Swings_National = Poll_Swings_National.drop(Insignificant_parties_2019, axis=1)
@@ -267,7 +255,6 @@ def format_election_polls(Polling_type):
 
                 Opinion_Polls_National = pd.read_csv(f"{election_year}ElectionPollFormatted.csv").dropna(how='all')
 
-                import pdb;pdb.set_trace()
 
                 # Convert date format to datetime.date
                 dates = pd.Series(Opinion_Polls_National.iloc[:,0])
@@ -278,8 +265,6 @@ def format_election_polls(Polling_type):
                 last_election_date = datetime.strptime(Opinion_Polls_National.iloc[-1,0], "%d %b %Y") 
                 days_since_election = (parsed_median_dates - last_election_date).dt.days
 
-                import pdb;pdb.set_trace()
-
 
                 Opinion_Polls_National.iloc[:,0] = days_since_election
                 Opinion_Polls_National = Opinion_Polls_National.rename(columns={"Date": "Days since last election"}) # not active yet
@@ -291,7 +276,6 @@ def format_election_polls(Polling_type):
 
 
                 Poll_Swings_National = Poll_Swings_National.sort_values(by='Days since last election').reset_index(drop=True)
-                import pdb;pdb.set_trace()
 
 
                 Poll_Swings_National.to_csv(f"NationalPollsforMGRW{election_year}.csv", index=False)
@@ -300,8 +284,6 @@ def format_election_polls(Polling_type):
             if election_year == '2016':
 
                 Opinion_Polls_National = pd.read_csv(f"{election_year}ElectionPollFormatted.csv").iloc[:,:num_parties_per_election_year[election_year]+NO_ADDITIONAL_COLUMNS].dropna(how='all')
-
-                import pdb;pdb.set_trace()
 
                 # Convert date format to datetime.date
                 dates = pd.Series(Opinion_Polls_National.iloc[:,0])
@@ -312,8 +294,6 @@ def format_election_polls(Polling_type):
                 last_election_date = datetime.strptime(Opinion_Polls_National.iloc[-1,0], "%d-%b-%y") 
                 days_since_election = (parsed_median_dates - last_election_date).dt.days
 
-                import pdb;pdb.set_trace()
-
 
                 Opinion_Polls_National.iloc[:,0] = days_since_election
                 Opinion_Polls_National = Opinion_Polls_National.rename(columns={"Date": "Days since last election"}) # not active yet
@@ -325,8 +305,6 @@ def format_election_polls(Polling_type):
 
 
                 Poll_Swings_National = Poll_Swings_National.sort_values(by='Days since last election').reset_index(drop=True)
-                import pdb;pdb.set_trace()
-
 
                 Poll_Swings_National.to_csv(f"NationalPollsforMGRW{election_year}.csv", index=False)
 
@@ -359,8 +337,6 @@ def format_election_polls(Polling_type):
 
                 Opinion_Polls_Electorate = Opinion_Polls_Electorate.sort_values(by='Days since last election').reset_index(drop=True)
 
-                import pdb;pdb.set_trace()
-
                 Opinion_Polls_Electorate.to_csv(f"SeatPolls{election_year}Formatted.csv", index=False)
 
             if election_year == '2019':
@@ -386,8 +362,6 @@ def format_election_polls(Polling_type):
 
                 Opinion_Polls_Electorate = Opinion_Polls_Electorate.sort_values(by='Days since last election').reset_index(drop=True)
 
-                import pdb;pdb.set_trace()
-
 
                 Opinion_Polls_Electorate.to_csv(f"SeatPolls{election_year}Formatted.csv", index=False)
 
@@ -410,8 +384,6 @@ def format_election_polls(Polling_type):
 
 
                 Opinion_Polls_Electorate = Opinion_Polls_Electorate.sort_values(by='Days since last election').reset_index(drop=True)
-
-                import pdb;pdb.set_trace()
 
 
                 Opinion_Polls_Electorate.to_csv(f"SeatPolls{election_year}Formatted.csv", index=False)
@@ -437,9 +409,6 @@ def format_election_polls(Polling_type):
 
                 Opinion_Polls_Electorate = Opinion_Polls_Electorate.sort_values(by='Days since last election').reset_index(drop=True)
 
-                import pdb;pdb.set_trace()
-
-
                 Opinion_Polls_Electorate.to_csv(f"SeatPolls{election_year}Formatted.csv", index=False)
 
 
@@ -457,8 +426,6 @@ def format_election_polls(Polling_type):
 
                 State_Weighted_Polling_Average_list = []
                 State_Results_list = []
-
-                import pdb;pdb.set_trace()
 
                 # get the weighted-averages of state polls for both CAGO and also ON/UAPP added
                 State_polls = pd.read_csv(f"StatePolls{election_year}.csv", index_col = None)
@@ -502,7 +469,6 @@ def format_election_polls(Polling_type):
                     State_polling_avg.loc[:,'Election'] = Election_name
                     Election_result = state_polling.iloc[:1,4:]
                     Election_result.loc[:,'Election'] = Election_name
-                    import pdb;pdb.set_trace()
 
                     State_polling_avg = pd.concat([State_polling_avg, avg_stds], axis = 1)
                     
@@ -512,7 +478,6 @@ def format_election_polls(Polling_type):
 
                 State_Weighted_Polling_Average_df = pd.concat(State_Weighted_Polling_Average_list, ignore_index=True)
                 #State_Results_df =  pd.concat(State_Results_list, ignore_index=True)
-                import pdb;pdb.set_trace()
                 State_Weighted_Polling_Average_df.to_csv(f"2025StatePollingWeightedAverage{Type}_Day_{Day}.csv", index = False)
 
             else:
@@ -583,7 +548,6 @@ def format_election_polls(Polling_type):
                     
                     State_Weighted_Polling_Average_df = pd.concat([State_Weighted_Polling_Average_df,Polling_estimates_2016], ignore_index=True)
                     State_Results_df = pd.concat([State_Results_df,State_Results_2016], ignore_index=True)
-                    import pdb;pdb.set_trace()
 
                     State_Weighted_Polling_Average_df.to_csv(f"StatePollingWeightedAverage{Type}.csv", index = False)
                     State_Results_df.to_csv(f"StateFederalResults{'_including_ON' if include_ON else ''}.csv", index=False)
@@ -595,17 +559,16 @@ def format_election_polls(Polling_type):
 
     if Polling_type == 'State Election':
 
-        folder_path = '/home/dania-freidgeim/Test of Aus Election Code/StateElectionPolls'
+        folder_path = '/home/dania-freidgeim/Australian Election/StateElectionPolls'
 
         for filename in os.listdir(folder_path):
             file_path = os.path.join(folder_path, filename)
             if os.path.isfile(file_path):
-                print(file_path)  # do something with the file
+                #print(file_path)  # do something with the file
 
                 State_polls_unformatted = pd.read_csv(file_path, index_col = None)
 
                 dates = pd.Series(State_polls_unformatted.iloc[:,0]).str.strip()
-                #import pdb;pdb.set_trace()
 
                 parsed_median_dates = dates.apply(parse_date_range) 
 
@@ -644,7 +607,6 @@ def format_election_polls(Polling_type):
                 State_polling_avg.loc[:,'Election'] = Election_name
                 Election_result = State_polls_formatted.iloc[:1,1:-1]
                 Election_result.loc[:,'Election'] = Election_name
-                #import pdb;pdb.set_trace()
 
                 State_polling_avg = pd.concat([State_polling_avg, avg_stds], axis = 1)
                 
@@ -653,8 +615,6 @@ def format_election_polls(Polling_type):
 
         Weighted_Polling_Average_df = pd.concat(Weighted_Polling_Average_list, ignore_index=True)
         State_Election_Result_df =  pd.concat(State_Election_Result_list, ignore_index=True)
-
-        import pdb;pdb.set_trace()
 
         Weighted_Polling_Average_df.to_csv("StateElectionsWeightedPollingAverage.csv", index = False)
         State_Election_Result_df.to_csv("StateElectionResults.csv", index=False)
@@ -714,7 +674,6 @@ def format_election_polls(Polling_type):
         Weighted_Polling_Average_df = pd.concat(Weighted_Polling_Average_list, ignore_index=True)
         Election_Result_df =  pd.concat(Election_Result_list, ignore_index=True)
 
-        import pdb;pdb.set_trace()
         # combine DEM/GRN results
         Weighted_Polling_Average_df.loc[:,'DEM'] = Weighted_Polling_Average_df['DEM'].combine_first(Weighted_Polling_Average_df['GRN'])
         Weighted_Polling_Average_df.loc[:,'DEM_stds'] = Weighted_Polling_Average_df['DEM_stds'].combine_first(Weighted_Polling_Average_df['GRN_stds'])
@@ -731,4 +690,3 @@ def format_election_polls(Polling_type):
 for Polling_type in ['National','State','State Election', 'Old Election']:
     format_election_polls(Polling_type)
 
-import pdb;pdb.set_trace()
