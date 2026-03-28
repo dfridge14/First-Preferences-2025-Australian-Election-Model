@@ -4818,7 +4818,7 @@ def whole_procedure(Formal_prefs_dict, Senate_party_abvs_dict, list_of_DOP_dicts
 
             next_year = str(int(data_year) + 3)
 
-            #By_election_data = pd.read_csv("Federal_By_election_data.csv")
+            By_election_data = pd.read_csv("Federal_by_election_data.csv")
             By_election_results = pd.read_csv("By-election_results.csv")
             By_election_divs = By_election_results.loc[(int(data_year)<(By_election_results['byelection_year']).astype(int)) & ((By_election_results['byelection_year']).astype(int)<int(next_year)),'div_nm'].unique().tolist()
 
