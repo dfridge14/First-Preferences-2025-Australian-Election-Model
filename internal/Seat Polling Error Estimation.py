@@ -146,6 +146,7 @@ x_axis = 'Sample size'
 CAGO_abs_diff_list = []
 
 Polling_misses_ALR_list = []
+store_list = []
 for election_year in election_years:
     CAGO_poll_df = Seat_poll_year_dict[election_year].loc[Seat_poll_year_dict[election_year]['GRN']>0,]
 
@@ -179,6 +180,33 @@ for election_year in election_years:
                         value_vars=["COAL_abs_diff", "ALP_abs_diff", "GRN_abs_diff", "OTH_abs_diff"], 
                         var_name="PartyAb", 
                         value_name="Abs Difference")
+    
+    # Original parties
+    parties = ["COAL","ALP","GRN","OTH"]
+
+    # Melt poll columns
+    poll_val_df = CAGO_poll_df.reset_index().melt(
+        id_vars=["Days before election","Sample size"],
+        value_vars=parties,
+        var_name="PartyAb",
+        value_name="Poll"
+    )
+
+    # Melt abs_diff columns
+    abs_diff_df = CAGO_poll_df.reset_index().melt(
+        id_vars=["Days before election","Sample size"],
+        value_vars=[p + "_abs_diff" for p in parties],
+        var_name="PartyAb_diff",
+        value_name="Abs Difference"
+    ).assign(PartyAb=lambda df: df.PartyAb_diff.str.replace("_abs_diff",""))
+
+    # Merge poll and abs_diff together by electorate and party
+    store_df = poll_val_df.merge(
+        abs_diff_df[["PartyAb","Abs Difference"]],
+        on=["PartyAb"]
+    )
+    store_df['election_year'] = election_year
+    store_list.append(store_df)
 
     # Map party names to colors
     party_colors = {"COAL": "blue", "ALP": "red", "GRN": "green", "OTH": "gray"}
@@ -206,6 +234,8 @@ plt.show()
 Polling_misses_ALR_df = pd.concat(Polling_misses_ALR_list)
 
 Polling_misses_ALR_df.iloc[:,:3] = Polling_misses_ALR_df.iloc[:,:3] - Polling_misses_ALR_df.iloc[:,:3].mean()
+
+Polling_misses_df = pd.concat(store_list)
 
 import pdb;pdb.set_trace()
 

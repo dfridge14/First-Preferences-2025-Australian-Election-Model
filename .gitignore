@@ -5,3 +5,4 @@
 *.shx
 *.xml
 data/generated/
+Plotly_fun.py

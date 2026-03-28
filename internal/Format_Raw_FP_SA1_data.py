@@ -21,8 +21,8 @@ sys.excepthook = exception_handler
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-data_year = "2013"
-SA1_year_dict = {'2022':'2016','2019':'2016','2016':'2011','2013':'2011','2010':'2006'}
+data_year = "2025"
+SA1_year_dict = {'2025':'2021','2022':'2016','2019':'2016','2016':'2011','2013':'2011','2010':'2006'}
 
 
 # creates 3 files  
@@ -254,7 +254,7 @@ FP_By_PP_Complete.to_csv(f'{data_year}FirstPrefsByPPComplete.csv', index = False
 
 SA1_By_PP_full = pd.read_csv(f"{data_year}VotesBySA1.csv")
 
-SA1_col_name = 'ccd_id' if data_year in ['2022','2013'] else 'SA1_id'
+SA1_col_name = 'ccd_id' if data_year in ['2025','2022','2013'] else 'SA1_id'
 last_col = "votes" if data_year != '2013' else 'count'
 
 SA1_By_PP = SA1_By_PP_full[["div_nm",SA1_col_name,"pp_id",last_col]]

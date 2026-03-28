@@ -23,17 +23,42 @@ sys.excepthook = exception_handler
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election" / "New Candidate Files"
 os.chdir(base_dir)
 
-election_years = ['2004','2007','2010','2013','2016','2019','2022']
+election_years = ['2004','2007','2010','2013','2016','2019','2022','2025']
 
-data_year = '2013'
+data_year = '2025'
 #Party_details = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", index_col=None)
 
 
 def convert_coalitions(Party_set, state, year):
     # valid for 2010 election onwards
 
+    if 'HETP' in Party_set:
+        Party_set.discard('HETP')
+        Party_set.add('IMO')
+        Party_set.add('LDP')
+    if 'PFHL' in Party_set:
+        Party_set.discard('PFHL')
+        Party_set.add('IMO')
+        Party_set.add('LDP')
+        Party_set.add('GRPF')
+    if 'GRKA' in Party_set:
+        Party_set.discard('GRKA')
+        Party_set.add('GRPF')
+        Party_set.add('KAP')
+    if 'GAHE' in Party_set:
+        Party_set.discard('GAHE')
+        Party_set.add('IMO')
+        Party_set.add('GAP')
+    if 'GRHE' in Party_set:
+        Party_set.discard('GRHE')
+        Party_set.add('GRPF')
+        Party_set.add('IMO')
+
     condition = lambda p: ((state in ['VIC','NSW']) or ((state == 'QLD') and (year == '2007'))) and (p in ['LPNP','LNP','LP','NP'])
     converted_set = {'COAL' if condition(p) else p for p in Party_set}
+
+
+
 
     converted_set.discard('UNAM') # removes ungrouped label
     converted_set.discard('IND')
@@ -64,6 +89,8 @@ for year in election_years:
         Senate_parties_by_state_curr = Senate_parties_by_state.loc[Senate_parties_by_state['StateAb'] == state,]
         House_parties_by_state_curr = House_parties_by_state.loc[House_parties_by_state['StateAb'] == state,]
 
+        
+
 
         Senate_set = set(Senate_parties_by_state_curr['GroupAb'].unique()) # unique set of parties
         Senate_set = convert_coalitions(Senate_set, state, year)
@@ -72,6 +99,9 @@ for year in election_years:
         House_set = set(House_parties_by_state_curr['PartyAb'].unique()) # unique set of parties
         House_set = convert_coalitions(House_set, state, year)
         House_parties_by_state_dict[year][state] = House_set
+
+        if year == '2025':
+            import pdb; pdb.set_trace()
 
         chambers = [['House','Senate'],['Senate','House']]
         for order in chambers:
@@ -93,7 +123,7 @@ for year in election_years:
 # File will later be modified manually to add Party Ideologies
 #grand_party_category_df.to_csv('Grand_Party_Category_df_2004_2022.csv', index = False)
 
-#import pdb;pdb.set_trace()
+import pdb;pdb.set_trace()
 
 all_parties = pd.read_csv('Grand_Party_Category_df_2004_2022.csv', index_col=None)
 all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['CLR'],'Ideo_Category':['ALP'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)

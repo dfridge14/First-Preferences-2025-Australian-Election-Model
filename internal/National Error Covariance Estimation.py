@@ -32,7 +32,7 @@ sys.excepthook = exception_handler
 
 
 
-base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+base_dir = Path.home() / "Australian Election"
 os.chdir(base_dir)
 
 Type = 'Election_swing' # Election_swing Polling
@@ -274,6 +274,8 @@ def estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = 90, plot_h
 
 
             CAGO_Variance_estimation_swings_centered = CAGO_Variance_estimation_swings_centered if Type == 'Polling' else Election_swings_ALR_for_Var_centered
+
+            import pdb; pdb.set_trace()
 
 
             def weighted_nanstd(data, weights):

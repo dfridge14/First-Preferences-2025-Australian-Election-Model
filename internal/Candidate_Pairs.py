@@ -9,11 +9,11 @@ base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else 
 os.chdir(base_dir)
 
 INCUMBENT_ADVANTAGE = 4
-final_cand_no_dict = {"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
-name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
+final_cand_no_dict = {"2025":4,"2022":5, "2019": 4, "2016": 4,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
+name_changes_year_dict = {'2025':{},'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
 
 
-data_year = '2022'
+data_year = '2025'
 FINAL_CANDIDATE_NO = final_cand_no_dict[data_year]
 NONINCUMBENT_DISADVANTAGE =  INCUMBENT_ADVANTAGE/(FINAL_CANDIDATE_NO-1)
 
@@ -252,7 +252,7 @@ rows = [(year, div, num) for year, divs in Division_IND_groupings.items() for di
 
 # Create DataFrame
 C200_IND_positions_df = pd.DataFrame(rows, columns=['Election_year', 'div_nm', 'Number'])
-C200_IND_positions_df.to_csv("C200_IND_positions_df.csv", index=False)
+#C200_IND_positions_df.to_csv("C200_IND_positions_df.csv", index=False)
 
 
 import pdb;pdb.set_trace()
@@ -344,7 +344,7 @@ def create_DOP_By_PP_csvs(data_year, name_changes_year_dict):
 
     return 1
 
-#create_DOP_By_PP_csvs(data_year, name_changes_year_dict) # create csv file!
+create_DOP_By_PP_csvs(data_year, name_changes_year_dict) # create csv file!
 
 import pdb;pdb.set_trace()
 

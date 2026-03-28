@@ -4,6 +4,7 @@ import pandas as pd
 import arviz as az
 import os
 from pathlib import Path
+import pickle
 import matplotlib.pyplot as plt
 from collections import defaultdict
 
@@ -2270,6 +2271,22 @@ def make_party_category_dict():
 
 
 
+def compare_TCP_via_senate(election_year, div, tcp_pair, party):
+    import pickle 
+
+
+
+    with open(f"Formal_prefs_dict_{election_year}.pkl", "rb") as f:
+        Formal_prefs_dict = pickle.load(f)
+
+    with open(f"Senate_party_abvs_dict_{election_year}.pkl", "rb") as f:
+        Senate_party_abvs_dict = pickle.load(f)
+
+    
+
+    
+
+
 def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','2022','2025'], party_category_dict={}):
 
     from collections import defaultdict
@@ -2336,7 +2353,7 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
 
     tcp_pairs = (TCP_Preference_Flows.groupby("div_nm")["TCP_Ab"].unique().apply(lambda x: tuple(sorted(set(x)))))  # optional: sort so (ALP, LP) and (LP, ALP) match)
 
-    tcp_coalified = tcp_pairs.apply(lambda tup: tuple('COAL' if x in ['LP', 'NP','LNP','CLP'] else x for x in tup))
+    tcp_coalified = tcp_pairs.apply(lambda tup: tuple('COAL' if x in ['LP', 'NP','LNP','CLP'] else x for x in tup)) # DELETE
 
 
 
@@ -2389,8 +2406,6 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
 
 
         first, second = tcp_pair  # alphabetical order
-        #if div == 'Brisbane':
-        #    import pdb;pdb.set_trace() 
         # We want % transferred to the *first* in alphabetical order
         if party_category_dict[tcp] == first:
             transfer_pct = pct
@@ -2470,9 +2485,6 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
                     Preference_flows_dict_with_categories[div][party][('ALP', 'COAL')] = percent_to_alp
 
 
-
-
-
     state_category_values = defaultdict(lambda: defaultdict(list))
 
     # STEP 2 — Fill in missing PARTY entries by div
@@ -2547,8 +2559,6 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
 
     # Step 2: Convert to DataFrame and pivot
     long_df = pd.DataFrame(rows)
-    #import pdb;pdb.set_trace()
-
     # Step 3: Pivot to wide format: one row per division, one column per party
     # Step 2: Create the dictionary of wide DataFrames
     result_dict = {}
@@ -2607,8 +2617,6 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
         #import pdb;pdb.set_trace()
 
 
-    #import pdb;pdb.set_trace()
-
     # now, find non-classic divisions and extrapolate
 
     for tcp_pair in Non_classic_divs.keys():
@@ -2627,7 +2635,6 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
         
         tcp_overall = pd.concat(series_list, axis=1)
         tcp_average = tcp_overall.mean(axis=1).dropna()
-
 
 
 
@@ -2819,7 +2826,6 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
 
                     if pd.isna(result_dict[div].at[i, 'Centre']):
                         import pdb;pdb.set_trace()
-                        2
                     
                 elif (row['Right']) and (row['ALP']):
                     result_dict[div].at[i, 'Centre'] = (row['Right'] + row['ALP'])/2
@@ -2833,7 +2839,6 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
                 if pd.isna(result_dict[div].at[i, 'Centre']):
                     print(div, i, row)
                     import pdb;pdb.set_trace()
-                    3
 
                     
 
@@ -3693,13 +3698,23 @@ def run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forc
     party_category_dict = make_party_category_dict()
     party_to_category_centered_IND = {k: ('IND' if v == 'Centre' else v) for k, v in party_category_dict.items()}
 
-    proportions_transferred_to_first = make_TCP_pair_category_dict(election_year = election_year, party_category_dict=party_category_dict)
+    os.chdir("/home/dania-freidgeim/Australian Election")
+
+    with open(f"TCP_pair_category_dict_for_{election_year}.pkl", "rb") as f:
+        proportions_transferred_to_first = pickle.load(f)
+    os.chdir("/home/dania-freidgeim/Necessary CSV Files")
+
+    #proportions_transferred_to_first = make_TCP_pair_category_dict(election_year = election_year, party_category_dict=party_category_dict)
 
     sigma_joint, sigma_ind = 4.2, 0.5
 
     per_electorate_winners, per_simulation_winners = distribution_to_top_2(final_simulated_votes, proportions_transferred_to_first, Results_dict, party_to_category_centered_IND, sigma_joint, sigma_ind)
 
     ##################### Results and exporting data ##############################
+
+    # FP votes
+    for div in final_simulated_votes.keys():
+        final_simulated_votes[div] = pd.DataFrame(final_simulated_votes[div], columns=Results_dict[div].columns)
 
     Winner_table, Average_seats = obtain_Winner_table(per_simulation_winners, Results_dict, n_simulations)
 
@@ -3719,12 +3734,21 @@ def run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forc
     "Average_seats": Average_seats,
     "per_electorate_winners": per_electorate_winners,
     "per_simulation_winners": per_simulation_winners,
+    "simulated_FP_votes": final_simulated_votes,
     "Results_dict": Results_dict,
 }
 
 
 if __name__ == "__main__":
+    forced_polling_average = [0.219,0.307,0.122,0.231,0.01,0.107] # Even odds of winning: [0.3782,0.2856,0.1220,0.064,0.0191,0.1311] # Actual result to be the Mean: [0.3257,0.3931,0.0920,0.064,0.0191,0.1061] # Yougov = [0.311,0.314,0.126,0.091,0.02, 0.138]
+    TOP_transfers = np.array([-0.122062, -0.071467,-0.123303, -0.117765, 0.565436, -0.130839])*forced_polling_average[-2]
+    forced_polling_average =  np.array(forced_polling_average) + np.array([-0.122062, -0.071467,-0.123303, -0.117765, 0.565436, -0.130839])*forced_polling_average[-2]
+    forced_polling_average[-1] = 1 - forced_polling_average[:-1].sum()
+    forced_polling_average = forced_polling_average.tolist()
+
     outputs = run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forced_polling_average = [], export_simulation_csvs = 0)
+
+    import pdb;pdb.set_trace()
 
     print(outputs["Average_seats"])
 

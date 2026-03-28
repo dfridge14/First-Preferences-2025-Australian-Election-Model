@@ -8,7 +8,7 @@ base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else 
 os.chdir(base_dir)
 
 
-data_year = '2025'
+data_year = '2013'
 
 directory = Path(f"C:/Dania/2024/Australian Election/DOP_By_PP_{data_year}") if os.name == "nt" else Path.home() / f"Australian Election/DOP_By_PP_{data_year}"
 
