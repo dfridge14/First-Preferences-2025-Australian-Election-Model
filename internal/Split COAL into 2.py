@@ -106,9 +106,16 @@ COAL_NP_ratio_df = pd.concat(COAL_ratio_df_list, ignore_index=False)
 COAL_NP_ratio_df_2025 = pd.read_csv("COAL_NP_ratio_df_2025.csv", index_col = None).fillna('')
 
 ONLY_2025 = 1
+BYELECTION_INCLUDED = 1
 
 if ONLY_2025:
     COAL_NP_ratio_df = pd.concat([COAL_NP_ratio_df,COAL_NP_ratio_df_2025], ignore_index=True)
+if BYELECTION_INCLUDED:
+    new_rows = pd.DataFrame([
+        {'div_nm': 'Eden-Monaro', 'State': 'NSW', 'election_year': '2022', 'Incumbent': '','NP_ratio': 0.1427}, # From 2020 Eden-Monary by-election
+        {'div_nm': 'Farrer',      'State': 'NSW', 'election_year': '2028', 'Incumbent': ''}
+    ])
+    COAL_NP_ratio_df = pd.concat([COAL_NP_ratio_df,new_rows], ignore_index=True)
 
 import pdb;pdb.set_trace()
 
@@ -213,6 +220,51 @@ COAL_NP_ratio_df_prediction.loc[:,'final_estimate'] = COAL_NP_ratio_df_predictio
 
 COAL_NP_ratio_df_prediction = COAL_NP_ratio_df_prediction[['div_nm','State','election_year','final_estimate']]
 
+df_raw = pd.read_csv("COAL_NP_ratio_df.csv")
+df_raw_2025 = pd.read_csv("COAL_NP_ratio_df_2025.csv")
+
+df_raw = pd.concat([df_raw, df_raw_2025], axis=0)
+df_pred = COAL_NP_ratio_df_prediction.copy()
+
+# keep BOTH separately (critical fix)
+df_raw = df_raw.rename(columns={"NP_ratio": "NP_actual"})
+df_pred = df_pred.rename(columns={"final_estimate": "NP_pred"})
+
+df_raw["source"] = "actual"
+df_pred["source"] = "prediction"
+
+df_all = pd.merge(
+    df_raw[["div_nm","State","election_year","NP_actual"]],
+    df_pred[["div_nm","election_year","NP_pred"]],
+    on=["div_nm","election_year"],
+    how="inner"
+)
+
+def estimate_lp_np_kappa_from_forecast(df):
+
+    y = df["NP_actual"].values
+    yhat = df["NP_pred"].values
+
+    mask = np.isfinite(y) & np.isfinite(yhat)
+    y = y[mask]
+    yhat = yhat[mask]
+
+    mu = np.mean(y)
+
+    sigma2 = np.var(y - yhat, ddof=1)
+    sigma2 = max(sigma2, 1e-8)
+
+    kappa = (mu * (1 - mu) / sigma2) - 1
+
+    return max(kappa, 1e-6)
+
+kappa_lp_np = estimate_lp_np_kappa_from_forecast(df_all)
+
+
+if BYELECTION_INCLUDED:
+    COAL_NP_ratio_df_prediction.loc[(COAL_NP_ratio_df_prediction['election_year'] == '2022') & (COAL_NP_ratio_df_prediction['div_nm'] == 'Eden-Monaro'),'election_year'] = 'Byelection' # 'Eden-Monaro2020'
+    COAL_NP_ratio_df_prediction.loc[(COAL_NP_ratio_df_prediction['election_year'] == '2028') & (COAL_NP_ratio_df_prediction['div_nm'] == 'Farrer'),'election_year'] = 'Byelection' # 'Farrer2026'
+
 import pdb;pdb.set_trace()
 
 if not ONLY_2025:
@@ -225,3 +277,34 @@ else:
 
 
 import pdb;pdb.set_trace()
+
+
+# Seat polling dirichlet alpha comparison vs estimates_df
+
+import numpy as np
+
+def estimate_dirichlet_alpha(predictions, results):
+    p = np.array(predictions)
+    r = np.array(results)
+    
+    # 1. Variance 'capacity' of the proportions
+    # This is the p*(1-p) term for each category
+    var_capacity = np.mean(p * (1 - p))
+    
+    # 2. Empirical Variance (Mean Squared Error)
+    mse = np.mean((r - p)**2)
+    
+    # 3. Method of Moments for Alpha_0
+    alpha_0 = (var_capacity / mse) - 1
+    return alpha_0
+
+# Your Data
+results = [0.03, 0.05, 0.3, 0.59, 0.394, 0.142]
+p1 = [0.047, 0.085, 0.4, 0.46, 0.2, 0.15]
+p2 = [0.18, 0.18, 0.19, 0.32, 0.17, 0.18]
+
+a0_p1 = estimate_dirichlet_alpha(p1, results)
+a0_p2 = estimate_dirichlet_alpha(p2, results)
+
+print(f"Alpha for p1: {a0_p1:.4f}")
+print(f"Alpha for p2: {a0_p2:.4f}")

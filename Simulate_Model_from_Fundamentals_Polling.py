@@ -1408,7 +1408,7 @@ def get_National_State_Prior_estimates(election_year, new_vote_totals_states, do
 
 
 
-def simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_col = 'COAL', df_t = 0, v = 0.1, s = 0.6, beta = 0.5, forced_polling_average = []):
+def simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_col = 'COAL', df_t = 0, v = 0.1, s = 0.6, beta = 0.5, forced_polling_average = [], forced_state_averages=pd.DataFrame()):
 
     # forced_polling_average allows input of list of 6 vote proportions summing to 1 for [ALP, COAL, GRN, ON, TOP, OTH]
 
@@ -1670,14 +1670,14 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_c
     Scaled_precisions_curr = pd.read_csv("State_Polling_Scaled_Precisions.csv", index_col = 0).loc[election_year] 
     relative_state_precisions = Scaled_precisions_curr.set_index('Scope', drop = True).drop('Mean_precision', axis = 1)
 
-    s_i = s * relative_state_precisions
+    s_i = s * relative_state_precisions if forced_state_averages.empty else pd.Series(1.0, index=relative_state_precisions.index) # if forced states, trust them fully
 
     #print("s_i", v, s)
 
     # weight the State poll deviaiton and electorate poll deviation by s_i per state
     s_i_reshaped = s_i.values.reshape(1,NO_OF_STATES,1)
 
-    State_Simulated_polling_error_centered = s_i_reshaped * State_Simulated_polling_error_centered + (1-s_i_reshaped) * State_Simulated_election_error_centered
+    State_Simulated_polling_error_centered = s_i_reshaped * State_Simulated_polling_error_centered + (1-s_i_reshaped) * State_Simulated_election_error_centered # CHECK - is this the correct way to incorporate the error scaling?
 
 
     #import pdb;pdb.set_trace()
@@ -1766,7 +1766,7 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_c
 
     
     state_poll_dev_alr = pd.read_csv("State_Polling_Deviations_from_National.csv", index_col=None)
-    state_poll_dev_alr_2025 = pd.read_csv(f"2025_State_Polling_Deviations_from_National_Day_{Day}.csv", index_col=None)
+    state_poll_dev_alr_2025 = pd.read_csv(f"2025_State_Polling_Deviations_from_National_Day_{Day}.csv", index_col=None) if forced_state_averages.empty else forced_state_averages
 
 
     State_Polls_Deviations_from_National_df_dict = {'2016': state_poll_dev_alr.loc[state_poll_dev_alr['Election_year']==2016,].drop(['ON','Election_year'], axis=1), \
@@ -1903,7 +1903,7 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_c
 
 
 
-    # Post-processing to remove artificial additions (includding ON in 2019/22)!
+    # Post-processing to remove artificial additions (including ON in 2019/22)!
     if election_year == '2016':
         div_idx = Div_relative_weights.index.get_loc('Gorton')
         OTH = Simulated_Electorate_Polling_Results[:, div_idx, 3]  # shape (10000,)
@@ -1922,6 +1922,9 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_c
         return 1
 
     def redistribute_ON_votes(sim, division_names, party_names, ON_transfer_dict, election_year):
+
+        """For electorates where ON or TOP aren't running, redistribute their votes to original parties"""
+
         party_index_map = {name: idx for idx, name in enumerate(party_names)}
 
         if election_year == '2025':
@@ -1932,7 +1935,7 @@ def simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_c
         for div, transfer_row in ON_transfer_dict.items():
             div_idx = division_names.index(div)
 
-            if (election_year == '2025') and (div in ['Canberra', 'Fenner', 'Bean']):
+            if (election_year == '2025') and (div in ['Canberra', 'Fenner', 'Bean']): # 2025 ACT - both ACT and TOP not contesting
 
                 ON_votes = sim[:, div_idx, [3,4]]
 
@@ -2165,12 +2168,12 @@ def expand_all_divisions_from_prior_df(sim, Prior_estimates_dict, Results_dict, 
 
     return final_sim, party_name_dict
 
-def First_Preference_Model_Simulation(election_year, Day, ref_col, w, alpha, v, s, beta, n_simulations = 1000, forced_polling_average = []):
+def First_Preference_Model_Simulation(election_year, Day, ref_col, w, alpha, v, s, beta, n_simulations = 1000, forced_polling_average = [], forced_state_averages = pd.DataFrame()):
 
 
 
     # Simulate votes for ALP, COAL, GRN, ON, TOP/UAPP, OTH (No ON/TOP/UAPP in 2016)
-    Simulated_Electorate_Polling_Results, Simulated_Electorate_Swing_Results = simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_col, v = v, s=s, beta=beta, forced_polling_average=forced_polling_average)
+    Simulated_Electorate_Polling_Results, Simulated_Electorate_Swing_Results = simulate_Polling_Fundamentals_model(n_simulations, election_year, Day, ref_col, v = v, s=s, beta=beta, forced_polling_average=forced_polling_average, forced_state_averages=forced_state_averages)
 
 
     Prior_estimates_dict = get_Prior_estimates_df(election_year, dont_add_ON = True)[1] # single row df for each div_nm
@@ -2344,9 +2347,7 @@ def make_TCP_pair_category_dict(election_year, election_years = ['2016','2019','
         div_to_state.loc[div_to_state['div_nm'] == 'North Sydney',] = 'Bullwinkel', 'WA'
         div_to_state = div_to_state.loc[~(div_to_state['div_nm'] == 'Higgins'),]
 
-    div_to_state_dict = {div: div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
-
-
+    
 
 
     # 1. Get PartyAb: 1st alphabetically for each pair:
@@ -3655,8 +3656,137 @@ def obtain_Winner_table(per_simulation_winners, Results_dict, n_simulations):
 
     return Winner_table, Average_seats_df
 
+def TOP_not_contesting_expansion(state_dict, Nat_poll_TOP, election_year="2025"): ### written by Gemini
+    """Computes state-segregated TOP transfers and applies the corrections
 
-def run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forced_polling_average = [], export_simulation_csvs = 0):
+    directly to a copy of the original state data dictionary, returning a new dictionary, as well as the National forced_polling_average, which accounts for expanded TOP vote
+    """
+    os.chdir("/home/dania-freidgeim/Australian Election")
+    div_to_state = pd.read_csv(f"{election_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+    os.chdir(Path.home() / "Necessary CSV Files")
+    div_to_state_dict = {div: div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
+
+    Nat_expanded_TOP = 0 # initial
+
+    # FIX: produce just National forced_pollinh)
+
+    if election_year != "2025":
+        # Return a copy of the original dict unmodified if not applicable
+        return {k: list(v) for k, v in state_dict.items()}
+
+    # --- 1. Compute State-Segregated TOP Transfers ---
+    Prior_estimates_df = get_Prior_estimates_df(election_year, dont_add_ON=0)[0].rename(columns={"Other": "OTH"})
+    Prior_estimates_no_TOP_df = get_Prior_estimates_df(election_year, dont_add_ON=1)[0].rename(columns={"Other": "OTH"})
+
+    # Electorates with no TOP:
+    No_TOP_electorates = Prior_estimates_no_TOP_df.loc[Prior_estimates_no_TOP_df["TOP"] == 0].index
+
+    # How much extra would non-TOP seats get globally per TOP-contesting vote?
+    Extra_TOP_scaling = Prior_estimates_df["TOP"].sum() / (Prior_estimates_df.loc[~Prior_estimates_df.index.isin(No_TOP_electorates), "TOP"].sum()) - 1
+
+    # Map electorates to their respective states using your dictionary
+    Prior_estimates_df["StateAb"] = Prior_estimates_df.index.map(div_to_state_dict)
+    Prior_estimates_no_TOP_df["StateAb"] = (Prior_estimates_no_TOP_df.index.map(div_to_state_dict))
+
+    # Identify the exact seats where TOP is missing in the real world
+    No_TOP_electorates = Prior_estimates_no_TOP_df.loc[Prior_estimates_no_TOP_df["TOP"] == 0].index
+
+    # Create a copy of the state data to adjust
+    df_adjusted = pd.DataFrame(state_dict).set_index("StateAb")
+
+    for state_ab in df_adjusted.index:
+
+        # Isolate all seats belonging to this state
+        all_state_seats = Prior_estimates_df[Prior_estimates_df["StateAb"] == state_ab].index if state_ab != "NAT" else Prior_estimates_df.index # If NAT, use all seats
+        state_no_TOP_seats = all_state_seats[all_state_seats.isin(No_TOP_electorates)]
+        state_with_top_seats = all_state_seats[~all_state_seats.isin(No_TOP_electorates)]
+
+        # QLD check: If 0 seats are missing TOP, no adjustment is needed
+        if len(state_no_TOP_seats) == 0:
+            continue
+        elif len(state_with_top_seats) == 0:
+            # mean difference between prior w. TOP added vs actual prior
+            TOP_added_diff = (Prior_estimates_df.loc[all_state_seats].drop(columns=["StateAb"]) - Prior_estimates_no_TOP_df.loc[all_state_seats].drop(columns=["StateAb"])).mean()
+            adj_vector = TOP_added_diff.copy()
+        else:
+            state_prior = Prior_estimates_df.loc[all_state_seats]
+            contested_prior = Prior_estimates_df.loc[state_with_top_seats]
+
+            state_extra_scaling = (state_prior["TOP"].sum() / contested_prior["TOP"].sum()) - 1
+            # mean difference between prior w. TOP added vs actual prior (among no-TOP seats)
+            raw_missing_diff = (Prior_estimates_df.loc[state_no_TOP_seats].drop(columns=["StateAb"]) - Prior_estimates_no_TOP_df.loc[state_no_TOP_seats].drop(columns=["StateAb"])).mean()
+            state_transfer_profile = raw_missing_diff / raw_missing_diff["TOP"] # rescaled so TOP is 
+            # Expected reported state poll result
+            expected_state_TOP = (Nat_poll_TOP*(Extra_TOP_scaling+1)) * (contested_prior["TOP"].sum()/state_prior["TOP"].sum())
+            adj_vector = state_transfer_profile * state_extra_scaling * expected_state_TOP # use expected_state_TOP as scale for state TOP
+
+            # last 2 lines simplify to: adj_vector = state_transfer_profile * (Nat_poll_TOP*(Extra_TOP_scaling+1)) * prior_prop_missing; prior_prop_missing = 1 - contested_prior["TOP"].sum()/state_prior["TOP"].sum()
+
+            #print(state_ab, len(all_state_seats),len(state_no_TOP_seats),len(all_state_seats)/len(state_with_top_seats), state_extra_scaling, expected_state_TOP)
+            #print(adj_vector)
+            if state_ab == 'NAT':
+                Nat_expanded_TOP = Nat_poll_TOP + adj_vector['TOP'] # national TOP vote if TOP contesting everywhere. 
+
+                # CHECK: should this be adjusted for ON too?
+            
+
+        # MERGE TOP INTO OTH AND APPLY
+        adj_vector["OTH"] = adj_vector["OTH"] + adj_vector["TOP"]
+
+        for party in ["COAL", "ALP", "GRN", "ON", "OTH"]:
+            if party in adj_vector:
+                df_adjusted.loc[state_ab, party] += adj_vector[party]
+
+    # create NAT forced_polling_average
+    forced_OTH = df_adjusted.loc['NAT']['OTH'] - Nat_expanded_TOP
+    forced_polling_average = df_adjusted.loc['NAT'].to_list()
+    forced_polling_average[-1] = Nat_expanded_TOP
+    forced_polling_average.append(forced_OTH)
+
+
+    return df_adjusted.reset_index().to_dict(orient="list"), forced_polling_average
+
+
+
+def calculate_state_deviations(state_dict, election_year="2025", ref_col = 'COAL', USE_YOUGOV = False):
+    """
+    Inputs a dictionary of state and National results (polling averages), converting into df of ALR deviations from the national result (polling)
+    """
+
+    if USE_YOUGOV:
+        
+        os.chdir("/home/dania-freidgeim/Australian Election")
+        Yougov_state_results = pd.read_csv("YouGov_State_deviations_ALR.csv") # df already created
+
+        os.chdir(base_dir)
+        return Yougov_state_results
+    
+    # 1. Construct initial DataFrame and set the index to StateAb
+    State_MRP_averages = pd.DataFrame(state_dict).set_index('StateAb')
+    
+    # 2. Append the Election column (e.g., '2025' + 'ACT' -> '2025ACT')
+    State_MRP_averages['Election'] = election_year + State_MRP_averages.index
+
+    # 3. Define calculation parameters
+    parties = ['ALP', 'GRN', 'ON', 'OTH']
+    ref_col = 'COAL'
+
+    # 4. Apply the ALR transformation (replacing 0 with NaN to handle log(0))
+    alr = np.log(State_MRP_averages[parties].replace(0, np.nan).div(State_MRP_averages[ref_col], axis=0))
+        
+    # 5. Calculate deviations by subtracting the NAT row, then drop NAT
+    deviations = alr.sub(alr.loc['NAT']).drop('NAT')
+
+    # 6. Format metadata columns to match your target layout
+    deviations['Election_year'] = State_MRP_averages['Election'].str[:4].drop('NAT')
+    deviations['State'] = deviations.index
+
+    # 7. Reset index for the final clean output
+    State_deviations = deviations.reset_index(drop=True)
+    
+    return State_deviations
+
+def run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forced_polling_average = [], forced_state_averages = pd.DataFrame(), export_simulation_csvs = 0):
 
     #forced_polling_average = []#[0.3159,0.3443,0.1196,0.0618,0.0299] # TOP shifts -0.136502 -0.233139 -0.235509 -0.22493  1.079983 -0.249903 # [0.26, 0.35, 0.115, 0.14, 0.03]
     #forced_polling_average.append(1-np.array(forced_polling_average).sum()) if forced_polling_average else [] # ensure sum-to-1-constraint
@@ -3691,7 +3821,7 @@ def run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forc
     elif election_year == '2016':
         w, alpha, s, v, beta = 0.85,20,0.7,0.05,0.8
 
-    final_simulated_votes, Results_dict =  First_Preference_Model_Simulation(election_year = election_year, Day = Day, ref_col='COAL', w = w, alpha = alpha, v = v, s = s, beta = beta, n_simulations = n_simulations, forced_polling_average = forced_polling_average)
+    final_simulated_votes, Results_dict =  First_Preference_Model_Simulation(election_year = election_year, Day = Day, ref_col='COAL', w = w, alpha = alpha, v = v, s = s, beta = beta, n_simulations = n_simulations, forced_polling_average = forced_polling_average, forced_state_averages=forced_state_averages)
 
     ########################################################################## SIMULATE 2025 DISTRIBUTION OF PREFERENCES ######################################################################
 
@@ -3707,6 +3837,8 @@ def run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forc
     #proportions_transferred_to_first = make_TCP_pair_category_dict(election_year = election_year, party_category_dict=party_category_dict)
 
     sigma_joint, sigma_ind = 4.2, 0.5
+
+
 
     per_electorate_winners, per_simulation_winners = distribution_to_top_2(final_simulated_votes, proportions_transferred_to_first, Results_dict, party_to_category_centered_IND, sigma_joint, sigma_ind)
 
@@ -3740,17 +3872,39 @@ def run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forc
 
 
 if __name__ == "__main__":
-    forced_polling_average = [0.219,0.307,0.122,0.231,0.01,0.107] # Even odds of winning: [0.3782,0.2856,0.1220,0.064,0.0191,0.1311] # Actual result to be the Mean: [0.3257,0.3931,0.0920,0.064,0.0191,0.1061] # Yougov = [0.311,0.314,0.126,0.091,0.02, 0.138]
-    TOP_transfers = np.array([-0.122062, -0.071467,-0.123303, -0.117765, 0.565436, -0.130839])*forced_polling_average[-2]
-    forced_polling_average =  np.array(forced_polling_average) + np.array([-0.122062, -0.071467,-0.123303, -0.117765, 0.565436, -0.130839])*forced_polling_average[-2]
-    forced_polling_average[-1] = 1 - forced_polling_average[:-1].sum()
-    forced_polling_average = forced_polling_average.tolist()
+    #forced_polling_average = [0.3182,0.3456,0.122,0.064,0.0191, 0.1311]# 2025 result: [0.318,0.346,0.122,0.064,0.019, 0.131] # [0.219,0.307,0.122,0.231,0.01,0.107] # Even odds of winning: [0.3782,0.2856,0.1220,0.064,0.0191,0.1311] # Actual result to be the Mean: [0.3257,0.3931,0.0920,0.064,0.0191,0.1061] # Yougov = [0.311,0.314,0.126,0.091,0.02, 0.138]
+    #TOP_transfers = np.array([-0.122062, -0.071467,-0.123303, -0.117765, 0.565436, -0.130839])*forced_polling_average[-2]
+    #forced_polling_average =  np.array(forced_polling_average) + np.array([-0.122062, -0.071467,-0.123303, -0.117765, 0.565436, -0.130839])*forced_polling_average[-2]
+    #forced_polling_average[-1] = 1 - forced_polling_average[:-1].sum()
+    #forced_polling_average = forced_polling_average.tolist()
+    #print(forced_polling_average)
 
-    outputs = run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forced_polling_average = [], export_simulation_csvs = 0)
+    forced_polling_average = [0.3182,0.3456,0.1220,0.0640,0.0191,0.1311]
+    state_averages_dict = {
+        'StateAb': ['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA', 'NAT'],
+        'COAL':    [0.2116, 0.3153, 0.3384, 0.3491, 0.2845, 0.2450, 0.3220, 0.3154, forced_polling_average[0]],
+        'ALP':     [0.4753, 0.3520, 0.3794, 0.3098, 0.3831, 0.3660, 0.3395, 0.3559, forced_polling_average[1]],
+        'GRN':     [0.1506, 0.1106, 0.1022, 0.1176, 0.1342, 0.1112, 0.1359, 0.1197, forced_polling_average[2]],
+        'ON':      [0.0000, 0.0602, 0.0772, 0.0784, 0.0615, 0.0603, 0.0579, 0.0761, forced_polling_average[3]],
+        'OTH':     [0.1625, 0.1619, 0.1028, 0.1451, 0.1367, 0.2175, 0.1447, 0.1329, sum(forced_polling_average[-2:])]
+    }
+
+    adjusted_state_averages_dict, forced_polling_average = TOP_not_contesting_expansion(state_dict=state_averages_dict,Nat_poll_TOP=forced_polling_average[-2], election_year="2025")
+    forced_state_averages = calculate_state_deviations(adjusted_state_averages_dict, election_year="2025", ref_col = 'COAL', USE_YOUGOV = False)
+    outputs = run_model(election_year = '2025', n_simulations=1000, ref_col = 'COAL', forced_polling_average = [], forced_state_averages = pd.DataFrame(), export_simulation_csvs = 0)
 
     import pdb;pdb.set_trace()
+    
 
     print(outputs["Average_seats"])
-
-
+    # for analysis - compute Brier score: 
+    fav_vs_res = outputs["Winner_table"]['favourite'][:150].to_frame().merge(pd.read_csv('2025HouseMembersElected.csv')[['DivisionNm','PartyAb']], left_index = True, right_on = 'DivisionNm').set_index('DivisionNm')
+    fav_vs_res.loc[fav_vs_res['favourite']!=fav_vs_res['PartyAb']]
+    fav_stats = {el: Counter(sims).most_common(1)[0] for el, sims in outputs["per_electorate_winners"].items()}
+    df = pd.DataFrame.from_dict(fav_stats, orient='index', columns=['favourite', 'win_count'])
+    df['favourite'] = df['favourite'].str.strip('12345')
+    df['prob'] = df['win_count'] / 1000
+    df['winner'] = fav_vs_res['PartyAb']
+    df['is_correct'] = (df['favourite'] == df['winner']).astype(int)
+    brier_score = ((df['prob'] - df['is_correct']) ** 2).mean()
 

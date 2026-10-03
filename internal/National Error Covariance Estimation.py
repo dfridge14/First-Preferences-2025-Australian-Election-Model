@@ -41,6 +41,7 @@ ref_col = 'COAL' # 'COAL'
 # manage removal of data for given election_year
 curr_election_year = '2025'
 REMOVE_ELECTION_YEAR = 1
+TO_CSV = 0
 Day = 90
 
 
@@ -153,6 +154,7 @@ def estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = 90, plot_h
 
         for Type in ['Polling','Election_swing']:
 
+
             if Type == 'Polling':
                 # 1. Correlation estimate of 3x3 - 6 GRW 2007-2022 + 14 State Elections + 15 State Results
                 
@@ -237,6 +239,7 @@ def estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = 90, plot_h
 
             elif Type == 'Election_swing':
                 Election_swings_df = pd.read_csv("ElectionSwings.csv", index_col=None).set_index("Election")
+                Election_swings_df = pd.read_csv("ElectionSwings_updated_2026.csv", index_col=None).set_index("Election")
                 Election_results_curr = Election_swings_df.iloc[:,:4]
                 Election_results_prev = Election_swings_df.iloc[:,4:]
                 Election_results_curr_ALR = np.log(Election_results_curr.drop(columns=[ref_col]).div(Election_results_curr[ref_col], axis=0))
@@ -245,11 +248,13 @@ def estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = 90, plot_h
 
                 Election_swings_ALR_centered = Election_swings_ALR - Election_swings_ALR.mean()
                 Election_swings_ALR_centered_after_1996 = Election_swings_ALR_centered.loc[~(Election_swings_ALR_centered.index.isin(['1987','1990','1993','1996'])),]
-
+                #import pdb; pdb.set_trace()
 
                 if REMOVE_ELECTION_YEAR:
                     CAGO_ALR_swings_centered = Election_swings_ALR_centered_after_1996.loc[~(Election_swings_ALR_centered_after_1996.index.str.startswith(election_year_to_remove)),]
 
+
+                #import pdb; pdb.set_trace()
                 corr_matrix_Elec = np.corrcoef(Election_swings_ALR_centered_after_1996.values, rowvar=False)
                 print(corr_matrix_Elec)
 
@@ -259,6 +264,8 @@ def estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = 90, plot_h
 
                 # 1 to post-2004 elections, 0.5 to state elections, 0.6 to 2004/2001, 0.5 to 20th century elecs
                 weights = np.array([1,1,1,1,1,1,0.6,0.6] + [0.5]*24)
+
+                weights = np.array([1,1,1,1,1,1,0.6,0.6] + [0.5]*24 + [1] + [0.5]*4)
 
                 if election_year_to_remove and election_year_to_remove != '2025':
                     if election_year_to_remove == '2016':
@@ -272,10 +279,13 @@ def estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = 90, plot_h
                     Election_swings_ALR_for_Var_centered = Election_swings_ALR_for_Var_centered.iloc[indices]
 
 
+                #import pdb; pdb.set_trace()
+
+
 
             CAGO_Variance_estimation_swings_centered = CAGO_Variance_estimation_swings_centered if Type == 'Polling' else Election_swings_ALR_for_Var_centered
 
-            import pdb; pdb.set_trace()
+            #import pdb; pdb.set_trace()
 
 
             def weighted_nanstd(data, weights):
@@ -367,7 +377,7 @@ def estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = 90, plot_h
             import pdb;pdb.set_trace()
 
 
-            if REMOVE_ELECTION_YEAR:
+            if REMOVE_ELECTION_YEAR and TO_CSV:
 
                 Election_swing_ON_UAPP_ALR_variances = {'2016':0.0751,'2019':0.0904,'2022':0.0901,'2025':0.0944}
                 Polling_swing_ON_UAPP_ALR_variances = {'2016':0.0136,'2019':0.0139,'2022':0.0309,'2025':0.0343}
@@ -422,6 +432,7 @@ def estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = 90, plot_h
                         CAGO_swing_2025_corr, CAGO_swing_2025_cov = extend_corr_matrix_to_5x5(corr_matrix_Elec, ON_UAPP_variances, ON_UAPP_variances, cov_matrix, ref_col)
                         CAGO_swing_2025_cov.to_csv(f"ElectionErrorALRCovarianceNational2025_{ref_col}.csv", index = True)
 
+estimate_National_ALR_Covariance_Matrices(ref_col = 'COAL', Day = 90, plot_histogram = False)
 
 
 import pdb;pdb.set_trace()

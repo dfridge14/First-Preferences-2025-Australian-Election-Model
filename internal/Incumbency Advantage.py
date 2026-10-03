@@ -21,14 +21,14 @@ sys.excepthook = exception_handler
 base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
 os.chdir(base_dir)
 
-data_year = "2022"
+data_year = "2025"
 
 incumbent_df = pd.read_csv("incumbent_df.csv")
 
-election_years = ['1993','1996','1998','2001','2004','2007','2010','2013','2016','2019','2022']
+election_years = ['1993','1996','1998','2001','2004','2007','2010','2013','2016','2019','2022','2025']
 
-final_cand_no_dict = {"2022":5, "2019": 4, "2016": 3,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
-name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
+final_cand_no_dict = {"2025": 4, "2022":5, "2019": 4, "2016": 3,"2013": 5, "2010": 3, "2007": 4, "2004": 4,"2001":4}
+name_changes_year_dict = {'2025': {},'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
 
 FINAL_CAND_NO = final_cand_no_dict[data_year]
 
@@ -156,7 +156,7 @@ Final_x_df.loc[(Final_x_df["Surname"]=="PROSSER")&(Final_x_df["GivenNm"]=="Geoff
 Final_x_df.loc[(Final_x_df["Surname"]=="SIDEBOTTOM")&(Final_x_df["GivenNm"]=="Peter"),"GivenNm"] = "Sid"
 Final_x_df.loc[(Final_x_df["Surname"]=="Horne")&(Final_x_df["GivenNm"]=="Robert"),"GivenNm"] = "Bob"
 Final_x_df.loc[(Final_x_df["Surname"]=="ST CLAIR")&(Final_x_df["GivenNm"]=="Stuart"),"Surname"] = "STCLAIR" # only relevant for 2001...?
-Final_x_df.loc[(Final_x_df["Surname"] == 'van MANEN') &(Final_x_df["GivenNm"]=="Bert"),"Surname"] = "VAN MANEN"
+Final_x_df.loc[(Final_x_df["Surname"].str.upper() == "VAN MANEN") &(Final_x_df["GivenNm"]=="Bert"),"Surname"] = "VAN MANEN"
 # fix up the M(a)cs and Sophie-name-change-Mirabella
 Final_x_df.loc[(Final_x_df["Surname"] == 'McCLELLAND')&(Final_x_df["GivenNm"]=="Robert"),"Surname"] = "MCCLELLAND"
 Final_x_df.loc[(Final_x_df["Surname"] == 'McMULLAN')&(Final_x_df["GivenNm"]=="Bob"),"Surname"] = "MCMULLAN"
@@ -217,7 +217,7 @@ Final_x_df = Final_x_df.drop(columns = ['Surname', 'GivenNm','Year'])
 
 
 general_party_df = pd.read_csv(f"{data_year}GeneralPartyDetails.csv", skiprows = 1)
-general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',] = 'GRN' # handle exceptions, but think GVIC is the only one
+general_party_df.loc[general_party_df["PartyAb"] == 'GVIC',"PartyAb"] = 'GRN' # handle exceptions, but think GVIC is the only one
 
 
 
@@ -244,7 +244,7 @@ for div in Final_x_df["div_nm"].unique(): #Final_x_div_dict.keys():
     for i in range(INTERESTED_NO_CANDS):
 
         if Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i] not in Senate_parties_by_div.loc[Senate_parties_by_div["div_nm"] == div,"PartyAbList"].iloc[0]:
-            print(Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i])
+            print(Final_x_df.loc[Final_x_df['div_nm'] == div, "PartyAb"].values[i], div)
             Final_x_party_not_in_senate.append(div)
 
 print(Final_x_party_not_in_senate)

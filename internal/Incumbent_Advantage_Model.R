@@ -1,9 +1,11 @@
-df <- read.csv("Incumbent_House_Senate_Final5_for_R.csv", header = TRUE, stringsAsFactors = FALSE)
+df <- read.csv("Incumbent_House_Senate_Final4_for_R.csv", header = TRUE, stringsAsFactors = FALSE)
 
 df = df[df$div_nm != 'Mayo19',]
-
-
-
+df = df[df$div_nm != 'Kennedy19',]
+df = df[df$div_nm != 'Kennedy16',]
+ 
+ 
+ 
 df$Diff_Pct <- df$House_Pct - df$Senate_Pct
 df$PartyCat <- as.factor(df$PartyCat)
 df$Demographic <- as.factor(df$Demographic)

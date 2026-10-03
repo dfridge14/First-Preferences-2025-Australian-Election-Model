@@ -36,7 +36,7 @@ SAMPLE_ERROR_SCALING_FACTOR = 2
 
 
 num_polling_days = 100 # length of interval for Gaussian Random Walk
-DAYS_TO_ELECTION = 2 # final model - 2 days before
+DAYS_TO_ELECTION = 1 # final model - 2 days before
 
 import arviz as az
 
@@ -323,6 +323,8 @@ for party in National_polls.columns[2:]:
 
     # Convert precision back to standard deviation
     agg_polls["poll_sd"] = np.sqrt(1 / agg_polls["total_precision"])
+
+    import pdb; pdb.set_trace()
 
 
 

@@ -44,7 +44,7 @@ import cmdstanpy
 import matplotlib.pyplot as plt
 import arviz as az
 
-election_year = '2016'
+election_year = '2022'
 election_date_num = {'2013':1113, '2016':1028, '2019':1050, '2022':1099}
 
 

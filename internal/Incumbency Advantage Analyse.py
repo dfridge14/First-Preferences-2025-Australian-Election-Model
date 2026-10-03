@@ -4,7 +4,7 @@ import os, time
 from pathlib import Path
 
 
-base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+base_dir = Path.home() / "Australian Election"
 os.chdir(base_dir)
 
 x = 4
@@ -13,7 +13,7 @@ Final_x_HS_df2022 = pd.read_csv(f"2022Final_{x}_HS_df.csv", index_col = None)
 Final_x_HS_df2019 = pd.read_csv(f"2019Final_{x}_HS_df.csv", index_col = None)
 Final_x_HS_df2016 = pd.read_csv(f"2016Final_{x}_HS_df.csv", index_col = None)
 
-data_years = ['2022','2019','2016']
+data_years = ['2025','2022','2019','2016']
 
 combined_HS_df = pd.DataFrame(columns = ['div_nm', 'PartyAb', 'is_incumbent', 'is_historic_incumbent', 'elections_won','copied_PartyAb','House_Pct','Senate_Pct','Demographic','StateAb'])
 
@@ -30,6 +30,8 @@ for data_year in data_years:
     # add year suffixes to differentiate division observation years
     Final_x_HS_df_year.loc[:,'div_nm'] = Final_x_HS_df_year.loc[:,'div_nm'] + data_year[-2:]
 
+    Final_x_HS_df_year.loc[:, 'year'] = data_year
+
     Final_x_HS_df_year_list.append(Final_x_HS_df_year)
 
 combined_HS_df = pd.concat(Final_x_HS_df_year_list, ignore_index=True)
@@ -40,7 +42,7 @@ import pdb;pdb.set_trace()
 
 # model just incumbent effects:
 # make CLP into LNP - in total get ALP/LP/LNP/Other (NP + GRN) 
-incumbent_df_for_R_model = combined_HS_df.loc[combined_HS_df['is_incumbent'] == 1,].copy()[['div_nm','PartyAb','StateAb','Demographic','elections_won','House_Pct','Senate_Pct']]
+incumbent_df_for_R_model = combined_HS_df.loc[combined_HS_df['is_incumbent'] == 1,].copy()[['div_nm','PartyAb','StateAb','year','Demographic','elections_won','House_Pct','Senate_Pct']]
 incumbent_df_for_R_model.loc[incumbent_df_for_R_model['PartyAb']=='CLP','PartyAb'] = 'LNP'
 incumbent_df_for_R_model.loc[~incumbent_df_for_R_model['PartyAb'].isin(['ALP','LP','LNP']),'PartyAb'] = 'Other'
 incumbent_df_for_R_model.rename(columns={'PartyAb':'PartyCat'},inplace=True)
@@ -54,7 +56,7 @@ incumbent_df_for_R_model.loc[:,'elections_won'] -= 1
 
 import pdb;pdb.set_trace()
 
-incumbent_df_for_R_model.to_csv(f'Incumbent_House_Senate_Final{x}_for_R.csv', index = False)
+#incumbent_df_for_R_model.to_csv(f'Incumbent_House_Senate_Final{x}_for_R.csv', index = False)
 
 # Find average starting incumbency advantage (Inner Metropolitan and elections_won == 0)
 incumbent_df_for_R_model.loc[:,'Diff_Pct'] = incumbent_df_for_R_model.loc[:,'House_Pct'].values - incumbent_df_for_R_model.loc[:,'Senate_Pct'].values

@@ -4,6 +4,7 @@ from itertools import product
 import os,time
 from datetime import datetime
 from pathlib import Path
+import glob
 
 # automatic error debugging
 import sys
@@ -52,6 +53,8 @@ def parse_date_range(date_str):
     # Ensure date_str is a string and not NaN
     if not isinstance(date_str, str):
         return None
+    
+    date_str = date_str.strip(' ')
 
     # Try parsing a single date (e.g., "10-Aug-20", "10 Aug 20")
     try:
@@ -64,7 +67,11 @@ def parse_date_range(date_str):
     except ValueError:
         pass  
     try:
-        return datetime.strptime(date_str, "%d/%m/%Y")  # Try second format
+        return datetime.strptime(date_str, "%d/%m/%Y")  # Try third format
+    except ValueError:
+        pass  
+    try:
+        return datetime.strptime(date_str, "%d/%m/%y")  # Try fourth format
     except ValueError:
         pass  
 
@@ -89,6 +96,9 @@ def parse_date_range(date_str):
         if start_date_split == [range_split[0]]: # "13–19 May 2022" guaranteed
             start_date_str = range_split[0] + ' '+ end_date_split[1]+' '+end_date_split[2]
             start_date = datetime.strptime(start_date_str, "%d %b %Y")
+
+        elif len(start_date_split) == 3:  # e.g., ['25', 'Apr', '2022']
+            start_date = datetime.strptime(range_split[0], "%d %b %Y")
 
         else: # 25 Apr–1 May 2022 guaranteed
             start_date_str = range_split[0] + ' ' + end_date_split[-1]
@@ -142,13 +152,20 @@ def parse_date_range(date_str):
 
     return median_date
 
+def parse_election_date(election_date):
+    for fmt in ("%d %b %Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(election_date, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"Date format not recognized: {election_date}")
 
 
 election_year = '2025'
 Polling_type = 'State' # National, Electorate, State Election, State
 Day = 90
 
-last_election_date = {'2025': "21/05/22", '2022':"18/05/19", '2019':"02/07/16", '2016':"07/09/13", '2013':"21/08/10"}
+last_election_date = {'2028': "03/05/25",'2025': "21/05/22", '2022':"18/05/19", '2019':"02/07/16", '2016':"07/09/13", '2013':"21/08/10",'1996':"13/03/93"}
 
 
 
@@ -161,7 +178,7 @@ def sigma_drift_function(mean_props):
 
 
 
-def format_election_polls(Polling_type):
+def format_election_polls(Polling_type, last_election_date):
     # formats polls from a given Polling_type in  ['National','Electorate','State','State Election', 'Old Election'] into DataFrame format suitable for modelling
 
     if Polling_type == 'National':
@@ -171,6 +188,8 @@ def format_election_polls(Polling_type):
             if election_year == '2022':
                 
                 Opinion_Polls_2022_National = pd.read_csv(f"{election_year}ElectionPollFormatted.csv").iloc[:,:num_parties_per_election_year[election_year]+NO_ADDITIONAL_COLUMNS].dropna(how='all')
+
+                import pdb; pdb.set_trace()
 
                 # Convert date format to datetime.date
                 dates = pd.Series(Opinion_Polls_2022_National.iloc[:,0])
@@ -314,14 +333,18 @@ def format_election_polls(Polling_type):
 
     elif Polling_type == 'Electorate':
 
-        for election_year in ['2013','2016','2019','2022','2025']:
+        for election_year in ['2013','2016','2019','2022','2025','Byelection']:
 
-            if election_year == '2022':
-                Opinion_Polls_Electorate = pd.read_csv(f"SeatPolls{election_year}Adjusted.csv").iloc[:,:13].drop('Pollster', axis = 1)
+            election_year = 'Byelection'
+            os.chdir("/home/dania-freidgeim/Australian Election")
+
+            if election_year in ['2022','2025']:
+                N_cols = {'2022':13,'2025':15}
+                Opinion_Polls_Electorate = pd.read_csv(f"SeatPolls{election_year}Adjusted.csv").iloc[:,:N_cols[election_year]].drop('Pollster', axis = 1)
 
                 # Convert date format to datetime.date
                 dates = pd.Series(Opinion_Polls_Electorate.iloc[:,0]).str.strip()
-                parsed_median_dates = dates.apply(parse_date_range) 
+                parsed_median_dates = dates.apply(parse_date_range)
 
                 parsed_median_dates = pd.to_datetime(parsed_median_dates) # datetime objects
 
@@ -331,11 +354,41 @@ def format_election_polls(Polling_type):
                 Opinion_Polls_Electorate.iloc[:,0] = days_since_election
                 Opinion_Polls_Electorate.rename(columns={"Date": "Days since last election"}, inplace=True) # not active yet
 
+                import pdb; pdb.set_trace()
+
                 Opinion_Polls_Electorate.iloc[:, 3:] = Opinion_Polls_Electorate.iloc[:, 3:].round(3)
                 Opinion_Polls_Electorate['Sample size'] = Opinion_Polls_Electorate['Sample size'].astype(int)  
 
 
                 Opinion_Polls_Electorate = Opinion_Polls_Electorate.sort_values(by='Days since last election').reset_index(drop=True)
+
+                Opinion_Polls_Electorate.to_csv(f"SeatPolls{election_year}Formatted.csv", index=False)
+
+            if election_year == 'Byelection':
+                Opinion_Polls_Electorate = pd.read_csv(f"SeatPolls{election_year}Adjusted.csv").drop('Pollster', axis = 1)
+                dates = pd.Series(Opinion_Polls_Electorate.iloc[:,0]).str.strip()
+                parsed_median_dates = dates.apply(parse_date_range)
+
+
+                # find days since last election in vectorised form
+                byelection_year = Opinion_Polls_Electorate['byelection_year']
+                election_years = np.array(sorted(last_election_date.keys()))
+                prev_election_dates = pd.to_datetime([last_election_date[y] for y in election_years],format='%d/%m/%y')
+                idx = np.searchsorted(election_years, byelection_year.values, side='right')
+                prev_election_dates = pd.Series(prev_election_dates[idx], index=Opinion_Polls_Electorate.index)
+
+
+                days_since_election = (parsed_median_dates - prev_election_dates).dt.days
+                Opinion_Polls_Electorate.iloc[:,0] = days_since_election
+                Opinion_Polls_Electorate.rename(columns={"Date": "Days since last election"}, inplace=True) # not active yet
+
+
+                Opinion_Polls_Electorate.iloc[:, 4:] = Opinion_Polls_Electorate.iloc[:, 4:].round(3)
+                Opinion_Polls_Electorate['Sample size'] = Opinion_Polls_Electorate['Sample size'].astype(int)  
+
+
+                Opinion_Polls_Electorate = Opinion_Polls_Electorate.sort_values(by=['byelection_year','Electorate','Days since last election']).reset_index(drop=True)
+                import pdb; pdb.set_trace()
 
                 Opinion_Polls_Electorate.to_csv(f"SeatPolls{election_year}Formatted.csv", index=False)
 
@@ -685,8 +738,160 @@ def format_election_polls(Polling_type):
         Election_Result_df.to_csv("OldFederalElectionResults.csv", index=False)
 
 
+    if Polling_type == 'State Election new':
+        
+        folder_path = "/home/dania-freidgeim/Australian Election/StateElectionPolls"
+
+        files = glob.glob(os.path.join(folder_path, "*.csv"))
+
+        dfs_dict = {
+            os.path.basename(f): pd.read_csv(f)
+            for f in files
+        }
+
+        State_poll_df_list = []
+
+        for election in dfs_dict:
+
+            poll_df = dfs_dict[election]
+
+            election = f"{election[5:-4].replace('Polls', '')}"
+            print(election)
+
+            # Convert date format to datetime.date
+            dates = pd.Series(poll_df.iloc[:,0])
+            parsed_median_dates = dates.apply(parse_date_range) 
 
 
-for Polling_type in ['National','State','State Election', 'Old Election']:
-    format_election_polls(Polling_type)
 
+            parsed_median_dates = pd.to_datetime(parsed_median_dates) # datetime objects
+
+
+            election_date = poll_df.iloc[-1,0].strip(' ')
+            election_date = parse_election_date(election_date)
+            
+        
+            days_to_election = (parsed_median_dates - election_date).dt.days
+
+            poll_df.iloc[:,0] = days_to_election
+            poll_df = poll_df.rename(columns={"Date": "Day_index"})
+            poll_df.iloc[:, 1:5] = np.round(poll_df.iloc[:,1:5].apply(pd.to_numeric, errors='raise'),3) # eliminate strings
+
+            if 'Sample size' in poll_df.columns:
+                poll_df['Sample size'] = pd.to_numeric(poll_df['Sample size'], errors='coerce').astype('Int64')
+            else:
+                poll_df['Sample size'] = [1000]*(len(poll_df)-1) + [pd.NA]
+
+            # additional formatting 
+            poll_df = poll_df.sort_values(by='Day_index').reset_index(drop=True)
+            poll_df['Election'] = election
+
+
+
+            State_poll_df_list.append(poll_df)
+
+
+        os.chdir('/home/dania-freidgeim/Australian Election')
+
+        Federal_election_results = pd.read_csv("Federal election CAGO results.csv")
+
+
+        for election_year in ['1987','1990','1993','1996','1998','2001','2004','2007','2010','2013','2016','2019','2022','2025']:
+
+            election_year = '2028'
+
+            formatted_df = pd.read_csv(f"{election_year}ElectionPollFormatted.csv")
+
+            if int(election_year) < 2007: # election result included in first line
+                election_date = formatted_df.iloc[0,0].strip(' ') # first date
+            else:
+                election_result_row = Federal_election_results.loc[Federal_election_results['Election'].astype(str) == election_year,].iloc[:,1:]
+                election_date = election_result_row['Date'].iloc[0]
+                if election_year == '2019': # add OTH col
+                    formatted_df['OTH'] = 1 - formatted_df.iloc[:,2:].sum(axis=1)
+                formatted_df.loc[len(formatted_df) - 1] = election_result_row.iloc[0]
+
+            dates = pd.Series(formatted_df.iloc[:,0])
+            parsed_median_dates = dates.apply(parse_date_range) 
+            parsed_median_dates = pd.to_datetime(parsed_median_dates) # datetime objects
+                
+            election_date = parse_election_date(election_date)
+            days_to_election = (parsed_median_dates - election_date).dt.days
+            formatted_df.iloc[:,0] = days_to_election
+
+            formatted_df = formatted_df.sort_values(by='Date')
+
+            # deal with both GRN and DEM:
+            if len(formatted_df.columns) > 6: # after 1996; keep only COAL/ALP/GRN/OTH
+                if int(election_year) == 1996:
+                    
+                    formatted_df = formatted_df.rename(columns={'DEM': 'GRN', 'GRN': 'DEM'}) # switch col names as final col will involve DEM under label of GRN
+
+                Extra_parties = {'DEM','HAN','XEN','ON','KAP','UAPP','TOP','ACP','OTH'}
+                curr_extras = [p for p in Extra_parties & set(formatted_df.columns)]
+                formatted_df['OTH'] = np.round(formatted_df[curr_extras].sum(axis=1),3)
+
+            if int(election_year) < 1996:
+                formatted_df = formatted_df.rename(columns = {'DEM':'GRN'})
+
+                
+            formatted_df = formatted_df[['Date','COAL','ALP','GRN','OTH','Sample size']]
+            
+
+            # additional formatting
+            formatted_df = formatted_df.rename(columns={"Date": "Day_index"})
+            formatted_df.iloc[:, 1:5] = np.round(formatted_df.iloc[:,1:5].apply(pd.to_numeric, errors='raise'),3)
+            formatted_df['Sample size'] = pd.to_numeric(formatted_df['Sample size'], errors='coerce').astype('Int64')
+            formatted_df = formatted_df.sort_values(by='Day_index').reset_index(drop=True)
+            formatted_df['Election'] = election_year
+
+            State_poll_df_list.append(formatted_df)
+
+
+
+
+        State_poll_df = pd.concat(State_poll_df_list, ignore_index=True)
+
+        State_poll_df.to_csv("CAGO_Polling_for_Kalman_filter.csv", index = False)
+        import pdb; pdb.set_trace()
+
+             
+
+
+#for Polling_type in ['National','State','State Election', 'Old Election']:
+#    format_election_polls(Polling_type)
+
+# format_election_polls('State Election new', last_election_date)
+
+
+
+#format_election_polls('Electorate', last_election_date)
+
+def format_2026_election_for_Kalman():
+    election_year = '2028'
+
+    # Load data
+    os.chdir('/home/dania-freidgeim/Australian Election')
+    formatted_df = pd.read_csv(f"{election_year}ElectionPollFormatted.csv")
+    election_date = pd.Timestamp('2026-05-09')
+
+    dates = pd.to_datetime(formatted_df.iloc[:, 0].apply(parse_date_range))
+    formatted_df['Day_index'] = (dates - election_date).dt.days
+
+    # 3. Keep only the exact columns you need (puts Day_index first)
+    formatted_df = formatted_df[['Day_index', 'COAL', 'ALP', 'GRN', 'ON','OTH', 'Sample size']]
+
+    # 4. Enforce numeric types and round
+    party_cols = ['COAL', 'ALP', 'GRN', 'ON','OTH']
+    formatted_df[party_cols] = formatted_df[party_cols].apply(pd.to_numeric, errors='raise').round(3)
+    formatted_df['Sample size'] = pd.to_numeric(formatted_df['Sample size'], errors='coerce').astype('Int64')
+
+    # 5. Sort, append Election column, and save
+    formatted_df = formatted_df.sort_values(by='Day_index').reset_index(drop=True)
+    formatted_df['Election'] = election_year
+
+    formatted_df.to_csv('Farrer_Byelection_Polling_for_Kalman_filter.csv', index=False)
+
+    import pdb; pdb.set_trace()
+
+format_2026_election_for_Kalman()

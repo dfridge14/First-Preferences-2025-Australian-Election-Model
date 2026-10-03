@@ -18,21 +18,21 @@ sys.excepthook = exception_handler
 
 
 
-base_dir = Path('C:\\Dania\\2024\\Australian Election') if os.name == "nt" else Path.home() / "Australian Election"
+base_dir = Path.home() / "Australian Election"
 os.chdir(base_dir)
 
 
 MIN_OBSERVABLE_RATIO = 0.001 # If SA1 somehow has 1000 voters, 0.01*1000=1 vote - anything else will not be observed due to rounding errors
 
-SA1_year_dict = {'2025':'2021','2022':'2016','2019':'2016','2016':'2011','2013':'2011','2010':'2006'}
-Redistribution_SA1_year_dict = {'2025':'2021','2022':'2021','2019':'2016','2016':'2011','2013':'2011'}
+SA1_year_dict = {'2028':'2021', '2025':'2021','2022':'2016','2019':'2016','2016':'2011','2013':'2011','2010':'2006'}
+Redistribution_SA1_year_dict = {'2028':'2021', '2025':'2021','2022':'2021','2019':'2016','2016':'2011','2013':'2011'}
 
-data_year = '2022'
+data_year = '2025'
 correspondence_years = [SA1_year_dict[data_year],SA1_year_dict[str(int(data_year)+3)]]
 
 
 name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'}}
-abolished_divs = {'2022':set(['Higgins','North Sydney']), '2016': set(['Port Adelaide']),'2019':set(['Stirling']),'2013':set(['Charlton'])}
+abolished_divs = {'2025':set(), '2022':set(['Higgins','North Sydney']), '2016': set(['Port Adelaide']),'2019':set(['Stirling']),'2013':set(['Charlton'])}
 
 # TO DO: 1. Make separate correspondence functions for each year - too few cases to generalise, especially since 2006--> 2001 is whole different structure!
 
@@ -212,6 +212,12 @@ def perform_CCD_Correspondence_to_SA1_By_PP(SA1_Correspondence_old_new, SA1_By_P
     return SA1_By_PP_2013.rename(columns={'weighted_votes':'votes'})
 
 
+if data_year == '2025': # currently using 2021 SA1s
+    SA1_By_PP_Votes_new = pd.read_csv(f"{data_year}SA1ByPPComplete.csv", index_col=None)
+    SA1_By_PP_Votes_new.to_csv(f"{data_year}SA1_By_PP_Votes.csv", index=False)
+
+
+
 if data_year == '2022': # different edition of SA1s - need for correspondence
 
     start = time.time()
@@ -261,19 +267,26 @@ elif data_year == '2013':
 
 
 def format_state_rdst_full(df,SA1_suffix):
-    
+    """ Filters Redistribution_by_SA1 df, removing SA1s with fewer than 10 enrolments and split SA1s (e.g. 1000000A, B, C)"""    
 
     df = df.rename(columns={df.columns[0]: f'SA1_CODE{SA1_suffix}',df.columns[1]: 'new_div', df.columns[2]: 'old_div', df.columns[4]: 'curr_enrol',df.columns[5]: 'proj_enrol'})
-    df = df[[f'SA1_CODE{SA1_suffix}',"new_div","old_div",'curr_enrol','proj_enrol']].drop(df.index[-1]) # removes last misbehaving row
+    
+    # last row usually has cumulative enrolments info - remove it
+    last_row_sa1 = df.loc[df.index[-1], f'SA1_CODE{SA1_suffix}']
+    if pd.isna(last_row_sa1) or last_row_sa1 == "": 
+        df = df.drop(df.index[-1])
+
+    df = df[[f'SA1_CODE{SA1_suffix}',"new_div","old_div",'curr_enrol','proj_enrol']]
     #import pdb;pdb.set_trace()
 
+    # if enrolment columns are not numeric, convert them to ints
     if df.iloc[:, -2:].dtypes.isin([np.dtype(np.float64), np.dtype(np.int64)]).sum() < 2:
         df.iloc[:,-2:] = df.iloc[:,-2:].replace(',', '', regex=True).apply(lambda col: col.str.strip()).replace('-', '0').astype(int)
 
+    print("Total number of ignored voters due to small SA1s in state:", df[((df['curr_enrol'] <= 10) | (df['proj_enrol'] <= 10)) & (df['new_div'] != df['old_div'])]['curr_enrol'].sum())
+
+
     df = df.loc[(df['curr_enrol'] > 10) & (df['proj_enrol'] > 10)].reset_index(drop=True) # ignore small changes
-
-    #import pdb;pdb.set_trace()
-
 
     df.loc[:,f'SA1_CODE{SA1_suffix}'] = df[f'SA1_CODE{SA1_suffix}'].astype(str).str[:7].astype(int)  # remove alpha characters at end - split SA1s don't matter as they are mostly taken care of
 
@@ -297,6 +310,13 @@ def format_state_rdst_full_without_enrol(df,SA1_suffix):
 
 SA1_suffix = Redistribution_SA1_year_dict[data_year][-2:]
 
+
+if data_year == '2025':
+
+    states = ['TAS']
+    state_dfs = [pd.read_csv(f"Redistribution2027{state}-by-SA2-and-SA1.csv", index_col=None) for state in states]
+    state_dfs_Redistribution = [format_state_rdst_full(state_df, SA1_suffix) for state_df in state_dfs]
+    Redistribution_SA1s = pd.concat(state_dfs_Redistribution, ignore_index=True)
 
 if data_year == '2022':
 
@@ -374,7 +394,7 @@ elif data_year == '2013':
 
 
 # Rename old divisions prior to analysis, treating as the natural state; ignores the effect of renaming divisions!
-name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
+name_changes_year_dict = {'2025':{},'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
 
 #import pdb;pdb.set_trace()
 # remame old_div to new_div if there was a name change!

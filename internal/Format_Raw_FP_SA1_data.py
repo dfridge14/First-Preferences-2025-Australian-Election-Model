@@ -47,7 +47,7 @@ def add_important_missing_coordinates(df, data_year):
         df.loc[df['pp_id']==58803,['Lat','Long']] = -37.8103, 144.97
         df.loc[df['pp_id']==58698,['Lat','Long']] = -28.0902, 153.451
 
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
 
 
     return df
@@ -139,6 +139,11 @@ def create_FP_APPP_Votes_by_Div():
 
     FP_Vote_Type_by_Div = pd.read_csv(f"{data_year}HouseFirstPrefsByCandidateByVoteType.csv", skiprows=1).rename(columns={'DivisionNm':'div_nm'}) 
 
+    # FFP renamed everywhere to FFPA, fixing AEC error
+    if data_year == '2025':
+        FP_Vote_Type_by_Div['PartyAb'] = FP_Vote_Type_by_Div['PartyAb'].replace({'FFP':'FFPA'})
+    
+
     FP_APPP_Votes_by_Div = FP_Vote_Type_by_Div[["div_nm","PartyAb",'PartyNm','BallotPosition',"AbsentVotes",'ProvisionalVotes','PostalVotes','PrePollVotes']]
     FP_APPP_Votes_by_Div.loc[:,'votes'] = FP_APPP_Votes_by_Div.iloc[:,-4:].sum(axis=1)
     FP_APPP_Votes_by_Div = FP_APPP_Votes_by_Div[["div_nm","PartyAb",'PartyNm','BallotPosition','votes']]
@@ -163,6 +168,10 @@ FP_By_PP = pd.DataFrame(columns=['div_nm','pp_id','pp_nm','PartyAb','votes'])
 
 for state in states:
     state_df = pd.read_csv(f'{data_year}HouseStateFirstPrefsByPollingPlace-{state}.csv', skiprows=1, index_col=None)
+
+    # FFP renamed everywhere to FFPA, fixing AEC error
+    if data_year == '2025':
+        state_df['PartyAb'] = state_df['PartyAb'].replace({'FFP':'FFPA'})
 
     state_df.rename(columns = {'DivisionNm': 'div_nm', "PollingPlaceID": "pp_id", "PollingPlace": "pp_nm", "OrdinaryVotes":'votes'}, inplace=True)
     state_df = state_df[['div_nm','pp_id','pp_nm','PartyAb','PartyNm','BallotPosition','votes']]

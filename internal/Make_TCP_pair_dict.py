@@ -44,11 +44,16 @@ def make_party_category_dict():
         all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['CLR'],'Ideo_Category':['ALP'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)
         all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['NGS'],'Ideo_Category':['Right'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)
         all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['ARTS'],'Ideo_Category':['Left'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)
+
+        all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['GRPF'],'Ideo_Category':['Right'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)
+        all_parties = pd.concat([all_parties,pd.DataFrame({'PartyAb':['FFPA'],'Ideo_Category':['Right'],'Ideo_Category_Data':[np.nan],'HouseYears':[[]],'SenateYears':[[]]})], ignore_index=True)
+
         all_parties_house = all_parties.loc[all_parties['Ideo_Category'].notna(),].iloc[:,:2].set_index('PartyAb') # excludes only senates, who don't yet have Ideology written
         party_category_dict = all_parties_house.to_dict()['Ideo_Category']
         party_category_dict['IND'] = 'Centre'
         party_category_dict['COALLP'] = 'COAL'
         party_category_dict['COALNP'] = 'COAL'
+
 
         return party_category_dict
 
@@ -314,31 +319,34 @@ def add_category_pct(row, party_category_dict):
     return row
 
 
-def make_TCP_pair_category_dict(election_year, party_category_dict={}):
+def make_TCP_pair_category_dict(data_year, party_category_dict={}):
 
     from collections import defaultdict
 
 
-    data_year = str(int(election_year) - 3)
+    election_year = str(int(data_year) + 3)
     
 
-    name_changes_year_dict = {'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
+    name_changes_year_dict = {'2025':{},'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
 
-    replacement_seats_year_dict = {'2022': {'Hasluck':'Bullwinkel'}, '2019':{'Gorton':'Hawke'}, '2016':{'Canberra':'Bean', 'Maribyrnong':'Fraser'}, '2013':{'Hasluck':'Burt'}}
-    abolished_divs_dict = {'2022':set(['Higgins','North Sydney']), '2016': set(['Port Adelaide']),'2019':set(['Stirling']),'2013':set(['Charlton'])}
+    replacement_seats_year_dict = {'2025':{},'2022': {'Hasluck':'Bullwinkel'}, '2019':{'Gorton':'Hawke'}, '2016':{'Canberra':'Bean', 'Maribyrnong':'Fraser'}, '2013':{'Hasluck':'Burt'}}
+    abolished_divs_dict = {'2025':set(),'2022':set(['Higgins','North Sydney']), '2016': set(['Port Adelaide']),'2019':set(['Stirling']),'2013':set(['Charlton'])}
 
 
-    next_year = election_year
     # 1. Get names of next election's parties in each div for comparison to senate
-    if next_year != '2025':
 
-        DOP_By_Division_next = pd.read_csv(f"{next_year}HouseDOPByDivision.csv", skiprows=1).rename(columns={'DivisionNm': 'div_nm'})[["div_nm","PartyAb"]].drop_duplicates()
-
-    else:
+    if election_year != '2028':
+        DOP_By_Division_next = pd.read_csv(f"{election_year}HouseDOPByDivision.csv", skiprows=1).rename(columns={'DivisionNm': 'div_nm'})[["div_nm","PartyAb"]].drop_duplicates()
+    elif election_year == '2028':
         DOP_By_Division_next = pd.read_csv("2025Candidates_By_Division.csv", index_col = None)
+
+    
     
     DOP_By_Division_next.loc[:,'PartyAb'] = DOP_By_Division_next.loc[:,'PartyAb'].fillna('IND').replace('GVIC','GRN')
     Div_parties_next_dict = {div: group['PartyAb'].tolist() for div, group in DOP_By_Division_next.groupby("div_nm")}
+    
+    Div_parties_next_dict['Farrer'] = [p[:-1] if p.startswith('IND') else p for p in pd.read_csv('Farrer_candidates.csv')['PartyAb'].tolist()]
+
 
     Div_parties_next_dict_COAL = {div: ['COAL' if p in ['LP', 'NP','CLP','LNP'] else p for p in Div_parties_next_dict[div]] for div in Div_parties_next_dict.keys()}
 
@@ -356,13 +364,17 @@ def make_TCP_pair_category_dict(election_year, party_category_dict={}):
 
     TPP_nationally = pd.read_csv(f"{data_year}HouseTPPFlowByParty.csv", skiprows = 1, index_col = None)[['PartyAb', 'Australian Labor Party Transfer Percentage']].rename(columns={'Australian Labor Party Transfer Percentage':'ALP%'})
     
-    if next_year != '2025':
-        div_to_state = pd.read_csv(f"{next_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
-
-    else:
+    
+    if election_year == '2025':
         div_to_state = pd.read_csv(f"2022HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
         div_to_state.loc[div_to_state['div_nm'] == 'North Sydney',] = 'Bullwinkel', 'WA'
         div_to_state = div_to_state.loc[~(div_to_state['div_nm'] == 'Higgins'),]
+    elif election_year == '2028':
+        div_to_state = pd.read_csv(f"{'2025'}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+    else:
+        div_to_state = pd.read_csv(f"{election_year}HouseMembersElected.csv", skiprows=1)[['DivisionNm','StateAb']].rename(columns = {'DivisionNm': 'div_nm'})
+
+        
 
     div_to_state_dict = {div: div_to_state.loc[div_to_state['div_nm'] == div, 'StateAb'].iloc[0] for div in div_to_state['div_nm'].unique()}
 
@@ -631,8 +643,6 @@ def make_TCP_pair_category_dict(election_year, party_category_dict={}):
         if 'COAL' not in result_dict[div]:
             result_dict[div].loc[:,'COAL'] = None
 
-        #if div == 'Macnamara':
-        #    import pdb;pdb.set_trace()
 
 
 
@@ -643,16 +653,6 @@ def make_TCP_pair_category_dict(election_year, party_category_dict={}):
             result_dict[div].loc[0,'Right'] = result_dict['Bean'].loc[0,'LDP']
 
         #import pdb;pdb.set_trace()
-
-
-
-    # import Formal_prefs_dict for senate calibration
-    with open(f"Formal_prefs_dict_{data_year}.pkl", "rb") as f:
-        Formal_prefs_dict = pickle.load(f)
-
-    with open(f"Senate_party_abvs_dict_{data_year}.pkl", "rb") as f:
-        Senate_party_abvs_dict = pickle.load(f)
-
 
     
     LNP_ON_SEN_ADJUSTMENT_FOR_2025 = pd.DataFrame([{'ALP': 11.004743,'UAPP': 5.010368,'GRN': -6.365148,'Right': 5.010368,'Left': -6.365148}]) # Maranoa 2019
@@ -744,6 +744,9 @@ def make_TCP_pair_category_dict(election_year, party_category_dict={}):
 
                 non_classic_sen_rows.append(non_classic_sen_TCP_df.iloc[:,1:])
 
+                #if tcp_pair == ('COAL', 'Right'):
+                #    import pdb; pdb.set_trace()
+
             
             if (election_year == '2025') and (tcp_pair == ('COAL','Right')):
                 tcp_pair_parties = ['LNP','ON']
@@ -810,13 +813,14 @@ def make_TCP_pair_category_dict(election_year, party_category_dict={}):
 
                     # This should ensure results are like previously, only overwritten where new data via senate comparisons is available
 
+
             for div in NEW_SEATS_YEAR_DICT[data_year]:
                 # use supplier div to add any relevant new data to the div's result_dict
                 supplier_dict = {v: k for k, v in replacement_seats_year_dict[data_year].items()}
                 common_cols_with_supplier = result_dict[supplier_dict[div]].columns
                 result_dict[div].loc[i,common_cols_with_supplier] = result_dict[supplier_dict[div]].loc[i,] # common columns with its supplier
 
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
 
         #if tcp_pair == ('COAL','Left'):
         #    import pdb;pdb.set_trace()
@@ -866,7 +870,8 @@ def make_TCP_pair_category_dict(election_year, party_category_dict={}):
                     if new_row[col] is not None:  # Only overwrite if the new value isn't None
                         result_dict[div].at[i, col] = new_row[col]
 
-            #import pdb;pdb.set_trace()
+            if div == 'Farrer':
+                import pdb;pdb.set_trace()
             #4
 
 
@@ -888,8 +893,6 @@ def make_TCP_pair_category_dict(election_year, party_category_dict={}):
                 new_row.loc['COAL'] = new_row['Right']
 
                 result_dict[div].loc[i, :] = new_row
-
-    import pdb;pdb.set_trace()
 
 
     for tcp_pair in [('ALP','Right'),('COAL','Left')]:
@@ -986,6 +989,15 @@ def make_TCP_pair_category_dict(election_year, party_category_dict={}):
 
             if (data_year == '2016') and (i == 14) and (pd.isna(result_dict[div].loc[14,'Right'])):
                 result_dict[div].at[14, 'Right'] = Right_COAL_COAL_Preferences
+
+
+            # CHECK - is this the best way of doing it; can't other parallel electorates be used?
+            if (data_year == '2025') and (i == 3) and (pd.isna(result_dict[div].loc[3,'Left'])):
+                result_dict[div].at[3, 'Left'] = Left_ALP_Left_Preferences
+            Left_ALP_Centre_Preferences = 0.7 # FIX - DO PROPERLY
+            if (data_year == '2025') and (i == 3) and (pd.isna(result_dict[div].loc[3,'Centre'])):
+                result_dict[div].at[3, 'Centre'] = Left_ALP_Centre_Preferences
+
 
 
             # fetch all changes so far!
@@ -1140,13 +1152,16 @@ def make_TCP_pair_category_dict(election_year, party_category_dict={}):
     # get them in Ballot order: 
 
     # Div_parties_next_dict groups all the INDs together - must use Div_Ballot_Order_next_dict instead to get all INDs in Ballot order
-    if next_year != '2025':
-        DOP_by_div_full = pd.read_csv(f"{next_year}HouseDOPByDivision.csv", skiprows=1).rename(columns={'DivisionNm': 'div_nm'}).rename(columns = {'DivisionNm':'div_nm'}) 
+    if election_year == '2028':
+        Div_Ballot_Order_next_dict = Div_parties_next_dict
+    elif election_year != '2025':
+        DOP_by_div_full = pd.read_csv(f"{election_year}HouseDOPByDivision.csv", skiprows=1).rename(columns={'DivisionNm': 'div_nm'})
         DOP_by_div_full = DOP_by_div_full.loc[(DOP_by_div_full['CountNumber']==0) & (DOP_by_div_full['CalculationType'] == 'Preference Count'),['div_nm', 'PartyAb']]
         DOP_by_div_full.loc[:,'PartyAb'] = DOP_by_div_full.loc[:,'PartyAb'].fillna('IND').replace('GVIC','GRN')
         Div_Ballot_Order_next_dict = DOP_by_div_full.groupby('div_nm')['PartyAb'].apply(list).to_dict()
     else:
         Div_Ballot_Order_next_dict = Div_parties_next_dict
+
 
     for div in result_dict.keys():
 
@@ -1176,11 +1191,72 @@ def make_TCP_pair_category_dict(election_year, party_category_dict={}):
     return TCP_pair_category_dict
 
 
-election_year = '2025'
+data_year = '2022'
+
+# import Formal_prefs_dict for senate calibration
+with open(f"Formal_prefs_dict_{data_year}.pkl", "rb") as f:
+    Formal_prefs_dict = pickle.load(f)
+
+with open(f"Senate_party_abvs_dict_{data_year}.pkl", "rb") as f:
+    Senate_party_abvs_dict = pickle.load(f)
+
+
+def get_senate_allocation(Formal_prefs_dict, Senate_party_abvs_dict, div, tcp_pair_parties, party_block, HTV_parties):
+
+    import pdb; pdb.set_trace()
+
+    allocation_abvs_list = [p for p in tcp_pair_parties]
+
+    allocation_set = convert_partyab_to_senate_group_names(allocation_abvs_list, Formal_prefs_dict, Senate_party_abvs_dict, div)
+    parties_to_allocate = convert_partyab_to_senate_group_names(party_block, Formal_prefs_dict, Senate_party_abvs_dict, div)
+    block_voters_df = Formal_prefs_dict[div].loc[Formal_prefs_dict[div]['Vote'].isin(parties_to_allocate),]
+
+    #Party_allocation = allocate_formal_preferences_to_allocation_set(data_year, Formal_prefs_dict[div].loc[Formal_prefs_dict[div]['Vote'] == party_to_allocate[0],], allocation_set, by_pp_id = False, as_percent = True)
+    Party_allocation = allocate_formal_preferences_to_allocation_set(data_year, block_voters_df, allocation_set, by_pp_id = False, as_percent = True)
+
+    import pdb; pdb.set_trace()
+
+    if HTV_parties:
+        HTV_party_list =  convert_partyab_to_senate_group_names(HTV_parties, Formal_prefs_dict, Senate_party_abvs_dict, div)
+        ATL = Formal_prefs_dict[div].iloc[:,list(range((Formal_prefs_dict[div].shape[1]-4)//2+2)) + [-1]]
+
+        mask1 = (ATL[HTV_party_list].to_numpy() == np.array([1,2,3,4,5,6])).all(axis=1)
+        mask2 = ATL.iloc[:,2:-1].sum(axis=1) == 21
+        id_list = ATL.loc[mask1 & mask2].index
+        wo_HTV =  Formal_prefs_dict[div].loc[~Formal_prefs_dict[div].index.isin(id_list),]
+
+        #wo_HTV_allocation = allocate_formal_preferences_to_allocation_set(data_year, wo_HTV.loc[wo_HTV['Vote'] == party_to_allocate[0],], allocation_set, by_pp_id = False, as_percent = True)
+        wo_HTV_allocation = allocate_formal_preferences_to_allocation_set(data_year, wo_HTV.loc[wo_HTV['Vote'].isin(parties_to_allocate),], allocation_set, by_pp_id = False, as_percent = True)
+
+
+        Party_allocation.columns = ['div_nm'] +  tcp_pair_parties
+        wo_HTV_allocation.columns = ['div_nm'] +  tcp_pair_parties
+    else:
+        wo_HTV_allocation = Party_allocation
+    return Party_allocation.set_index('div_nm'), wo_HTV_allocation.set_index('div_nm')
+
+tcp_pair_parties = {'Cook':['COAL','GRN','AJP','LDP','SPP'],'Fremantle':['ALP','GRN','LDP','AUC','AJP'],'Cooper':['ALP','GRN','AJP','RUAP','ALA','SPP'],'Perth':['ALP','GRN','LDP','AJP','AUC','FUT','SPP','ALA','CEC'],'Groom':['LNP','ALP','SPP','LDP'],'Farrer':['COAL','GRN','SPP','ON','FFPA','HMP']}
+HTV_parties_dict = {'Cook': ['ALP','GRN','ASP','AJP','LDP','REAS'],'Fremantle':['LP','NP','AUC','ASP','LDP','FFP'],'Cooper': ['COAL','FFP','AUC','DLP','CYA','DHJP'],'Perth':['LP','NP','AUC','ASP','LDP','FFP'],'Groom':['GRN','ICAN','AWP','AJP','ALP','HMP'],'Farrer':['ALP','GRN','HMP','JLN','AJP','SOPA']}
+major_sitout_dict = {'Cook':'ALP','Fremantle':'LP','Perth':'LP','Cooper':'COAL','Groom':'GRN','North Sydney':'ALP','Farrer':'ALP'}
+
+div = 'Farrer'
+
+#get_senate_allocation(Formal_prefs_dict, Senate_party_abvs_dict, 'Gippsland', ['COAL','ALP','GRN'], ['DHJP'], [])
+import pdb; pdb.set_trace()
+
+Normal_allocation, wo_HTV_allocation = get_senate_allocation(Formal_prefs_dict, Senate_party_abvs_dict, div, tcp_pair_parties[div], [major_sitout_dict[div]], HTV_parties_dict.get(div,[]))
+print(Normal_allocation)
+print(wo_HTV_allocation)
+
+
+
+import pdb; pdb.set_trace()
+
 
 party_category_dict = make_party_category_dict()
-TCP_pair_category_dict = make_TCP_pair_category_dict(election_year = election_year, party_category_dict=party_category_dict)
+TCP_pair_category_dict = make_TCP_pair_category_dict(data_year = data_year, party_category_dict=party_category_dict)
 
+election_year = str(int(data_year) + 3)
 
 if not os.path.exists(f"TCP_pair_category_dict_for_{election_year}.pkl"):
     with open(f"TCP_pair_category_dict_for_{election_year}.pkl", "wb") as f:
