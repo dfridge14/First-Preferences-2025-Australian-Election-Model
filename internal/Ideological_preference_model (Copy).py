@@ -6,7 +6,10 @@ import pickle
 import time
 import copy
 
+from dataclasses import dataclass
+from typing import List, Dict, Tuple, Optional, Any
 from scipy.optimize import minimize
+from collections import defaultdict
 
 import sys
 import pdb
@@ -139,10 +142,8 @@ if 0:
 
     import pdb; pdb.set_trace()
 
-from dataclasses import dataclass
-from typing import List, Dict, Tuple
-import numpy as np
-import pandas as pd
+
+
 
 # Define our fixed ideological arrays
 BLOCS = ["ALP", "COAL", "Left", "Right", "Centre"]
@@ -271,13 +272,6 @@ def build_cumulative_lc_sequences(
 
 
 
-from dataclasses import dataclass
-from typing import List, Dict, Tuple
-import numpy as np
-import pandas as pd
-import time
-from scipy.optimize import minimize
-from collections import defaultdict
 
 ORPHAN_POOLS = ['Left', 'Right', 'Centre']
 BLOCS = ['ALP', 'COAL', 'Left', 'Right', 'Centre']
@@ -1855,185 +1849,619 @@ for dist in simulated_districts: # Limit to first 3 for rapid inspection
 
 import pdb; pdb.set_trace()
 
-       
-# 1. Grab the cleaned empirical Count 0 for Eureka
-eureka_table = full_latent_tables['Eureka']
-eureka_empirical_c0 = eureka_table.count_0.copy()
-
-# 2. Run the injection function
-new_eureka_c0, eureka_deltas, _, _ = inject_lc_party_to_dop(
-    district='Eureka',
-    cand_to_add='ON',
-    target_bloc='Right',
-    empirical_c0=eureka_empirical_c0,
-    lc_df=LC_FPs_df,
-    party_df=party_df,
-    model=final_model
-)
-
-# 3. Print the results to see the cannibalization
-print("=== INJECTING ONE NATION INTO EUREKA ===")
-print(f"{'Candidate':<10} | {'Base C0':<12} | {'New C0':<12} | {'Delta (Shift)':<12}")
-print("-" * 55)
-for cand in sorted(set(eureka_empirical_c0.keys()) | {'ON'}):
-    base_val = eureka_empirical_c0.get(cand, 0.0)
-    new_val = new_eureka_c0.get(cand, 0.0)
-    shift = eureka_deltas.get(cand, 0.0)
-    print(f"{cand:<10} | {base_val:>12.4%} | {new_val:>12.4%} | {shift:>+12.4%}")
-
-
-on_contested_divs = ['Macedon', 'Morwell', 'Pakenham','Bendigo East'] 
-
-diag_df, on_scalar = diagnose_and_recalibrate_party(
-    party_abbr='ON',
-    contested_divs=on_contested_divs,
-    latent_tables=full_latent_tables,
-    lc_df=LC_FPs_df,
-    party_df=party_df,
-    model=final_model
-)
-
-print("\n=== ONE NATION DIAGNOSTIC REPORT ===")
-print(diag_df.to_string(index=False))
-print(f"=> ON Calibration Scalar (Median Actual/Pred): {on_scalar:.4f}\n")
-
-# 2. Run the detailed trace on Eureka, applying the extracted scalar
-trace_injection_mechanics_detailed(
-    district='Eureka',
-    cand_to_add='ON',
-    target_bloc='Right',
-    empirical_c0=full_latent_tables['Eureka'].count_0,
-    lc_df=LC_FPs_df,
-    party_df=party_df,
-    model=final_model,
-    calibration_scalar=on_scalar
-)
-
-
-#trace_electorate_mechanics('Eureka', final_model, full_transitions)
 
 
 
 
 
-PARTY_TO_ADD = 'ON'
-TARGET_BLOC = 'Right'
 
-# 1. Recalibrate ON realization ratio (kappa) across seats where they actually ran
-contested_divs = [d for d, t in full_latent_tables.items() if PARTY_TO_ADD in t.count_0]
 
-diag_df, on_kappa = diagnose_and_recalibrate_party(
-    party_abbr=PARTY_TO_ADD,
-    contested_divs=contested_divs,
-    latent_tables=full_latent_tables,
-    lc_df=LC_FPs_df,
-    party_df=party_df,
-    model=final_model
-)
 
-print(f"[{PARTY_TO_ADD}] Contested Seats: {len(contested_divs)} | Realization Scalar (Kappa): {on_kappa:.4f}")
 
-# 2. Iterate through electorates and inject ON where absent
-counterfactual_c0_dict = {}
-shift_vectors_dict = {}
-model_pred_A_dict = {}
-model_pred_B_dict = {}
 
-for district, table in full_latent_tables.items():
-    emp_c0 = table.count_0
+
+
+
+
+
+
+
+
+
+######################################################################### Add IND back in ############################################################################################################
+
+
+def extract_count_0(table_obj: Any) -> Dict[str, float]:
+    """Cleanly extracts count_0 dictionary whether object is a Table or dict."""
+    if hasattr(table_obj, 'count_0'):
+        raw = table_obj.count_0
+    elif isinstance(table_obj, dict):
+        raw = table_obj
+    else:
+        raise TypeError("Expected dict or object with a 'count_0' attribute.")
     
-    # Skip if candidate already contested this electorate
-    if PARTY_TO_ADD in emp_c0:
-        continue
+    tot = sum(raw.values())
+    if tot > 1.5:
+        return {k: v / 100.0 for k, v in raw.items()}
+    return dict(raw)
 
-    # Ensure the electorate exists in LC and has non-zero Upper House base
-    if district not in LC_FPs_df.columns:
-        continue
-    
-    raw_lc = LC_FPs_df[district].get(PARTY_TO_ADD, 0.0)
-    if raw_lc <= 1e-9:
-        continue
 
-    # Inject directly using your existing function
-    new_c0, shift_vector, s_hat_a, s_hat_b = inject_lc_party_to_dop(
-        district=district,
-        cand_to_add=PARTY_TO_ADD,
-        target_bloc=TARGET_BLOC,
-        empirical_c0=emp_c0,
-        lc_df=LC_FPs_df,
-        party_df=party_df,
-        model=final_model,
-        calibration_scalar=on_kappa
+def build_and_evaluate_model_allocation(
+    district: str,
+    menu: List[str],
+    lc_series: pd.Series,
+    party_df: pd.DataFrame,
+    model: 'AggregateLatentLogit',
+    fallback_c0: Optional[Dict[str, float]] = None
+) -> Dict[str, float]:
+    """
+    Evaluates model.evaluate_state_allocation for an arbitrary menu in a district.
+    Handles Upper House aggregation and Coalition alias fallback logic.
+    """
+    lc_mass = np.zeros(5)
+    for party, share in lc_series.items():
+        b_idx = BLOCS.index(get_party_bloc(party, party_df))
+        lc_mass[b_idx] += share
+    if lc_mass.sum() > 0:
+        lc_mass = lc_mass / lc_mass.sum()
+
+    menu_size = np.zeros(5)
+    c_cap = np.zeros(5)
+    cand_to_bloc = {}
+    cand_demand = {}
+
+    for cand in menu:
+        b = BLOCS.index(get_party_bloc(cand, party_df))
+        cand_to_bloc[cand] = b
+        menu_size[b] += 1.0
+
+        if b in [0, 1]:
+            u = lc_series.get(cand, 0.0)
+            if u <= 1e-9 and fallback_c0 is not None:
+                u = fallback_c0.get(cand, 0.0)
+                if u <= 1e-9 and cand in ['LP', 'NP', 'LNP']:
+                    coal_lc = sum(lc_series.get(a, 0.0) for a in ['LP', 'NP', 'LNP'])
+                    coal_la = [c for c in menu if c in ['LP', 'NP', 'LNP']]
+                    if len(coal_la) == 1:
+                        u = coal_lc
+                    elif len(coal_la) > 1:
+                        emp_c = fallback_c0.get(cand, 0.0)
+                        emp_tot = sum(fallback_c0.get(c, 0.0) for c in coal_la)
+                        u = coal_lc * (emp_c / emp_tot) if emp_tot > 0 else (coal_lc / len(coal_la))
+        else:
+            u = lc_series.get(cand, 0.0)
+
+        cand_demand[cand] = u
+        if b in [2, 3, 4]:
+            c_cap[b] += u
+
+    c_cap[0] = 1.0 if menu_size[0] > 0 else 0.0
+    c_cap[1] = 1.0 if menu_size[1] > 0 else 0.0
+    for b in [2, 3, 4]:
+        c_cap[b] = min(1.0, c_cap[b] / lc_mass[b]) if lc_mass[b] > 0 else 0.0
+
+    alpha, beta, gamma = model.unpack_params(model.theta)
+    return model.evaluate_state_allocation(
+        lc_mass, menu, c_cap, menu_size, cand_to_bloc, cand_demand,
+        alpha, beta, gamma
     )
 
-    counterfactual_c0_dict[district] = new_c0
-    shift_vectors_dict[district] = shift_vector
-    model_pred_A_dict[district] = s_hat_a
-    model_pred_B_dict[district] = s_hat_b
 
-def generate_injection_comparison_table(
-    district: str, 
-    counterfactual_c0_dict: dict, 
-    model_pred_A_dict: dict,
-    model_pred_B_dict: dict,
+def compute_independent_defection_rates(
+    district: str,
+    empirical_c0_full: Dict[str, float],
+    s_hat_a: Dict[str, float]
+) -> Tuple[Dict[str, float], List[str], float]:
+    """
+    Calculates lambda_c (the proportion of incumbent c's structural vote 
+    that defected to the Independent), strictly floored at 0 and calibrated 
+    to match the total empirical Independent vote share.
+    """
+    ind_cands = [c for c, v in empirical_c0_full.items() if str(c).startswith('IND') and v > 1e-9]
+    tot_ind_emp = sum(empirical_c0_full[c] for c in ind_cands)
+    menu_A = [c for c in empirical_c0_full if c not in ind_cands and empirical_c0_full[c] > 1e-9]
+
+    if tot_ind_emp <= 1e-9:
+        return {c: 0.0 for c in menu_A}, [], 0.0
+
+    # Raw votes drawn by the Independent from each incumbent
+    raw_stolen = {}
+    for c in menu_A:
+        pred_a = s_hat_a.get(c, 0.0)
+        emp_c = empirical_c0_full.get(c, 0.0)
+        raw_stolen[c] = max(0.0, pred_a - emp_c)
+
+    tot_raw_stolen = sum(raw_stolen.values())
+    calibrated_stolen = {}
+
+    if tot_raw_stolen > 1e-9:
+        # Scale proportionally to match observed Independent vote share
+        scale_factor = tot_ind_emp / tot_raw_stolen
+        for c in menu_A:
+            calibrated_stolen[c] = min(s_hat_a.get(c, 0.0), raw_stolen[c] * scale_factor)
+    else:
+        # Fallback proportional to predicted size if model underpredicts all incumbents
+        for c in menu_A:
+            calibrated_stolen[c] = tot_ind_emp * s_hat_a.get(c, 0.0)
+
+    # Compute defection rate lambda_c = stolen / model_prediction
+    lambdas = {}
+    for c in menu_A:
+        pred = s_hat_a.get(c, 0.0)
+        lam = calibrated_stolen[c] / pred if pred > 1e-9 else 0.0
+        lambdas[c] = min(0.9999, max(0.0, lam))
+
+    return lambdas, ind_cands, tot_ind_emp
+
+
+def inject_parties_with_ind_fork(
+    district: str,
+    cands_to_add: List[str],
+    empirical_c0_full: Dict[str, float],
     lc_df: pd.DataFrame,
-    latent_tables: dict
-) -> pd.DataFrame:
+    party_df: pd.DataFrame,
+    model: 'AggregateLatentLogit',
+    latent_table_obj: Optional[Any] = None,
+    calibration_scalars: Optional[Dict[str, float]] = None
+) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, Any]]:
     """
-    Renders a 5-row diagnostic table showing:
-      1. Counterfactual LA C0 (Final simulated result)
-      2. Original Empirical LA C0 (Baseline without entrant)
-      3. Predicted LA C0 (Model S_hat_A without entrant)
-      4. Predicted LA C0_ON (Model S_hat_B with entrant)
-      5. Raw LC Base (Upper House baseline)
+    Executes the Complete 6-Step Injection & Independent Restoration Pipeline.
+    Includes Square-Root Scale Dampening for endogenous IND vs entrant party affinity.
     """
-    if district not in counterfactual_c0_dict:
-        print(f"District '{district}' not found in counterfactual results.")
-        return pd.DataFrame()
-        
-    cf_c0 = counterfactual_c0_dict[district]
-    s_hat_A = model_pred_A_dict[district]
-    s_hat_B = model_pred_B_dict[district]
-    orig_c0 = latent_tables[district].count_0
-    
+    if calibration_scalars is None:
+        calibration_scalars = {c: 1.0 for c in cands_to_add}
+
+    # Clean Upper House series
     lc_series = lc_df[district].dropna().copy()
     if lc_series.sum() > 1.5:
         lc_series = lc_series / 100.0
-        
-    table_data = {}
-    for party in cf_c0.keys():
-        table_data[party] = [
-            lc_series.get(party, 0.0),
-            s_hat_A.get(party, 0.0),
-            s_hat_B.get(party, 0.0),
-            cf_c0.get(party, 0.0),
-            orig_c0.get(party, 0.0)
-        ]
-        
-    df = pd.DataFrame(
-        table_data, 
-        index=[
-            "Raw LC Base",
-            "Predicted LA C0 (Ŝ_A)",
-            "Predicted LA C0_ON (Ŝ_B)",
-            "Counterfactual LA C0",
-            "Original Empirical LA C0"
-        ]
+
+    # Separate incumbents and Independents
+    ind_cands = [c for c, v in empirical_c0_full.items() if str(c).startswith('IND') and v > 1e-9]
+    menu_A = [c for c in empirical_c0_full if c not in ind_cands and empirical_c0_full[c] > 1e-9]
+    menu_B = menu_A + [c for c in cands_to_add if c not in menu_A]
+
+    # -------------------------------------------------------------
+    # STEP 1 & 2: Structural Baseline (S_hat_A) and Defection Rates
+    # -------------------------------------------------------------
+    s_hat_a = build_and_evaluate_model_allocation(
+        district=district,
+        menu=menu_A,
+        lc_series=lc_series,
+        party_df=party_df,
+        model=model,
+        fallback_c0=empirical_c0_full
     )
+
+    lambdas, _, tot_ind_emp = compute_independent_defection_rates(
+        district=district,
+        empirical_c0_full=empirical_c0_full,
+        s_hat_a=s_hat_a
+    )
+
+    # -------------------------------------------------------------
+    # STEP 3 & 4: The Counterfactual Without IND (The Fork)
+    # -------------------------------------------------------------
+    if latent_table_obj is not None:
+        regime = "latent_table_mrr"
+        clean_latent_c0 = extract_count_0(latent_table_obj)
+        
+        cf_c0_no_ind, _, _, s_hat_b = inject_parties_to_dop(
+            district=district,
+            cands_to_add=cands_to_add,
+            empirical_c0=clean_latent_c0,
+            lc_df=lc_df,
+            party_df=party_df,
+            model=model,
+            calibration_scalars=calibration_scalars
+        )
+    else:
+        regime = "structural_pure"
+        
+        s_hat_b = build_and_evaluate_model_allocation(
+            district=district,
+            menu=menu_B,
+            lc_series=lc_series,
+            party_df=party_df,
+            model=model,
+            fallback_c0=empirical_c0_full
+        )
+        
+        unnorm_b = {}
+        for c in menu_B:
+            if c in cands_to_add:
+                kappa = calibration_scalars.get(c, 1.0)
+                unnorm_b[c] = s_hat_b.get(c, 0.0) * kappa
+            else:
+                unnorm_b[c] = s_hat_b.get(c, 0.0)
+                
+        tot_unnorm = sum(unnorm_b.values())
+        cf_c0_no_ind = {c: v / tot_unnorm for c, v in unnorm_b.items()}
+
+    # -------------------------------------------------------------
+    # STEP 5: Entrant Defection Rates via Scale-Dampened Affinity
+    # -------------------------------------------------------------
+    all_lambdas = dict(lambdas)
+    gamma_scalars = {}
+
+    for entrant in cands_to_add:
+        if len(cands_to_add) == 1:
+            s_hat_b_single = s_hat_b
+        else:
+            s_hat_b_single = build_and_evaluate_model_allocation(
+                district=district,
+                menu=menu_A + [entrant],
+                lc_series=lc_series,
+                party_df=party_df,
+                model=model,
+                fallback_c0=empirical_c0_full
+            )
+
+        # 1. District-wide baseline defection rates (denominators)
+        tot_menu_a_mass = sum(s_hat_a.values())
+        tot_delta = sum(max(0.0, s_hat_a.get(c, 0.0) - s_hat_b_single.get(c, 0.0)) for c in lambdas)
+        
+        bar_tau = tot_delta / tot_menu_a_mass if tot_menu_a_mass > 1e-9 else 1.0
+        bar_lam = tot_ind_emp / tot_menu_a_mass if tot_menu_a_mass > 1e-9 else 1.0
+
+        # Scale dampeners (square-root scaling balances affinity vs size)
+        scale_tau = (bar_tau ** 0.5)
+        scale_lam = (bar_lam ** 0.5)
+
+        g_stream = {}
+        gamma_stream = {}
+
+        for c, lam_c in lambdas.items():
+            pred_a = s_hat_a.get(c, 0.0)
+            delta_c = max(0.0, pred_a - s_hat_b_single.get(c, 0.0))
+            tau_c = min(0.9999, max(0.0, delta_c / pred_a)) if pred_a > 1e-9 else 0.0
+
+            # Scale-dampened odds
+            eff_odds_tau = (tau_c / scale_tau) if scale_tau > 1e-9 else 0.0
+            eff_odds_lam = (lam_c / scale_lam) if scale_lam > 1e-9 else 0.0
+
+            if (eff_odds_tau + eff_odds_lam) > 1e-9:
+                gamma_c = eff_odds_tau / (eff_odds_tau + eff_odds_lam)
+            else:
+                gamma_c = 0.5
+
+            gamma_stream[c] = gamma_c
+            g_stream[c] = delta_c * lam_c
+
+        tot_g = sum(g_stream.values())
+
+        if tot_g > 1e-9:
+            gamma_bar = sum((g / tot_g) * gamma_stream[c] for c, g in g_stream.items())
+            
+            ent_mass = cf_c0_no_ind.get(entrant, 0.0)
+            lambda_donor_bar = tot_g / ent_mass if ent_mass > 1e-9 else 0.0
+            
+            lam_ent = lambda_donor_bar * (1.0 - gamma_bar)
+            all_lambdas[entrant] = min(0.9999, max(0.0, lam_ent))
+            gamma_scalars[entrant] = gamma_bar
+        else:
+            all_lambdas[entrant] = 0.0
+            gamma_scalars[entrant] = 1.0
+
+    # -------------------------------------------------------------
+    # STEP 6: Universal Simplex Reintegration
+    # -------------------------------------------------------------
+    final_c0 = {}
+    total_restored_ind_mass = 0.0
+
+    # Retain non-defected share across all parties
+    for p in cf_c0_no_ind.keys():
+        retention = 1.0 - all_lambdas.get(p, 0.0)
+        final_c0[p] = cf_c0_no_ind[p] * retention
+        total_restored_ind_mass += cf_c0_no_ind[p] * all_lambdas.get(p, 0.0)
+
+    # Distribute restored mass across Independents proportional to original vote
+    if ind_cands:
+        for ind in ind_cands:
+            prop = empirical_c0_full[ind] / tot_ind_emp if tot_ind_emp > 0 else (1.0 / len(ind_cands))
+            final_c0[ind] = total_restored_ind_mass * prop
+
+    # Exact simplex closure
+    z_final = sum(final_c0.values())
+    final_c0 = {k: v / z_final for k, v in final_c0.items()}
+
+    # -------------------------------------------------------------
+    # Calculate Pure Extraction Rates (tau) for IA Reintegration
+    # -------------------------------------------------------------
+    extraction_rates = {}
     
-    return df.map(lambda x: f"{x:.2%}")
+    if latent_table_obj is not None:
+        baseline_no_ind_no_on = extract_count_0(latent_table_obj)
+    else:
+        baseline_no_ind_no_on = s_hat_a
+    
+    for c in menu_A:
+        base_val = baseline_no_ind_no_on.get(c, 0.0)
+        cf_val = cf_c0_no_ind.get(c, 0.0)
+        extraction_rates[c] = min(0.9999, max(0.0, 1.0 - (cf_val / base_val))) if base_val > 1e-9 else 0.0
 
-# ==========================================================
-# Example usage to inspect the first 3 simulated districts:
-# ==========================================================
-simulated_districts = list(counterfactual_c0_dict.keys())
+    if tot_ind_emp > 1e-9:
+        ind_loss_frac = max(0.0, (tot_ind_emp - total_restored_ind_mass) / tot_ind_emp)
+    else:
+        ind_loss_frac = 0.0
+        
+    for ind in ind_cands:
+        extraction_rates[ind] = ind_loss_frac
 
-for dist in simulated_districts:
-    print(f"\n--- {dist.upper()} ---")
-    comp_table = generate_injection_comparison_table(dist, counterfactual_c0_dict, model_pred_A_dict, model_pred_B_dict,LC_FPs_df, full_latent_tables)
-    print(comp_table.to_string())
+    diagnostics = {
+        'regime': regime,
+        'baseline_no_ind_no_on': baseline_no_ind_no_on,
+        'cf_c0_no_ind': cf_c0_no_ind,
+        'gamma_scalars': gamma_scalars,
+        'tot_ind_emp': tot_ind_emp,
+        'tot_ind_final': total_restored_ind_mass,
+        'extraction_rates': extraction_rates
+    }
+
+    return final_c0, all_lambdas, diagnostics
+
+
+
+
+
+
+
+
+
+
+
+############################################ Re-inject incumbency ###############
+
+def reapply_incumbency_to_counterfactual(
+    cf_c0_no_ia: Dict[str, float],
+    extraction_rates: Dict[str, float], 
+    ia_adjustments: Dict[str, float],
+    dop_table: Any,
+    entrants: List[str],
+    emp_c0_with_ia: Optional[Dict[str, float]] = None,
+    debug: bool = True
+) -> Tuple[Dict[str, float], Dict[str, float]]:
+    """
+    Complete Standalone IA Restoration Pipeline.
+    """
+    # -------------------------------------------------------------------------
+    # STAGE 1: 3CP -> Count 0 via DOP Reverse-Transfers
+    # -------------------------------------------------------------------------
+    table_copy = copy.deepcopy(dop_table)
+    
+    if emp_c0_with_ia is None:
+        if hasattr(table_copy, 'apply_incumbency'):
+            adjusted_table = table_copy.apply_incumbency(ia_adjustments)
+        elif hasattr(table_copy, 'strip_incumbency'):
+            inverted_adjustments = {k: -v for k, v in ia_adjustments.items()}
+            adjusted_table = table_copy.strip_incumbency(inverted_adjustments)
+        else:
+            raise AttributeError("dop_table must have 'apply_incumbency' or 'strip_incumbency' method.")
+            
+        emp_c0_with_ia = extract_count_0(adjusted_table)
+
+    # -------------------------------------------------------------------------
+    # STAGE 2: Absolute Extraction & Entrant Mapping (Count 0 -> Count -1)
+    # -------------------------------------------------------------------------
+    final_c0 = {}
+    pooled_entrant_mass = 0.0
+
+    if debug:
+        print(f"\n--- STAGE 2: Count -1 (Entrant Extraction) ---")
+
+    for cand, ia_adjusted_mass in emp_c0_with_ia.items():
+        if cand in entrants:
+            continue
+
+        ext_frac = extraction_rates.get(cand, 0.0)
+        retention_frac = 1.0 - ext_frac
+
+        final_c0[cand] = ia_adjusted_mass * retention_frac
+        stolen_vol = ia_adjusted_mass * ext_frac
+        pooled_entrant_mass += stolen_vol
+
+        if debug:
+            print(f"  {cand:5s} | Retained {retention_frac:6.2%} of {ia_adjusted_mass:.4%} | Donated {stolen_vol:.4%} to pool")
+
+    # Distribute pooled entrant mass
+    entrant_pre_ia_masses = {e: cf_c0_no_ia.get(e, 0.0) for e in entrants}
+    tot_entrant_pre_ia = sum(entrant_pre_ia_masses.values())
+
+    if debug:
+        print(f"\n  [Pool Total]: {pooled_entrant_mass:.4%}")
+
+    if tot_entrant_pre_ia > 1e-9:
+        for e, pre_mass in entrant_pre_ia_masses.items():
+            prop = pre_mass / tot_entrant_pre_ia
+            final_c0[e] = pooled_entrant_mass * prop
+            if debug:
+                print(f"  {e:5s} | Receives {prop:5.1%} of pool -> {final_c0[e]:.4%}")
+    else:
+        if entrants:
+            split = pooled_entrant_mass / len(entrants)
+            for e in entrants:
+                final_c0[e] = split
+
+    # Exact Simplex Closure
+    z_final = sum(final_c0.values())
+    final_c0 = {k: v / z_final for k, v in final_c0.items()}
+    
+    if debug:
+        print(f"{'='*70}\n")
+
+    return final_c0, emp_c0_with_ia
+
+
+def test_high_ind_electorates(
+    dop_table_dict: dict,
+    lc_df: pd.DataFrame,
+    party_df: pd.DataFrame,
+    model: 'AggregateLatentLogit',
+    ia_adjustments_dict: dict,
+    latent_tables: dict = None,
+    parties_to_add: list = None,
+    kappas: dict = None
+):
+    if latent_tables is None:
+        latent_tables = {}
+    if parties_to_add is None:
+        parties_to_add = ['ON']
+    if kappas is None:
+        kappas = {p: 0.985 for p in parties_to_add}
+        
+    summary_rows = []
+    
+    for district, df in dop_table_dict.items():
+        if district not in lc_df.columns:
+            continue
+            
+        # =========================================================
+        # 1. Initialize DOPTable and Normalize
+        # =========================================================
+        table = DOPTable(df)
+        total_votes = sum(table.count_0.values())
+        table.count_0 = {k: v / total_votes for k, v in table.count_0.items()}
+        for rnd in table.rounds:
+            rnd['V_elim'] /= total_votes
+            rnd['transfers'] = {k: v / total_votes for k, v in rnd['transfers'].items()}
+            
+        # =========================================================
+        # 2. High-IND Check
+        # =========================================================
+        ind_cands = [c for c in table.candidates if str(c).startswith('IND')]
+        ind_share = sum(table.count_0.get(c, 0) for c in ind_cands)
+        
+        if ind_share < 0.15:
+            continue
+            
+        orig_ind_share = ind_share
+        
+        # =========================================================
+        # 3. Strip Incumbency & Filter Valid Entrants
+        # =========================================================
+        ia_adj = ia_adjustments_dict.get(district, {})
+        stripped_table = table.strip_incumbency(ia_adj) if ia_adj else table
+        emp_c0_stripped = stripped_table.count_0
+        
+        valid_parties = []
+        for p in parties_to_add:
+            raw_lc = lc_df[district].get(p, 0.0)
+            if raw_lc > 1.5:
+                raw_lc /= 100.0
+            if raw_lc > 1e-9:
+                valid_parties.append(p)
+            else:
+                print(f"[Notice] {p} has 0.0 LC demand in '{district}'. Skipping {p}.")
+                
+        if not valid_parties:
+            print(f"[Notice] No valid entrants for '{district}'. Skipping district entirely.")
+            continue
+            
+        valid_kappas = {p: kappas.get(p, 1.0) for p in valid_parties}
+
+        # =========================================================
+        # 4. Inject Parties & Compute Entrant/IND Tug-of-War
+        # =========================================================
+        tbl_obj = latent_tables.get(district, None)
+        
+        cf_c0_no_ia, lambdas, diag = inject_parties_with_ind_fork(
+            district=district,
+            cands_to_add=valid_parties,
+            empirical_c0_full=emp_c0_stripped,
+            lc_df=lc_df,
+            party_df=party_df,
+            model=model,
+            latent_table_obj=tbl_obj,
+            calibration_scalars=valid_kappas
+        )
+        
+        # =========================================================
+        # 5. Re-apply Incumbency Advantage
+        # =========================================================
+        final_c0, abs_ia_c0 = reapply_incumbency_to_counterfactual(
+            cf_c0_no_ia=cf_c0_no_ia,
+            extraction_rates=diag['extraction_rates'],
+            ia_adjustments=ia_adj,
+            dop_table=stripped_table,
+            entrants=valid_parties
+        )
+        
+        # =========================================================
+        # 6. Diagnostics and Reporting
+        # =========================================================
+        ind_keys = [c for c in final_c0 if str(c).startswith('IND')]
+        final_ind_share = sum(final_c0[c] for c in ind_keys)
+
+        # Base row data
+        row_data = {
+            'District': district,
+            'Regime': diag['regime'],
+            'Orig_IND_with_IA': f"{orig_ind_share:.2%}",
+            'Final_IND_with_IA': f"{final_ind_share:.2%}",
+            'IND_Delta': f"{(final_ind_share - orig_ind_share):+.2%}"
+        }
+        
+        # Dynamically append columns for each entrant
+        for p in valid_parties:
+            row_data[f'{p}_Vote'] = f"{final_c0.get(p, 0.0):.2%}"
+            row_data[f'{p}_λ'] = f"{lambdas.get(p, 0.0):.2%}"
+            row_data[f'{p}_γ'] = f"{diag['gamma_scalars'].get(p, 1.0):.2%}"
+            
+        summary_rows.append(row_data)
+
+        # Print Detailed District Trace
+        print(f"\n--- {district.upper()} ({diag['regime']}) ---")
+        detail_data = {}
+        for p in final_c0.keys():
+            detail_data[p] = [
+                f"{table.count_0.get(p, 0.0):.2%}",
+                f"{emp_c0_stripped.get(p, 0.0):.2%}",
+                f"{diag['baseline_no_ind_no_on'].get(p, 0.0):.2%}",
+                f"{diag['cf_c0_no_ind'].get(p, 0.0):.2%}",
+                f"{cf_c0_no_ia.get(p, 0.0):.2%}",
+                f"{final_c0.get(p, 0.0):.2%}"
+            ]
+        
+        detail_df = pd.DataFrame(
+            detail_data,
+            index=[
+                "1. Empirical (With IA)",
+                "2. Empirical (IA Free)",
+                "3. CF w/o IND, w/o Entrants (IA Free)",
+                "4. CF w/o IND, WITH Entrants (IA Free)",
+                "5. CF WITH IND, WITH Entrants (IA Free)",
+                "6. Final Counterfactual (With IA)"
+            ]
+        )
+        print(detail_df.to_string())
+
+    print("\n" + "=" * 90)
+    print("HIGH-IND SUMMARY TABLE")
+    print("=" * 90)
+    summary_df = pd.DataFrame(summary_rows)
+    print(summary_df.to_string(index=False))
+
+test_high_ind_electorates(
+    dop_table_dict = DOP_table_dict,
+    lc_df = LC_FPs_df,
+    party_df = party_df,
+    model = final_model,
+    ia_adjustments_dict = ia_adjustments_dict,
+    latent_tables = None,
+    parties_to_add = PARTIES_TO_ADD,
+    kappas = kappas
+)
 
 import pdb; pdb.set_trace()
+
+
+
+
+
+
+
+
+
 
 
 
