@@ -203,9 +203,9 @@ is_repeat = successful_matches.apply(
 )
 
 print(f"Removed {is_repeat.sum()} repeat contenders running in the same electorate.")
-final_model_df = successful_matches.copy()
-final_model_df['is_repeat'] = is_repeat
-#final_model_df = successful_matches[~is_repeat].drop(columns=['Simple_Temp']).copy()
+final_IND_model_df = successful_matches.copy()
+final_IND_model_df['is_repeat'] = is_repeat
+#final_IND_model_df = successful_matches[~is_repeat].drop(columns=['Simple_Temp']).copy()
 # Print Diagnostic Summary
 print("\n" + "="*50)
 print("MERGE DIAGNOSTICS")
@@ -230,7 +230,7 @@ if len(unmatched_res) > 0:
 
 councillors_df = pd.read_csv("VEC_Councillors.csv")
 
-final_model_df['Is_Former_Councillor'] = final_model_df.apply(
+final_IND_model_df['Is_Former_Councillor'] = final_IND_model_df.apply(
     lambda r: not councillors_df[
         (councillors_df['Candidate_Formatted'] == r['Candidate']) & 
         (councillors_df['Year'] < r['Year'])
@@ -255,7 +255,8 @@ def get_candidate_archetype(name):
         return 'Public Figure'
     return 'Standard'
 
-final_model_df['Candidate_Archetype'] = final_model_df['Candidate'].apply(get_candidate_archetype)
+final_IND_model_df['Candidate_Archetype'] = final_IND_model_df['Candidate'].apply(get_candidate_archetype)
+final_IND_model_df.loc[(final_IND_model_df['Candidate']=='Darryn Lyons') & (final_IND_model_df['Year']==2018),'Is_Former_Councillor'] = True # Mayor of Geelong
 
 
 to_plot = 0
@@ -263,8 +264,8 @@ to_plot = 0
 if to_plot:
 
     # 1. Create a categorical grouping column for the facets
-    final_model_df['Campaign_Phase'] = np.where(
-        final_model_df['Campaign_Length_Days'] <= 15, 
+    final_IND_model_df['Campaign_Phase'] = np.where(
+        final_IND_model_df['Campaign_Length_Days'] <= 15, 
         '<= 15 Days (Ballot Draw / Late)', 
         '> 15 Days (Early Campaign)'
     )
@@ -274,7 +275,7 @@ if to_plot:
     phases = ['<= 15 Days (Ballot Draw / Late)', '> 15 Days (Early Campaign)']
 
     for i, phase in enumerate(phases):
-        subset = final_model_df[final_model_df['Campaign_Phase'] == phase]
+        subset = final_IND_model_df[final_IND_model_df['Campaign_Phase'] == phase]
         ax = axes[i]
         
         # A. Draw the regression line ONLY (scatter=False)
@@ -341,7 +342,7 @@ successful_matches.to_csv("Final_IND_Campaign_Model_Data.csv", index=False)
 
 # Add Suzanna Sheed 2014 to rows 
 
-# final_model_df.loc[final_model_df['Candidate'].isin(final_model_df.loc[final_model_df['is_repeat']==False,].groupby('Candidate')['Candidate'].count().sort_values().tail(6).index),].sort_values(by='Candidate')
+# final_IND_model_df.loc[final_IND_model_df['Candidate'].isin(final_IND_model_df.loc[final_IND_model_df['is_repeat']==False,].groupby('Candidate')['Candidate'].count().sort_values().tail(6).index),].sort_values(by='Candidate')
 
 
 #1a. Save page electorate and primary vote performance for each is_repeat IND (CLEAN: double-doing the is_repeat section)
@@ -350,21 +351,23 @@ successful_matches.to_csv("Final_IND_Campaign_Model_Data.csv", index=False)
 def clean_cand_name(name):
     return " ".join(str(name).strip().lower().split())
 
-final_model_df['Cand_Clean'] = final_model_df['Candidate'].apply(clean_cand_name)
+final_IND_model_df['Cand_Clean'] = final_IND_model_df['Candidate'].apply(clean_cand_name)
 
 # 2. Extract prior run history across ALL electorates
 is_repeat_list = []
 past_vote_list = []
 past_elec_list = []
 
-for _, row in final_model_df.iterrows():
+for _, row in final_IND_model_df.iterrows():
     c_clean = row['Cand_Clean']
     curr_yr = row['Year']
+    curr_elec = row['Electorate']
     
     # Match candidate anywhere in Victoria strictly before current election year
-    priors = final_model_df[
-        (final_model_df['Cand_Clean'] == c_clean) & 
-        (final_model_df['Year'] < curr_yr)
+    priors = final_IND_model_df[
+        (final_IND_model_df['Cand_Clean'] == c_clean) & 
+        (final_IND_model_df['Year'] == curr_yr - 4) &
+        (final_IND_model_df['Electorate'] == curr_elec)
     ]
     
     if not priors.empty:
@@ -377,9 +380,9 @@ for _, row in final_model_df.iterrows():
         past_vote_list.append(0.0)
         past_elec_list.append(None)
 
-final_model_df['is_repeat'] = is_repeat_list
-final_model_df['Past_Vote_Share'] = past_vote_list
-final_model_df['Past_Electorate'] = past_elec_list
+final_IND_model_df['is_repeat'] = is_repeat_list
+final_IND_model_df['Past_Vote_Share'] = past_vote_list
+final_IND_model_df['Past_Electorate'] = past_elec_list
 
 # 1b. Get is_incumbent (manually apply to really strong repeat contenders - ) # Ali Cupper 2018-22, Jacqui Hawinks 22, Suzanna Sheed 18-22, Russel Northe 18? Plus the well-funded 2022 Teals
 
@@ -399,7 +402,7 @@ excluded_contests = [
     (2022, 'Bellarine'),  # Sarah Fenton
 ]
 
-train_model_df = final_model_df[~final_model_df.set_index(['Year', 'Electorate']).index.isin(excluded_contests)].copy()
+train_model_df = final_IND_model_df[~final_IND_model_df.set_index(['Year', 'Electorate']).index.isin(excluded_contests)].copy()
 
 # 2. Get elec_df: get total IND vote in last electorate; fix for redistributions. 
 
@@ -692,186 +695,574 @@ for year in [2022]: # ADD: previous years only work once complete_DOP_table_dict
 
 import pdb; pdb.set_trace()
 
-# 4. Perform model
 
 # ==========================================
 # PHASE 1: DATA PREP & FILTERING
 # ==========================================
-def prepare_training_data(cand_df, elec_df):
-    """Filters incumbents and builds the electorate-level aggregations."""
-    
-    # 1. Drop Incumbent MPs (they skew the insurgency model)
-    train_cand = cand_df
+def prepare_training_data(cand_df, elec_df, excluded_contests):
+    train_cand = cand_df.copy()
 
-    # 1. Define the baseline nomination cut-off per year
-  
-    # Calculate Effective Days: 0 if at/below minimum, otherwise keep raw days
-    baseline_days = {2014: 13, 2018: 14, 2022: 15}
+    # 1. Flag Excluded Contests (The Unified List: Teals + Incumbents)
+    excluded_idx = pd.MultiIndex.from_tuples(excluded_contests, names=['Year', 'Electorate'])
+    train_cand['Is_Excluded_Seat'] = train_cand.set_index(['Year', 'Electorate']).index.isin(excluded_idx)
+
+    # 2. Effective Days Logic 
+    baseline_days = {2010: 13, 2014: 13, 2018: 14, 2022: 15}
     train_cand['Min_Days'] = train_cand['Year'].map(baseline_days)
-    train_cand['Effective_Days'] = np.where(train_cand['Campaign_Length_Days'] <= train_cand['Min_Days'], 0, train_cand['Campaign_Length_Days'])
-    
-    # Log transform (add 1 to safely handle the zeros)
+    train_cand['Effective_Days'] = np.where(
+        train_cand['Campaign_Length_Days'] <= train_cand['Min_Days'], 
+        0, train_cand['Campaign_Length_Days']
+    )
     train_cand['Log_Days'] = np.log(train_cand['Effective_Days'] + 1)
     
-    # 2. Aggregate to Electorate Level (The Pool)
-    pool_df = train_cand.groupby(['Year', 'Electorate']).agg(
-        Total_IND_Share=('Primary_Vote_Share', 'sum'),
-        Has_Councillor=('Is_Former_Councillor', 'max'),
-        Sum_Log_Days=('Log_Days', 'sum')
+    # ---------------------------------------------------------
+    # 3. CALCULATE "HIDDEN THREATS" (For Track 1)
+    # ---------------------------------------------------------
+    # We must measure New IND pressure even in excluded seats, so Track 1 knows 
+    # if the Repeat Teals/Incumbents were actively attacked.
+    all_new_inds = train_cand[train_cand['is_repeat'] == False]
+    
+    threat_pool = all_new_inds.groupby(['Year', 'Electorate']).agg(
+        Sum_New_Days=('Effective_Days', 'sum'),
+        Has_New_Councillor=('Is_Former_Councillor', 'max')
     ).reset_index()
     
-    # Merge with Electorate structural baselines (Margin, Lag Vote)
-    pool_df = pool_df.merge(elec_df, on=['Year', 'Electorate'], how='left')
-    pool_df['Log_Lag_Vote'] = np.log(1 + pool_df['Lag_Challenger_IND_Vote'])
-    
-    # 3. Calculate candidate share of the pool (for Stage 2)
-    train_cand = train_cand.merge(pool_df[['Year', 'Electorate', 'Total_IND_Share']], on=['Year', 'Electorate'])
-    train_cand['Share_of_Pool'] = (train_cand['Primary_Vote_Share'] / train_cand['Total_IND_Share']).clip(lower=0.01)
-    
-    train_cand = train_cand.drop(columns = ['Min_Days', 'Effective_Days'])
+    threat_pool['Log_Sum_New_Days'] = np.log(threat_pool['Sum_New_Days'] + 1)
 
-    return train_cand, pool_df
+    train_cand = train_cand.drop(columns=['Min_Days', 'Effective_Days'])
+
+    # ---------------------------------------------------------
+    # 4. TRACK 1: THE REPEAT/WALL TRACK
+    # ---------------------------------------------------------
+    # This automatically grabs Repeaters, Repeat Teals, and Incumbents.
+    # First-time Teals safely fall away here because is_repeat == False.
+    repeats = train_cand[train_cand['is_repeat'] == True].copy()
+    
+    repeat_pool = repeats.groupby(['Year', 'Electorate']).agg(
+        Repeat_IND_Share=('Primary_Vote_Share', 'sum'),
+        Repeat_Past_Vote=('Past_Vote_Share', 'sum')
+    ).reset_index()
+    
+    # Track 1 Target Variable
+    repeats['Retention_Rate'] = (repeats['Primary_Vote_Share'] / repeats['Past_Vote_Share']).clip(lower=0.01)
+    
+    # Merge the threat metrics (so Track 1 can calculate damage)
+    repeats = repeats.merge(
+        threat_pool, on=['Year', 'Electorate'], how='left'
+    ).fillna({'Log_Sum_New_Days': 0, 'Has_New_Councillor': False})
+    
+    # ---------------------------------------------------------
+    # 5. TRACK 2 & 3: THE INSURGENCY POOL
+    # ---------------------------------------------------------
+    # ENFORCE THE RULE: Excluded contests must NEVER touch Track 2 or 3.
+    new_inds = train_cand[(train_cand['is_repeat'] == False) & (~train_cand['Is_Excluded_Seat'])].copy()
+    
+    new_pool = new_inds.groupby(['Year', 'Electorate']).agg(
+        Total_New_IND_Share=('Primary_Vote_Share', 'sum')
+    ).reset_index()
+    
+    # ---------------------------------------------------------
+    # 6. MERGE TO ELECTORATE BASELINE
+    # ---------------------------------------------------------
+    pool_df = elec_df[['Year', 'Electorate', 'Lag_Challenger_IND_Vote']].copy()
+    pool_df['Is_Excluded_Seat'] = pool_df.set_index(['Year', 'Electorate']).index.isin(excluded_idx)
+    
+    # Merge New Pool & Threat Pool
+    pool_df = pool_df.merge(new_pool, on=['Year', 'Electorate'], how='left').fillna({'Total_New_IND_Share': 0})
+    pool_df = pool_df.merge(threat_pool, on=['Year', 'Electorate'], how='left').fillna({'Log_Sum_New_Days': 0, 'Has_New_Councillor': False})
+    
+    # Merge Repeat Pool
+    pool_df = pool_df.merge(repeat_pool, on=['Year', 'Electorate'], how='left').fillna({'Repeat_IND_Share': 0, 'Repeat_Past_Vote': 0})
+    
+    # Define generic lags
+    pool_df['Generic_Lag_Vote'] = (pool_df['Lag_Challenger_IND_Vote'] - pool_df['Repeat_Past_Vote']).clip(lower=0)
+    pool_df['Log_Generic_Lag'] = np.log(1 + pool_df['Generic_Lag_Vote'])
+    pool_df['Log_Repeat_Past'] = np.log(1 + pool_df['Repeat_Past_Vote']) 
+    
+    # ENFORCE THE RULE: Drop excluded seats from pool_df so Track 2 never trains on them
+    pool_df = pool_df[~pool_df['Is_Excluded_Seat']].drop(columns=['Is_Excluded_Seat'])
+    
+    # Split prep for Track 3
+    new_inds = new_inds.merge(pool_df[['Year', 'Electorate', 'Total_New_IND_Share']], on=['Year', 'Electorate'])
+    new_inds['Share_of_New_Pool'] = (new_inds['Primary_Vote_Share'] / new_inds['Total_New_IND_Share']).clip(lower=0.01)
+    
+    return new_inds, repeats, pool_df
 
 
 # ==========================================
 # PHASE 2: FIT STATISTICAL MODELS
 # ==========================================
-def fit_generative_models(train_cand, pool_df):
-    """Fits the GLM for the Total Pool and OLS for the Split."""
+def fit_generative_models(new_inds, repeats, pool_df):
     
-    # --- STAGE 1: The Pool Model (Gamma/Log GLM) ---
-    # Convert share (0-100) to proportion (0-1) for Gamma regression
-    y_pool = pool_df['Total_IND_Share'] / 100.0 
-    X_pool_cols = pool_df[['Log_Lag_Vote', 'Has_Councillor', 'Sum_Log_Days']].copy()
-    X_pool_cols = X_pool_cols.astype(float)
-    X_pool = sm.add_constant(X_pool_cols)
+    # --- TRACK 1: Repeat Candidate Retention (NO INTERCEPT) ---
+    y_rep = repeats['Retention_Rate'].astype(float)
+    X_rep = repeats[['Log_Sum_New_Days', 'Has_New_Councillor']].astype(float)
+    repeat_model = sm.GLM(y_rep, X_rep, family=sm.families.Gamma(link=sm.families.links.Log())).fit()
+
+    # --- TRACK 2: The New IND Pool Model ---
+    active_pool_df = pool_df[pool_df['Total_New_IND_Share'] > 0].copy() # ensure only data from elecotrates where contesting
+    y_pool = (active_pool_df['Total_New_IND_Share'] / 100.0).astype(float)
     
+    # We use threat_pool variables from new_pool since we want the filtered baseline
+    X_pool_cols = active_pool_df[['Log_Generic_Lag','Has_New_Councillor', 'Log_Sum_New_Days', 'Log_Repeat_Past']].copy().astype(float)
+    
+    # (Optional: Re-add 'Has_New_Councillor' to Track 2 if you want it there, 
+    # but currently it's acting nicely in Track 1 and Track 3)
+    X_pool = sm.add_constant(X_pool_cols.astype(float))
     pool_model = sm.GLM(y_pool, X_pool, family=sm.families.Gamma(link=sm.families.links.Log())).fit()
     
-    # --- STAGE 2: The Allocation Split Model ---
-    # We only fit the split model on NEW candidates. 
-    # Repeat contenders will use an anchor value based on their past vote.
-    new_cands = train_cand[train_cand['is_repeat'] == 0].copy()
-    y_split = np.log(new_cands['Share_of_Pool'])
-    X_split = sm.add_constant(new_cands[['Is_Former_Councillor', 'Log_Days']].astype(float))
+    # --- TRACK 3: The Allocation Split Model ---
+    contest_counts = new_inds.groupby(['Year', 'Electorate'])['Candidate'].transform('count')
+    multi_new_inds = new_inds[contest_counts >= 2].copy()
     
+    y_split = np.log(multi_new_inds['Share_of_New_Pool'].astype(float))
+    X_split = sm.add_constant(multi_new_inds[['Is_Former_Councillor', 'Log_Days']].astype(float))
     split_model = sm.OLS(y_split, X_split).fit()
     
-    return pool_model, split_model
+    return repeat_model, pool_model, split_model
+
+# ==========================================
+# EXECUTION CALL
+# ==========================================
+excluded_contests = [
+    (2018, 'Mildura'), (2022, 'Mildura'), (2022, 'Benambra'),
+    (2018, 'Shepparton'), (2022, 'Shepparton'), (2018, 'Morwell'), 
+    (2022, 'Brighton'), (2022, 'Caulfield'), (2022, 'Mornington'), 
+    (2022, 'Kew'), (2022, 'Hawthorn'), (2022, 'Sandringham'), (2022, 'Bellarine')
+]
+
+# Pass the raw, unfiltered final_IND_model_df directly in.
+# The function will act as the traffic cop.
+new_inds, repeats, pool_df = prepare_training_data(final_IND_model_df, elec_df, excluded_contests)
 
 
 
-train_cand, pool_df = prepare_training_data(train_model_df, elec_df)
-pool_model, split_model = fit_generative_models(train_cand, pool_df.loc[pool_df['Year']!=2010])
+filtered_pool_df = pool_df[pool_df['Year'] != 2010].copy()
+
+repeat_model, pool_model, split_model = fit_generative_models(new_inds, repeats, filtered_pool_df)
+
+print("=== DIAGNOSTIC 1: THE TRACK 2 ZERO-CRASH ===")
+zero_seats = len(pool_df[pool_df['Total_New_IND_Share'] == 0])
+print(f"Seats with exactly 0.0% New IND vote: {zero_seats} out of {len(pool_df)}")
+print("-> If this is > 0, it caused the Gamma log-link crash. We must filter these out of Track 2.\n")
+
+
+print("=== DIAGNOSTIC 2: THE GIANTS SPOT-CHECK ===")
+# Are Sheed and Cupper actually being mapped properly to exert the 'oxygen squeeze'?
+giants_check = pool_df[pool_df['Electorate'].isin(['Mildura', 'Shepparton'])].sort_values(['Electorate', 'Year'])
+print(giants_check[['Year', 'Electorate', 'Repeat_Past_Vote', 'Log_Repeat_Past', 'Total_New_IND_Share', 'Log_Sum_New_Days']])
+print("\n-> Look at 2022 Mildura/Shepparton. If Repeat_Past_Vote is 0, the mapping failed.\n")
+
+
+print("=== DIAGNOSTIC 3: TRACK 1 RETENTION EXTREMES ===")
+# Did a 0.5% IND jump to 5%, creating a 1000% retention rate that destroys Track 1?
+bad_retention = repeats.sort_values('Retention_Rate', ascending=False)
+print("Highest Retention Rates (Max should ideally not exceed ~2.5):")
+print(bad_retention[['Year', 'Electorate', 'Candidate', 'Past_Vote_Share', 'Primary_Vote_Share', 'Retention_Rate']].head(5))
+print("\nLowest Retention Rates:")
+print(bad_retention[['Year', 'Electorate', 'Candidate', 'Past_Vote_Share', 'Primary_Vote_Share', 'Retention_Rate']].tail(3))
+print("\n-> If fringe INDs are jumping 500%, we may need to cap Retention_Rate or exclude INDs < 2% from Track 1.\n")
+
+
+print("=== DIAGNOSTIC 4: TRACK 2 RESIDUALS (THE OUTLIER HUNT) ===")
+
+print("=== TRACK 1: BIGGEST MISSES (Retention Model) ===")
+repeats['Actual_Retention'] = repeats['Retention_Rate']
+# Force float here
+repeats['Predicted_Retention'] = repeat_model.predict(repeats[['Log_Sum_New_Days', 'Has_New_Councillor']].astype(float))
+repeats['Retention_Error'] = repeats['Actual_Retention'] - repeats['Predicted_Retention']
+repeats['Predicted_Vote_Share'] = repeats['Past_Vote_Share'] * repeats['Predicted_Retention']
+repeats['Vote_Share_Error'] = repeats['Primary_Vote_Share'] - repeats['Predicted_Vote_Share']
+
+track1_diagnostics = repeats[[
+    'Year', 'Electorate', 'Candidate', 
+    'Past_Vote_Share', 'Primary_Vote_Share', 
+    'Actual_Retention', 'Predicted_Retention', 'Vote_Share_Error'
+]].sort_values('Vote_Share_Error')
+
+print("Under-predicted their vote (Model thought they'd get less):")
+print(track1_diagnostics.tail(5))
+print("\nOver-predicted their vote (Model thought they'd get more):")
+print(track1_diagnostics.head(5))
+
+
+print("\n=== TRACK 2: BIGGEST MISSES (Insurgency Pool) ===")
+# Strictly filter active pools from the filtered pool (post-2010)
+active_pools = filtered_pool_df[filtered_pool_df['Total_New_IND_Share'] > 0].copy().reset_index(drop=True)
+
+# Force float conversion BEFORE add_constant
+X_pool_cols = active_pools[['Log_Generic_Lag', 'Has_New_Councillor', 'Log_Sum_New_Days', 'Log_Repeat_Past']].copy().astype(float)
+X_pool = sm.add_constant(X_pool_cols)
+
+active_pools['Predicted_Pool_Share'] = pool_model.predict(X_pool) * 100.0
+active_pools['Actual_Pool_Share'] = active_pools['Total_New_IND_Share']
+active_pools['Pool_Error'] = active_pools['Actual_Pool_Share'] - active_pools['Predicted_Pool_Share']
+
+track2_diagnostics = active_pools[[
+    'Year', 'Electorate', 
+    'Log_Generic_Lag', 'Log_Repeat_Past', 'Log_Sum_New_Days', 'Has_New_Councillor',
+    'Actual_Pool_Share', 'Predicted_Pool_Share', 'Pool_Error'
+]].sort_values('Pool_Error')
+
+print("Under-predicted the Insurgency (New INDs got way more than expected):")
+print(track2_diagnostics.tail(5))
+print("\nOver-predicted the Insurgency (New INDs got way less than expected):")
+print(track2_diagnostics.head(5))
+import pdb; pdb.set_trace()
+
+# 
+
+
+
+
+
+
+
 
 import pdb; pdb.set_trace()
 
-# ==========================================
-# PHASE 3: COMPUTE BAYESIAN DOP PRIORS
-# ==========================================
-def build_dop_priors(dop_flows_df, kappa_reg=25, kappa_obs=75):
-    """Calculates Regional average flows and prepares the Dirichlet alphas."""
-    
-    flow_cols = ['Flow_ALP', 'Flow_LNP', 'Flow_GRN', 'Flow_R_MIN', 'Flow_L_MIN']
-    
-    # 1. Regional Priors (mu_reg)
-    reg_priors = dop_flows_df.groupby('Region')[flow_cols].mean()
-    
-    # 2. Build the lookup dictionary
-    dop_lookup = {}
-    for region in reg_priors.index:
-        mu_reg = reg_priors.loc[region].values
-        alpha_reg = kappa_reg * mu_reg
-        dop_lookup[region] = {'regional_alpha': alpha_reg, 'electorates': {}}
-        
-        # Local updates
-        local_flows = dop_flows_df[dop_flows_df['Region'] == region]
-        for _, row in local_flows.iterrows():
-            mu_obs = row[flow_cols].values
-            # Bayesian update: Posterior = Prior + (Kappa_obs * Obs_mean)
-            alpha_post = alpha_reg + (kappa_obs * mu_obs)
-            dop_lookup[region]['electorates'][row['Electorate']] = alpha_post
-            
-    return dop_lookup, flow_cols
+# ==============================================================================
+# 1. STATEWIDE IND -> IND PREFERENCE POOLING (Isolated by Year)
+# ==============================================================================
+def extract_statewide_ind_to_ind_flow(dop_table_dict, party_category_dict, data_year=None):
+    """
+    Scans historical wide DOP tables to find the empirical IND -> IND preference flow.
+    If data_year is provided and a 'Year' column exists in the DOP sheets, it strictly filters.
+    """
+    ind_flows = []
 
-# ==========================================
-# PHASE 4: MONTE CARLO SIMULATION ENGINE
-# ==========================================
-def simulate_electorate(elec_data, candidates, pool_model, split_model, dop_lookup, flow_cols, M=1000):
+    for elec, dop in dop_table_dict.items():
+        if dop.empty or len(dop) < 2:
+            continue
+            
+        # Optional year filter if DOP sheets contain a 'Year' column
+        if data_year is not None and 'Year' in dop.columns:
+            if dop['Year'].iloc[0] != data_year:
+                continue
+
+        party_cols = list(dop.columns[2:-2])
+        ind_cols = [
+            c for c in party_cols
+            if str(c).startswith('IND') or party_category_dict.get(c) == 'IND'
+        ]
+
+        if len(ind_cols) < 2:
+            continue
+
+        for ind_col in ind_cols:
+            elim_idx = None
+            for idx in range(1, len(dop)):
+                if (
+                    dop.loc[idx, 'CountType'] == 'TransferredVotes'
+                    and pd.isna(dop.loc[idx, ind_col])
+                    and pd.notna(dop.loc[idx - 1, ind_col])
+                ):
+                    elim_idx = idx
+                    break
+
+            if elim_idx is None:
+                continue
+
+            elim_row = dop.loc[elim_idx]
+
+            other_active_inds = [
+                c for c in ind_cols
+                if c != ind_col
+                and pd.notna(elim_row[c])
+                and pd.notna(dop.loc[elim_idx - 1, c])
+            ]
+            if not other_active_inds:
+                continue
+
+            all_active_receivers = [
+                c for c in party_cols
+                if c != ind_col
+                and pd.notna(elim_row[c])
+                and float(elim_row[c]) > 0
+            ]
+
+            total_transferred = sum(float(elim_row[c]) for c in all_active_receivers)
+            if total_transferred <= 0:
+                continue
+
+            transferred_to_inds = sum(float(elim_row[c]) for c in other_active_inds)
+            ind_flows.append(transferred_to_inds / total_transferred)
+
+    if not ind_flows:
+        return 0.20  # Empirical fallback
+
+    return float(np.mean(ind_flows))
+
+
+# ==============================================================================
+# 2. REGIONAL IMPUTATION, RENORMALIZATION & 3-TIER PRIORS (Isolated by Year)
+# ==============================================================================
+def impute_and_build_dop_priors(ind_dop_flows_df, elec_df, data_year, S_local=75, S_borrowed=35):
     """
-    Runs M simulations of an election in a single electorate.
-    elec_data: dict containing 'Region', 'Electorate', 'Lag_Challenger_IND_Vote', 'Margin_2PP', plus P_ALP, P_LNP, etc.
-    candidates: list of dicts for each IND running.
+    Strictly filters flows and electorate baselines to data_year.
+    Imputes missing categories, renormalizes, and establishes the 3-Tier S lookup.
     """
-    # 1. Electorate Features
-    has_councillor = max([c['Is_Sitting_Councillor'] for c in candidates])
-    sum_log_days = sum([np.log(max(1, c['Campaign_Length_Days'])) for c in candidates])
-    log_lag = np.log(1 + elec_data['Lag_Challenger_IND_Vote'])
-    
-    x_pool = np.array([1, log_lag, elec_data['Margin_2PP'], has_councillor, sum_log_days])
-    
-    # 2. Extract Covariance Matrices for Multivariate Normal Draws
-    pool_mean, pool_cov = pool_model.params, pool_model.cov_params()
-    split_mean, split_cov = split_model.params, split_model.cov_params()
-    
-    # 3. Retrieve Dirichlet Alpha
-    region = elec_data['Region']
-    elec = elec_data['Electorate']
-    if elec in dop_lookup.get(region, {}).get('electorates', {}):
-        alpha = dop_lookup[region]['electorates'][elec] # Use local posterior
+    target_cats = ['ALP', 'COAL', 'Left', 'Right', 'Centre']
+    flow_cols = [f'Flow_{c}' for c in target_cats]
+
+    # Isolate strictly to the target year
+    df = ind_dop_flows_df[ind_dop_flows_df['Year'] == data_year].copy()
+    e_df = elec_df[elec_df['Year'] == data_year].copy()
+
+    # Map Region from the isolated elec_df if missing
+    if 'Region' not in df.columns:
+        region_map = e_df.drop_duplicates(subset=['Electorate']).set_index('Electorate')['Region'].to_dict()
+        df['Region'] = df['Electorate'].map(region_map)
+
+    # Calculate Regional Mean Baselines for the specific year
+    reg_means = df.groupby('Region')[flow_cols].mean()
+    state_means = df[flow_cols].mean()
+
+    cleaned_rows = []
+    for _, row in df.iterrows():
+        reg = row['Region']
+        clean_row = row.copy()
+
+        for col in flow_cols:
+            if pd.isna(clean_row[col]):
+                if pd.notna(reg) and reg in reg_means.index and not pd.isna(reg_means.loc[reg, col]):
+                    clean_row[col] = reg_means.loc[reg, col]
+                else:
+                    clean_row[col] = state_means[col]
+
+        row_sum = sum(clean_row[flow_cols])
+        if row_sum > 0:
+            clean_row[flow_cols] = clean_row[flow_cols] / row_sum
+
+        cleaned_rows.append(clean_row)
+
+    cleaned_df = pd.DataFrame(cleaned_rows)
+
+    final_reg_priors = cleaned_df.groupby('Region')[flow_cols].mean()
+    final_state_prior = cleaned_df[flow_cols].mean().values
+
+    dop_lookup = {
+        'data_year': data_year,
+        'electorates': {},
+        'regions': {},
+        'state': final_state_prior,
+        'target_cats': target_cats,
+    }
+
+    for reg, grp in final_reg_priors.iterrows():
+        dop_lookup['regions'][reg] = grp.values
+
+    for _, row in cleaned_df.iterrows():
+        dop_lookup['electorates'][row['Electorate']] = row[flow_cols].values
+
+    dop_lookup['S_local'] = S_local
+    dop_lookup['S_borrowed'] = S_borrowed
+
+    return dop_lookup
+
+
+# ==============================================================================
+# 3. WATERFALL CAPACITY EXTRACTION (Pure Math - No Year Required)
+# ==============================================================================
+def apply_waterfall_extraction(T_pool, p_propensity, capacities, max_drain=0.90):
+    """
+    Extracts votes proportionally, enforcing a 10% capacity floor and reallocating
+    excess demands to uncapped parties to rigidly conserve total extracted mass.
+    """
+    K = len(capacities)
+    V = np.zeros(K)
+    caps = capacities * max_drain
+
+    total_available_capacity = np.sum(caps)
+    T_target = min(T_pool, total_available_capacity)
+
+    active = np.ones(K, dtype=bool)
+    remaining_T = T_target
+
+    while remaining_T > 1e-9 and np.any(active):
+        weights = p_propensity[active] * capacities[active]
+        w_sum = np.sum(weights)
+
+        if w_sum <= 1e-12:
+            weights = capacities[active]
+            w_sum = np.sum(weights)
+            if w_sum <= 1e-12:
+                break
+
+        w_norm = weights / w_sum
+        demands = remaining_T * w_norm
+
+        active_indices = np.where(active)[0]
+        remaining_caps = caps[active] - V[active]
+        exceeded = demands > remaining_caps
+
+        if not np.any(exceeded):
+            V[active] += demands
+            remaining_T = 0.0
+            break
+        else:
+            for i, is_exc in enumerate(exceeded):
+                orig_idx = active_indices[i]
+                if is_exc:
+                    v_added = remaining_caps[i]
+                    V[orig_idx] += v_added
+                    remaining_T -= v_added
+                    active[orig_idx] = False
+
+    return V
+
+
+# ==============================================================================
+# 4. FULL MONTE CARLO COUNTERFACTUAL SIMULATOR (Includes data_year tag)
+# ==============================================================================
+def simulate_electorate_counterfactual(
+    data_year,
+    elec_name,
+    region_name,
+    elec_baseline_data,
+    counterfactual_counts,
+    new_candidates,
+    pool_model,
+    split_model,
+    dop_lookup,
+    mu_ind_to_ind,
+    M=1000,
+):
+    target_cats = dop_lookup['target_cats']
+    num_new_inds = len(new_candidates)
+
+    if num_new_inds == 0:
+        return {'simulations': [], 'mean_results': counterfactual_counts}
+
+    sum_days = sum(c.get('Campaign_Length_Days', 0) for c in new_candidates)
+    log_sum_days = np.log(sum_days + 1)
+    has_councillor = float(max(c.get('Is_Former_Councillor', False) for c in new_candidates))
+
+    repeat_past = counterfactual_counts.get('Repeat_IND', elec_baseline_data.get('Repeat_Past_Vote', 0.0))
+    generic_lag = max(0.0, elec_baseline_data.get('Lag_Challenger_IND_Vote', 0.0) - repeat_past)
+
+    log_generic_lag = np.log(1 + generic_lag)
+    log_repeat_past = np.log(1 + repeat_past)
+
+    x_pool = np.array([1.0, log_generic_lag, has_councillor, log_sum_days, log_repeat_past])
+    linear_pred = np.dot(x_pool, pool_model.params)
+    mu_pool = np.exp(linear_pred) * 100.0
+    dispersion = pool_model.scale
+
+    shape_k = 1.0 / dispersion
+    scale_theta = mu_pool * dispersion
+
+    split_params = split_model.params
+    split_mse = split_model.mse_resid
+
+    has_repeat_ind = 'Repeat_IND' in counterfactual_counts and counterfactual_counts['Repeat_IND'] > 0
+
+    if elec_name in dop_lookup['electorates']:
+        mu_base = dop_lookup['electorates'][elec_name].copy()
+        S = dop_lookup['S_local']
+    elif region_name in dop_lookup['regions']:
+        mu_base = dop_lookup['regions'][region_name].copy()
+        S = dop_lookup['S_borrowed']
     else:
-        alpha = dop_lookup.get(region, {}).get('regional_alpha', np.array([5, 5, 5, 5, 5])) # Fallback
-    
-    # 4. Simulation Loop
-    sim_results = []
-    baseline_P = np.array([elec_data[f'P_{k}'] for k in ['ALP', 'LNP', 'GRN', 'R_MIN', 'L_MIN']])
-    
+        mu_base = dop_lookup['state'].copy()
+        S = dop_lookup['S_borrowed']
+
+    if has_repeat_ind:
+        mu_sim = np.append(mu_base * (1.0 - mu_ind_to_ind), mu_ind_to_ind)
+        categories_sim = target_cats + ['Repeat_IND']
+        S = S * 0.70  # Tier 3
+    else:
+        mu_sim = mu_base.copy()
+        categories_sim = list(target_cats)
+
+    alpha_dirichlet = S * mu_sim
+    initial_caps = np.array([counterfactual_counts[cat] for cat in categories_sim])
+
+    sim_outputs = []
+
     for m in range(M):
-        # A. Draw Pool Parameters & Calculate Total Pool (in %)
-        b_pool = np.random.multivariate_normal(pool_mean, pool_cov)
-        T_e = np.exp(np.dot(x_pool, b_pool)) * 100 
+        T_pool_sim = np.random.gamma(shape_k, scale_theta)
+
+        if num_new_inds == 1:
+            ind_votes = {new_candidates[0]['Candidate']: T_pool_sim}
+        else:
+            log_scores = []
+            for c in new_candidates:
+                eff_days = c.get('Campaign_Length_Days', 0)
+                is_counc = float(c.get('Is_Former_Councillor', False))
+                x_split = np.array([1.0, is_counc, np.log(eff_days + 1)])
+                pred_log = np.dot(x_split, split_params) + np.random.normal(0, np.sqrt(split_mse))
+                log_scores.append(pred_log)
+
+            max_s = max(log_scores)
+            exp_s = np.exp(np.array(log_scores) - max_s)
+            split_shares = exp_s / np.sum(exp_s)
+            ind_votes = {c['Candidate']: T_pool_sim * split_shares[i] for i, c in enumerate(new_candidates)}
+
+        p_draw = np.random.dirichlet(alpha_dirichlet)
+        extracted_v = apply_waterfall_extraction(T_pool_sim, p_draw, initial_caps, max_drain=0.90)
+        post_caps = initial_caps - extracted_v
+
+        final_macro_counts = {cat: post_caps[i] for i, cat in enumerate(categories_sim)}
         
-        # B. Draw Split Parameters & Allocate
-        b_split = np.random.multivariate_normal(split_mean, split_cov)
-        
-        scores = []
-        for c in candidates:
-            if c['Is_Repeat_Contender']:
-                # Anchoring: Base score off their past performance log
-                score = np.exp(np.log(max(1, c['Past_Vote_Share']))) 
-            else:
-                x_split = np.array([1, c['Is_Sitting_Councillor'], np.log(max(1, c['Campaign_Length_Days']))])
-                score = np.exp(np.dot(x_split, b_split))
-            scores.append(score)
-            
-        sum_scores = sum(scores)
-        pi_i = np.array(scores) / sum_scores
-        V_i = T_e * pi_i # Final predicted primary for each IND in this sim
-        
-        # C. Draw Cannibalisation Matrix (Dirichlet)
-        W = np.random.dirichlet(alpha, size=len(candidates)) # Shape: (Num INDs, 5 Parties)
-        
-        # D. Base Rate Weighting & Deduction
-        P_new = baseline_P.copy()
-        
-        for idx, v in enumerate(V_i):
-            w_raw = W[idx]
-            w_adj = (w_raw * P_new) / np.sum(w_raw * P_new) # Modulate by available party votes
-            
-            deductions = w_adj * v
-            P_new = P_new - deductions
-            
-        # E. Simplex Projection (ALR Equivalent Clipping)
-        P_final = np.maximum(0, P_new)
-        total_majors_expected = 100 - T_e
-        if np.sum(P_final) > 0:
-            P_final = (P_final / np.sum(P_final)) * total_majors_expected
-        
-        sim_results.append({
+        subparty_breakdown = {}
+        if 'subparties' in counterfactual_counts:
+            for sub_party, info in counterfactual_counts['subparties'].items():
+                parent_bloc = info['bloc']
+                parent_baseline = counterfactual_counts[parent_bloc]
+                sub_baseline = info['vote_share']
+
+                if parent_baseline > 0:
+                    bloc_drain = extracted_v[categories_sim.index(parent_bloc)]
+                    sub_drain = bloc_drain * (sub_baseline / parent_baseline)
+                    subparty_breakdown[sub_party] = max(0.0, sub_baseline - sub_drain)
+                else:
+                    subparty_breakdown[sub_party] = 0.0
+
+        sim_outputs.append({
             'Sim_ID': m,
-            'Total_IND_Pool': T_e,
-            'V_i': V_i,
-            'Final_Majors': P_final
+            'Year': data_year,
+            'Electorate': elec_name,
+            'Total_New_IND_Pool': T_pool_sim,
+            'New_IND_Votes': ind_votes,
+            'Final_Macro_Blocs': final_macro_counts,
+            'Final_Subparties': subparty_breakdown,
         })
-        
-    return sim_results
+
+    return sim_outputs
+
+
+# ==============================================================================
+# PIPELINE CALL SCRIPT (Year Isolated)
+# ==============================================================================
+DATA_YEAR = 2022
+
+mu_ind_to_ind = extract_statewide_ind_to_ind_flow(
+    dop_table_dict, 
+    global_party_dict, 
+    data_year=DATA_YEAR
+)
+
+dop_lookup = impute_and_build_dop_priors(
+    IND_DOP_flows_2022, 
+    elec_df, 
+    data_year=DATA_YEAR, 
+    S_local=75, 
+    S_borrowed=35
+)
+
+simulation_results = simulate_electorate_counterfactual(
+    data_year=DATA_YEAR,
+    elec_name=target_electorate,
+    region_name=target_region,
+    elec_baseline_data=elec_baseline_data,
+    counterfactual_counts=counterfactual_counts,
+    new_candidates=new_candidates,
+    pool_model=pool_model,
+    split_model=split_model,
+    dop_lookup=dop_lookup,
+    mu_ind_to_ind=mu_ind_to_ind,
+    M=1000,
+)
+
+import pdb; pdb.set_trace()

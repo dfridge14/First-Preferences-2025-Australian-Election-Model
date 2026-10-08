@@ -2201,15 +2201,6 @@ def inject_parties_with_ind_fork(
     return final_c0, all_lambdas, diagnostics
 
 
-
-
-
-
-
-
-
-
-
 ############################################ Re-inject incumbency ###############
 
 def reapply_incumbency_to_counterfactual(
@@ -2458,14 +2449,325 @@ import pdb; pdb.set_trace()
 
 
 
+#################################################################### Inject new parties not in LC #################################################################
+
+
+# explore prevalence of new parties
+#  {p:len([div for div in DOP_table_dict.keys() if p in DOP_table_dict[div].columns]) for p in ['AVP','CAP','HMP','SDA','UAPP','ND','ON','FPV','FFP']}
+#  {div: len([p for p in DOP_table_dict[div].columns if p in ['AVP','CAP','HMP','SDA','UAPP','ND','ON','FPV','FFP']]) for div in  DOP_table_dict.keys()}
+#  {div: [p for p in DOP_table_dict[div].columns if p in ['RP','DHJP','AVP','HAP','SDA','TMP']] for div in  DOP_table_dict.keys() if len([p for p in DOP_table_dict[div].columns if p in ['RP','DHJP','AVP','HAP','SDA','TMP']])>0} # non-contesting old parties
+#  pd.DataFrame({div: {cat: LC_FPs_df[div].loc[[p for p in party_df.groupby('Ideo_category')['PartyAb'].agg(list)[cat] if p not in DOP_table_dict[div].columns ]].sum() for cat in ['Right','Left','Centre']}  for div in  DOP_table_dict.keys()}).T*100
+#  (pd.DataFrame({div: {cat + '_contesting': LC_FPs_df[div].loc[[p for p in party_df.groupby('Ideo_category')['PartyAb'].agg(list)[cat] if p in DOP_table_dict[div].columns ]].sum() for cat in ['Right','Left','Centre']}  for div in  DOP_table_dict.keys()}).T*100)
+
+
+def is_minor_bloc_party(party: str, party_df: pd.DataFrame) -> bool:
+    """Identifies minor parties to strictly protect ALP, LP, NP from the orphan pools."""
+    return party not in ['ALP', 'LP', 'NP', 'LNP', 'IND']
+
+def apply_LC_orphan_capture(
+    cands_to_add: List[str],
+    current_c0: Dict[str, float],
+    lc_series: pd.Series,
+    party_df: pd.DataFrame
+) -> pd.Series:
+    """
+    Applies Multi-Entrant Capture of LC Orphans: extracts mass from orphans not contesting LA and scales them down proportionally, perfectly preserving the simplex and bloc volumes.
+    """
+    mod_lc = lc_series.copy()
+    
+    # Group entrants by their ideological bloc
+    entrants_by_bloc = {}
+    for e in cands_to_add:
+        b = get_party_bloc(e, party_df)
+        entrants_by_bloc.setdefault(b, []).append(e)
+        
+    for b, entrants in entrants_by_bloc.items():
+        k_B = len(entrants)
+        
+        # All minor bloc parties present in the LC baseline
+        minor_bloc_parties = [p for p in mod_lc.index  if get_party_bloc(p, party_df) == b and is_minor_bloc_party(p, party_df) and mod_lc[p] > 1e-9]
+        N_B = len(minor_bloc_parties)
+        
+        if N_B == 0:
+            for e in entrants: mod_lc[e] = 0.0
+            continue
+            
+        # Identify total bloc LC mass (Sigma) and the Orphan pool (Omega)
+        Sigma_B = sum(mod_lc[p] for p in minor_bloc_parties)
+        
+        uncontested_minors = [p for p in minor_bloc_parties if current_c0.get(p, 0.0) <= 1e-9]
+        Omega_B = sum(mod_lc[p] for p in uncontested_minors)
+        
+        if Omega_B <= 1e-9:
+            for e in entrants: mod_lc[e] = 0.0
+            continue
+
+            
+        # target entrant LC vote is just under average of bloc share
+        target_lc_e = Sigma_B / (k_B + N_B)
+        total_target_mass = k_B * target_lc_e
+        
+        # Cap extraction at the physical orphan limit
+        total_extracted = min(total_target_mass, Omega_B)
+        lc_e = total_extracted / k_B  # The actual baseline allocated per entrant
+        
+        # Deflate the orphan pool uniformly to preserve the simplex sum (1.0)
+        deflation_factor = max(0.0, (Omega_B - total_extracted) / Omega_B)
+        for p in uncontested_minors:
+            mod_lc[p] = mod_lc[p] * deflation_factor
+            
+        # 5. Insert Entrants
+        for e in entrants:
+            mod_lc[e] = mod_lc.get(e, 0.0) + lc_e
+            
+    return mod_lc
+
+def _build_state_vars(active_cands: List[str], mod_lc: pd.Series, emp_c0: Dict[str, float], party_df: pd.DataFrame):
+    """Extracted utility helper for clean reuse."""
+    lc_mass = np.zeros(5)
+    for party, share in mod_lc.items():
+        b_idx = BLOCS.index(get_party_bloc(party, party_df))
+        lc_mass[b_idx] += share
+    if lc_mass.sum() > 0:
+        lc_mass = lc_mass / lc_mass.sum()
+
+    menu_size, c_cap = np.zeros(5), np.zeros(5)
+    cand_to_bloc, cand_demand = {}, {}
+
+    for cand in active_cands:
+        b = BLOCS.index(get_party_bloc(cand, party_df))
+        cand_to_bloc[cand] = b
+        menu_size[b] += 1.0
+        
+        # Coalition alias handling
+        if b in [0, 1]:
+            u = mod_lc.get(cand, 0.0)
+            if u <= 1e-9:
+                u = emp_c0.get(cand, 0.0)
+                if u <= 1e-9 and cand in ['LP', 'NP', 'LNP']:
+                    coal_lc = sum(mod_lc.get(a, 0.0) for a in ['LP', 'NP', 'LNP'])
+                    coal_la = [c for c in active_cands if c in ['LP', 'NP', 'LNP']]
+                    if len(coal_la) == 1:
+                        u = coal_lc
+                    elif len(coal_la) > 1:
+                        emp_tot = sum(emp_c0.get(c, 0.0) for c in coal_la)
+                        u = coal_lc * (emp_c0.get(cand, 0.0) / emp_tot) if emp_tot > 0 else (coal_lc / len(coal_la))
+        else:
+            u = mod_lc.get(cand, 0.0)
+
+        cand_demand[cand] = u
+        if b in [2, 3, 4]:
+            c_cap[b] += u
+
+    c_cap[0] = 1.0 if menu_size[0] > 0 else 0.0
+    c_cap[1] = 1.0 if menu_size[1] > 0 else 0.0
+    for b in [2, 3, 4]:
+        c_cap[b] = min(1.0, c_cap[b] / lc_mass[b]) if lc_mass[b] > 0 else 0.0
+
+    return menu_size, c_cap, cand_to_bloc, cand_demand, lc_mass
 
 
 
 
+def calibrate_new_party_kappa(
+    party_abbr: str,
+    prior_vote_share: float,
+    full_latent_tables: dict,
+    lc_df: pd.DataFrame,
+    party_df: pd.DataFrame,
+    model: 'AggregateLatentLogit'
+) -> float:
+    """
+    Unilaterally injects new party into LC across all districts, measures mean uncalibrated vote share in LC, and returns the Kappa needed to hit the specified prior_vote_share.
+    """
+    s_hat_1_list = []
+    alpha, beta, gamma = model.unpack_params(model.theta)
+    
+    for div, table in full_latent_tables.items():
+        if div not in lc_df.columns: 
+            continue
+        
+        emp_c0 = table.count_0
+        lc_series = lc_df[div].dropna().copy()
+        if lc_series.sum() > 1.5: 
+            lc_series = lc_series / 100.0
+        
+        # 1. Unilateral Injection (k=1)
+        mod_lc = apply_LC_orphan_capture([party_abbr], emp_c0, lc_series, party_df)
+        
+        # 2. Add Entrant to Menu
+        menu_B = [c for c, v in emp_c0.items() if v > 1e-9]
+        if party_abbr not in menu_B:
+            menu_B.append(party_abbr)
+            
+        # 3. Model Evaluation (kappa = 1.0)
+        ms_B, cap_B, ctb_B, cd_B, lc_mass = _build_state_vars(menu_B, mod_lc, emp_c0, party_df)
+        s_hat_B = model.evaluate_state_allocation(lc_mass, menu_B, cap_B, ms_B, ctb_B, cd_B, alpha, beta, gamma)
+        
+        s_hat_1_list.append(s_hat_B.get(party_abbr, 0.0))
+        
+    mean_s_1 = np.mean(s_hat_1_list) if s_hat_1_list else 0.0
+    
+    # Linear Ratio Calculation
+    if mean_s_1 > 1e-9:
+        return prior_vote_share / mean_s_1
+    else:
+        print(f"[Warning] {party_abbr} has 0.0 baseline everywhere. Defaulting kappa to 1.0")
+        return 1.0
+
+
+def inject_new_parties_to_dop(
+    district: str,
+    cands_to_add: List[str],
+    current_c0: Dict[str, float],
+    lc_df: pd.DataFrame,
+    party_df: pd.DataFrame,
+    model: 'AggregateLatentLogit',
+    calibration_scalars: Dict[str, float] = None
+) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float], Dict[str, float]]:
+    
+    if calibration_scalars is None:
+        calibration_scalars = {c: 1.0 for c in cands_to_add}
+
+    lc_series = lc_df[district].dropna().copy()
+    if lc_series.sum() > 1.01:
+        import pdb; pdb.set_trace()
+        lc_series = lc_series / 100.0
+
+    # 1. Option B: Modify LC Baseline (Simultaneously handles crowding and dilution)
+    mod_lc = apply_LC_orphan_capture(cands_to_add, current_c0, lc_series, party_df)
+
+    import pdb; pdb.set_trace()
+
+    menu_A = [c for c, v in current_c0.items() if v > 1e-9 and c not in cands_to_add]
+    menu_B = menu_A + [c for c in cands_to_add if c not in menu_A]
+
+    alpha, beta, gamma = model.unpack_params(model.theta)
+    
+    # State A (Original LC structure without entrants)
+    ms_A, cap_A, ctb_A, cd_A, lc_mass_A = _build_state_vars(menu_A, lc_series, current_c0, party_df)
+    s_hat_A = model.evaluate_state_allocation(lc_mass_A, menu_A, cap_A, ms_A, ctb_A, cd_A, alpha, beta, gamma)
+
+    # State B (New Option B LC structure with entrants)
+    ms_B, cap_B, ctb_B, cd_B, lc_mass_B = _build_state_vars(menu_B, mod_lc, current_c0, party_df)
+    s_hat_B = model.evaluate_state_allocation(lc_mass_B, menu_B, cap_B, ms_B, ctb_B, cd_B, alpha, beta, gamma)
+
+    # ---------------------------------------------------------
+    # STEP 1: Inter-Bloc MRR (Macro Shift)
+    # ---------------------------------------------------------
+    emp_bloc_mass, s_hat_A_bloc, s_hat_B_bloc_inc, s_hat_B_bloc_ent = [{b: 0.0 for b in BLOCS} for _ in range(4)]
+
+    for c in menu_A:
+        b = get_party_bloc(c, party_df)
+        emp_bloc_mass[b] += current_c0.get(c, 0.0)
+        s_hat_A_bloc[b] += s_hat_A.get(c, 0.0)
+        s_hat_B_bloc_inc[b] += s_hat_B.get(c, 0.0)
+
+    for e in cands_to_add:
+        b = get_party_bloc(e, party_df)
+        kappa = calibration_scalars.get(e, 1.0)
+        s_hat_B_bloc_ent[b] += s_hat_B.get(e, 0.0) * kappa
+
+    s_hat_B_bloc_total = {b: s_hat_B_bloc_inc[b] + s_hat_B_bloc_ent[b] for b in BLOCS}
+
+    unnorm_bloc_vol = {}
+    for b in BLOCS:
+        if emp_bloc_mass[b] > 1e-9 and s_hat_A_bloc[b] > 1e-9:
+            macro_retention = s_hat_B_bloc_total[b] / s_hat_A_bloc[b]
+            unnorm_bloc_vol[b] = emp_bloc_mass[b] * macro_retention
+        else:
+            unnorm_bloc_vol[b] = s_hat_B_bloc_ent[b]
+
+    z_bloc = sum(unnorm_bloc_vol.values())
+    norm_bloc_vol = {b: v / z_bloc for b, v in unnorm_bloc_vol.items()}
+
+    # ---------------------------------------------------------
+    # STEP 2 & 3: Entrant Extraction & Empirical Residual Allocation
+    # ---------------------------------------------------------
+    new_c0 = {}
+    for b in BLOCS:
+        b_cands_inc = [c for c in menu_A if get_party_bloc(c, party_df) == b]
+        b_cands_ent = [c for c in cands_to_add if get_party_bloc(c, party_df) == b]
+
+        v_star = norm_bloc_vol[b]
+        b_total_B = s_hat_B_bloc_total[b]
+
+        extracted_entrant_vol = 0.0
+        for e in b_cands_ent:
+            kappa = calibration_scalars.get(e, 1.0)
+            calibrated_s_b = s_hat_B.get(e, 0.0) * kappa
+            entrant_share = v_star * (calibrated_s_b / b_total_B) if b_total_B > 1e-9 else 0.0
+            new_c0[e] = entrant_share
+            extracted_entrant_vol += entrant_share
+
+        v_residual = max(0.0, v_star - extracted_entrant_vol)
+        emp_inc_total = emp_bloc_mass[b]
+
+        for c in b_cands_inc:
+            cand_intra_share = current_c0[c] / emp_inc_total if emp_inc_total > 1e-9 else (1.0 / len(b_cands_inc))
+            new_c0[c] = v_residual * cand_intra_share
+
+    for c in menu_A:
+        if new_c0[c] > current_c0[c]: new_c0[c] = current_c0[c]
+
+    z_final = sum(new_c0.values())
+    new_c0 = {c: v / z_final for c, v in new_c0.items()}
+    shift_vector = {c: new_c0.get(c, 0.0) - current_c0.get(c, 0.0) for c in menu_B}
+
+    return new_c0, shift_vector, s_hat_A, s_hat_B
 
 
 
+# 1. Define the Phantoms and their target Statewide Primary Votes
+NEW_PARTY_PRIORS = {
+    'SAL': 0.02,  # SAL targeting 2% (2014 VIC, 2025 Fed without Sue Bolton)
+    'CEC': 0.0103   # CEC - 1.03% (2025 Federal election)
+}
 
+kappas = {}
+
+# Unilateral Calibration (Find kappa to hit prior)
+print("--- PASS 1: CALIBRATION ---")
+for party, prior in NEW_PARTY_PRIORS.items():
+    k = calibrate_new_party_kappa(
+        party_abbr=party,
+        prior_vote_share=prior,
+        full_latent_tables=full_latent_tables,
+        lc_df=LC_FPs_df,
+        party_df=party_df,
+        model=final_model
+    )
+    kappas[party] = k
+    print(f"[{party}] Prior: {prior:.1%} -> Kappa needed: {k:.4f}")
+
+# Final Simultaneous Injection
+print("\n--- PASS 2: SIMULTANEOUS INJECTION ---")
+counterfactual_c0_dict = {}
+
+for district, table in full_latent_tables.items():
+    if district not in LC_FPs_df.columns:
+        continue
+        
+    emp_c0 = table.count_0
+    
+    # Determine which parties from our list are missing in this electorate
+    missing_cands = [p for p in NEW_PARTY_PRIORS.keys() if emp_c0.get(p, 0.0) <= 1e-9]
+
+    if not missing_cands:
+        continue
+
+    # Inject all missing parties at the exact same time
+    new_c0, shift_vector, s_hat_a, s_hat_b = inject_parties_to_dop(
+        district=district,
+        cands_to_add=missing_cands,
+        empirical_c0=emp_c0,
+        lc_df=LC_FPs_df,
+        party_df=party_df,
+        model=final_model,
+        calibration_scalars=kappas
+    )
+
+    counterfactual_c0_dict[district] = new_c0
 
 
 
