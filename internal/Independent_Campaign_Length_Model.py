@@ -106,6 +106,11 @@ electorate_totals['Electorate'] = electorate_totals['Electorate'].str.strip().st
 inds_results = inds_results.merge(electorate_totals, on=['Year', 'Electorate'], how='left')
 inds_results['Primary_Vote_Share'] = (inds_results['votes'] / inds_results['total_electorate_votes']) * 100
 
+# 2026 SPLIT: Isolate 2026 before merging to protect it
+ind_wiki_2026 = ind_wiki_df[ind_wiki_df['Year'] == 2026].copy()
+ind_wiki_df = ind_wiki_df[ind_wiki_df['Year'] != 2026].copy()
+
+import pdb; pdb.set_trace()
 
 # TWO-ROUND MERGE (Exact -> Middle-Name Stripped)
 
@@ -136,6 +141,11 @@ match_r2 = pd.merge(
 successful_matches = pd.concat([match_r1, match_r2], ignore_index=True)
 successful_matches.drop(columns=['Candidate_Simple'], errors='ignore', inplace=True)
 
+# Restore 2026 component of df
+ind_wiki_2026['votes'] = np.nan
+ind_wiki_2026['Primary_Vote_Share'] = np.nan
+ind_wiki_2026['PartyAb'] = 'IND'
+successful_matches = pd.concat([successful_matches, ind_wiki_2026], ignore_index=True)
 
 
 # ==========================================
@@ -182,7 +192,7 @@ import pdb; pdb.set_trace()
 # EXCLUDE REPEAT CONTENDERS
 
 # Map candidates who ran in the immediately prior cycle (2014 -> 2018, 2018 -> 2022)
-prev_year_map = {2018: 2014, 2022: 2018}
+prev_year_map = {2018: 2014, 2022: 2018, 2026: 2022}
 
 prior_runs_by_elec = set()
 for curr_y, prev_y in prev_year_map.items():
@@ -404,13 +414,17 @@ excluded_contests = [
 
 train_model_df = final_IND_model_df[~final_IND_model_df.set_index(['Year', 'Electorate']).index.isin(excluded_contests)].copy()
 
+# CHECK: should an earlier iteration be used?
+train_model_df.loc[train_model_df['Year']==2026,['Electorate','Candidate']].to_csv('INDs_contesting_2026.csv', index = False)
+
 # 2. Get elec_df: get total IND vote in last electorate; fix for redistributions. 
 
 def generate_complete_elec_df(results_df, party_category_dict, rediv_2014, rediv_2022, excluded_contests):
     # 1. Base Electorates from your snippet
     elect_df_list = []
-    for year in [2010, 2014, 2018, 2022]:
-        e_df = pd.read_excel(f'Tally Room/VIC-{year}/VIC-{year}-Electorates.xlsx')[['district_name', 'region_name']]
+    for year in [2010, 2014, 2018, 2022, 2026]:
+        file_year = 2022 if year == 2026 else year # 2026 uses 2022 boundaries (no redistribution)
+        e_df = pd.read_excel(f'Tally Room/VIC-{file_year}/VIC-{file_year}-Electorates.xlsx')[['district_name', 'region_name']]
         e_df.insert(0, 'Year', year)
         elect_df_list.append(e_df)
         
@@ -442,7 +456,7 @@ def generate_complete_elec_df(results_df, party_category_dict, rediv_2014, rediv
 
     # 5. Map Prior Cycle Results with Redistributions
     lag_records = []
-    for year in [2014, 2018, 2022]:
+    for year in [2014, 2018, 2022, 2026]:
         prev_year = year - 4
         prev_map = ind_totals[ind_totals['Year'] == prev_year].set_index('div_nm')['IND_Pct'].to_dict()
         
@@ -502,8 +516,7 @@ elec_df = generate_complete_elec_df(results_df, global_party_dict, rediv_2014, r
 
 
 
-def build_dop_flows_from_IND(year, DOP_table_dict, model_df, party_category_dict, 
-                             counterfactual_df=None, MIN_CAT_NUM=4, results_df=None):
+def build_dop_flows_from_IND(year, DOP_table_dict, model_df, party_category_dict, counterfactual_df=None, MIN_CAT_NUM=4, results_df=None):
     """
     Extracts IND preference flows directly from wide DOP tables, replacing IND->IND flows with 0. Where not available, supplements this with IND defection flows (counterfactual_df). 
     Computes electorate-wide average, imputing for missing category. Target categories: ALP, COAL, Left, Right, Centre.
@@ -702,12 +715,13 @@ import pdb; pdb.set_trace()
 def prepare_training_data(cand_df, elec_df, excluded_contests):
     train_cand = cand_df.copy()
 
-    # 1. Flag Excluded Contests (The Unified List: Teals + Incumbents)
+    # 1. Flag Excluded Contests (The Unified List: Teals + Historical Incumbents)
     excluded_idx = pd.MultiIndex.from_tuples(excluded_contests, names=['Year', 'Electorate'])
     train_cand['Is_Excluded_Seat'] = train_cand.set_index(['Year', 'Electorate']).index.isin(excluded_idx)
 
     # 2. Effective Days Logic 
-    baseline_days = {2010: 13, 2014: 13, 2018: 14, 2022: 15}
+    # (Note: 2026 is mapped to the 2022 baseline of 15 days)
+    baseline_days = {2010: 13, 2014: 13, 2018: 14, 2022: 15, 2026: 15}
     train_cand['Min_Days'] = train_cand['Year'].map(baseline_days)
     train_cand['Effective_Days'] = np.where(
         train_cand['Campaign_Length_Days'] <= train_cand['Min_Days'], 
@@ -716,10 +730,8 @@ def prepare_training_data(cand_df, elec_df, excluded_contests):
     train_cand['Log_Days'] = np.log(train_cand['Effective_Days'] + 1)
     
     # ---------------------------------------------------------
-    # 3. CALCULATE "HIDDEN THREATS" (For Track 1)
+    # 3. CALCULATE "HIDDEN THREATS" (Track 2 Environment)
     # ---------------------------------------------------------
-    # We must measure New IND pressure even in excluded seats, so Track 1 knows 
-    # if the Repeat Teals/Incumbents were actively attacked.
     all_new_inds = train_cand[train_cand['is_repeat'] == False]
     
     threat_pool = all_new_inds.groupby(['Year', 'Electorate']).agg(
@@ -732,29 +744,20 @@ def prepare_training_data(cand_df, elec_df, excluded_contests):
     train_cand = train_cand.drop(columns=['Min_Days', 'Effective_Days'])
 
     # ---------------------------------------------------------
-    # 4. TRACK 1: THE REPEAT/WALL TRACK
+    # 4. REPEAT PAST VOTE CALCULATION
     # ---------------------------------------------------------
-    # This automatically grabs Repeaters, Repeat Teals, and Incumbents.
-    # First-time Teals safely fall away here because is_repeat == False.
+    # We no longer model retention (Track 1 is dead), but we MUST know 
+    # how much baseline is locked up by repeat candidates to calculate Generic Lag.
     repeats = train_cand[train_cand['is_repeat'] == True].copy()
     
     repeat_pool = repeats.groupby(['Year', 'Electorate']).agg(
-        Repeat_IND_Share=('Primary_Vote_Share', 'sum'),
         Repeat_Past_Vote=('Past_Vote_Share', 'sum')
     ).reset_index()
-    
-    # Track 1 Target Variable
-    repeats['Retention_Rate'] = (repeats['Primary_Vote_Share'] / repeats['Past_Vote_Share']).clip(lower=0.01)
-    
-    # Merge the threat metrics (so Track 1 can calculate damage)
-    repeats = repeats.merge(
-        threat_pool, on=['Year', 'Electorate'], how='left'
-    ).fillna({'Log_Sum_New_Days': 0, 'Has_New_Councillor': False})
     
     # ---------------------------------------------------------
     # 5. TRACK 2 & 3: THE INSURGENCY POOL
     # ---------------------------------------------------------
-    # ENFORCE THE RULE: Excluded contests must NEVER touch Track 2 or 3.
+    # ENFORCE THE RULE: Excluded contests must NEVER touch Track 2 or 3 training.
     new_inds = train_cand[(train_cand['is_repeat'] == False) & (~train_cand['Is_Excluded_Seat'])].copy()
     
     new_pool = new_inds.groupby(['Year', 'Electorate']).agg(
@@ -772,7 +775,7 @@ def prepare_training_data(cand_df, elec_df, excluded_contests):
     pool_df = pool_df.merge(threat_pool, on=['Year', 'Electorate'], how='left').fillna({'Log_Sum_New_Days': 0, 'Has_New_Councillor': False})
     
     # Merge Repeat Pool
-    pool_df = pool_df.merge(repeat_pool, on=['Year', 'Electorate'], how='left').fillna({'Repeat_IND_Share': 0, 'Repeat_Past_Vote': 0})
+    pool_df = pool_df.merge(repeat_pool, on=['Year', 'Electorate'], how='left').fillna({'Repeat_Past_Vote': 0})
     
     # Define generic lags
     pool_df['Generic_Lag_Vote'] = (pool_df['Lag_Challenger_IND_Vote'] - pool_df['Repeat_Past_Vote']).clip(lower=0)
@@ -784,30 +787,21 @@ def prepare_training_data(cand_df, elec_df, excluded_contests):
     
     # Split prep for Track 3
     new_inds = new_inds.merge(pool_df[['Year', 'Electorate', 'Total_New_IND_Share']], on=['Year', 'Electorate'])
-    new_inds['Share_of_New_Pool'] = (new_inds['Primary_Vote_Share'] / new_inds['Total_New_IND_Share']).clip(lower=0.01)
+    # For 2026, Total_New_IND_Share is 0/NaN, so clip to avoid zero division during setup
+    new_inds['Share_of_New_Pool'] = (new_inds['Primary_Vote_Share'] / new_inds['Total_New_IND_Share'].replace(0, np.nan)).clip(lower=0.01)
     
-    return new_inds, repeats, pool_df
-
+    return new_inds, pool_df
 
 # ==========================================
 # PHASE 2: FIT STATISTICAL MODELS
 # ==========================================
-def fit_generative_models(new_inds, repeats, pool_df):
+def fit_generative_models(new_inds, pool_df):
     
-    # --- TRACK 1: Repeat Candidate Retention (NO INTERCEPT) ---
-    y_rep = repeats['Retention_Rate'].astype(float)
-    X_rep = repeats[['Log_Sum_New_Days', 'Has_New_Councillor']].astype(float)
-    repeat_model = sm.GLM(y_rep, X_rep, family=sm.families.Gamma(link=sm.families.links.Log())).fit()
-
     # --- TRACK 2: The New IND Pool Model ---
-    active_pool_df = pool_df[pool_df['Total_New_IND_Share'] > 0].copy() # ensure only data from elecotrates where contesting
+    active_pool_df = pool_df[pool_df['Total_New_IND_Share'] > 0].copy() 
     y_pool = (active_pool_df['Total_New_IND_Share'] / 100.0).astype(float)
     
-    # We use threat_pool variables from new_pool since we want the filtered baseline
     X_pool_cols = active_pool_df[['Log_Generic_Lag','Has_New_Councillor', 'Log_Sum_New_Days', 'Log_Repeat_Past']].copy().astype(float)
-    
-    # (Optional: Re-add 'Has_New_Councillor' to Track 2 if you want it there, 
-    # but currently it's acting nicely in Track 1 and Track 3)
     X_pool = sm.add_constant(X_pool_cols.astype(float))
     pool_model = sm.GLM(y_pool, X_pool, family=sm.families.Gamma(link=sm.families.links.Log())).fit()
     
@@ -819,7 +813,7 @@ def fit_generative_models(new_inds, repeats, pool_df):
     X_split = sm.add_constant(multi_new_inds[['Is_Former_Councillor', 'Log_Days']].astype(float))
     split_model = sm.OLS(y_split, X_split).fit()
     
-    return repeat_model, pool_model, split_model
+    return pool_model, split_model
 
 # ==========================================
 # EXECUTION CALL
@@ -832,14 +826,26 @@ excluded_contests = [
 ]
 
 # Pass the raw, unfiltered final_IND_model_df directly in.
-# The function will act as the traffic cop.
-new_inds, repeats, pool_df = prepare_training_data(final_IND_model_df, elec_df, excluded_contests)
+new_inds, pool_df = prepare_training_data(final_IND_model_df, elec_df, excluded_contests)
+
+# 2. FILTER OUT 2010 AND 2026 FOR MODEL TRAINING
+train_pool_df = pool_df[(pool_df['Year'] != 2010) & (pool_df['Year'] != 2026)].copy()
+train_new_inds = new_inds[new_inds['Year'] != 2026].copy()
+
+pool_model, split_model = fit_generative_models(train_new_inds, train_pool_df)
 
 
+new_inds.to_csv("new_inds_features.csv", index=False)
+pool_df.to_csv("pool_df_features.csv", index=False)
 
-filtered_pool_df = pool_df[pool_df['Year'] != 2010].copy()
+# 2. Save the Trained Statsmodels
+with open("pool_model.pkl", "wb") as f:
+    pickle.dump(pool_model, f)
 
-repeat_model, pool_model, split_model = fit_generative_models(new_inds, repeats, filtered_pool_df)
+with open("split_model.pkl", "wb") as f:
+    pickle.dump(split_model, f)
+
+import pdb; pdb.set_trace()
 
 print("=== DIAGNOSTIC 1: THE TRACK 2 ZERO-CRASH ===")
 zero_seats = len(pool_df[pool_df['Total_New_IND_Share'] == 0])
@@ -854,41 +860,9 @@ print(giants_check[['Year', 'Electorate', 'Repeat_Past_Vote', 'Log_Repeat_Past',
 print("\n-> Look at 2022 Mildura/Shepparton. If Repeat_Past_Vote is 0, the mapping failed.\n")
 
 
-print("=== DIAGNOSTIC 3: TRACK 1 RETENTION EXTREMES ===")
-# Did a 0.5% IND jump to 5%, creating a 1000% retention rate that destroys Track 1?
-bad_retention = repeats.sort_values('Retention_Rate', ascending=False)
-print("Highest Retention Rates (Max should ideally not exceed ~2.5):")
-print(bad_retention[['Year', 'Electorate', 'Candidate', 'Past_Vote_Share', 'Primary_Vote_Share', 'Retention_Rate']].head(5))
-print("\nLowest Retention Rates:")
-print(bad_retention[['Year', 'Electorate', 'Candidate', 'Past_Vote_Share', 'Primary_Vote_Share', 'Retention_Rate']].tail(3))
-print("\n-> If fringe INDs are jumping 500%, we may need to cap Retention_Rate or exclude INDs < 2% from Track 1.\n")
-
-
-print("=== DIAGNOSTIC 4: TRACK 2 RESIDUALS (THE OUTLIER HUNT) ===")
-
-print("=== TRACK 1: BIGGEST MISSES (Retention Model) ===")
-repeats['Actual_Retention'] = repeats['Retention_Rate']
-# Force float here
-repeats['Predicted_Retention'] = repeat_model.predict(repeats[['Log_Sum_New_Days', 'Has_New_Councillor']].astype(float))
-repeats['Retention_Error'] = repeats['Actual_Retention'] - repeats['Predicted_Retention']
-repeats['Predicted_Vote_Share'] = repeats['Past_Vote_Share'] * repeats['Predicted_Retention']
-repeats['Vote_Share_Error'] = repeats['Primary_Vote_Share'] - repeats['Predicted_Vote_Share']
-
-track1_diagnostics = repeats[[
-    'Year', 'Electorate', 'Candidate', 
-    'Past_Vote_Share', 'Primary_Vote_Share', 
-    'Actual_Retention', 'Predicted_Retention', 'Vote_Share_Error'
-]].sort_values('Vote_Share_Error')
-
-print("Under-predicted their vote (Model thought they'd get less):")
-print(track1_diagnostics.tail(5))
-print("\nOver-predicted their vote (Model thought they'd get more):")
-print(track1_diagnostics.head(5))
-
-
 print("\n=== TRACK 2: BIGGEST MISSES (Insurgency Pool) ===")
 # Strictly filter active pools from the filtered pool (post-2010)
-active_pools = filtered_pool_df[filtered_pool_df['Total_New_IND_Share'] > 0].copy().reset_index(drop=True)
+active_pools = train_pool_df[train_pool_df['Total_New_IND_Share'] > 0].copy().reset_index(drop=True)
 
 # Force float conversion BEFORE add_constant
 X_pool_cols = active_pools[['Log_Generic_Lag', 'Has_New_Councillor', 'Log_Sum_New_Days', 'Log_Repeat_Past']].copy().astype(float)
@@ -910,7 +884,6 @@ print("\nOver-predicted the Insurgency (New INDs got way less than expected):")
 print(track2_diagnostics.head(5))
 import pdb; pdb.set_trace()
 
-# 
 
 
 
@@ -919,7 +892,8 @@ import pdb; pdb.set_trace()
 
 
 
-import pdb; pdb.set_trace()
+
+
 
 # ==============================================================================
 # 1. STATEWIDE IND -> IND PREFERENCE POOLING (Isolated by Year)
@@ -991,7 +965,8 @@ def extract_statewide_ind_to_ind_flow(dop_table_dict, party_category_dict, data_
     if not ind_flows:
         return 0.20  # Empirical fallback
 
-    return float(np.mean(ind_flows))
+    import pdb; pdb.set_trace()
+    return np.array(ind_flows)
 
 
 # ==============================================================================
@@ -1238,7 +1213,7 @@ def simulate_electorate_counterfactual(
 DATA_YEAR = 2022
 
 mu_ind_to_ind = extract_statewide_ind_to_ind_flow(
-    dop_table_dict, 
+    DOP_table_dict, 
     global_party_dict, 
     data_year=DATA_YEAR
 )
@@ -1251,18 +1226,28 @@ dop_lookup = impute_and_build_dop_priors(
     S_borrowed=35
 )
 
-simulation_results = simulate_electorate_counterfactual(
-    data_year=DATA_YEAR,
-    elec_name=target_electorate,
-    region_name=target_region,
-    elec_baseline_data=elec_baseline_data,
-    counterfactual_counts=counterfactual_counts,
-    new_candidates=new_candidates,
-    pool_model=pool_model,
-    split_model=split_model,
-    dop_lookup=dop_lookup,
-    mu_ind_to_ind=mu_ind_to_ind,
-    M=1000,
-)
+with open("add_new_IND_models_and_priors.pkl", "wb") as f:
+    pickle.dump({
+        'pool_model': pool_model,
+        'split_model': split_model,
+        'dop_lookup': dop_lookup,
+        'mu_ind_to_ind': mu_ind_to_ind,
+        'global_party_dict': global_party_dict 
+    }, f)
+
+if 0: 
+    simulation_results = simulate_electorate_counterfactual(
+        data_year=DATA_YEAR,
+        elec_name=target_electorate,
+        region_name=target_region,
+        elec_baseline_data=elec_baseline_data,
+        counterfactual_counts=counterfactual_counts,
+        new_candidates=new_candidates,
+        pool_model=pool_model,
+        split_model=split_model,
+        dop_lookup=dop_lookup,
+        mu_ind_to_ind=mu_ind_to_ind,
+        M=1000,
+    )
 
 import pdb; pdb.set_trace()

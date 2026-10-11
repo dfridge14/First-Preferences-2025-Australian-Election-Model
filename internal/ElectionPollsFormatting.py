@@ -894,4 +894,34 @@ def format_2026_election_for_Kalman():
 
     import pdb; pdb.set_trace()
 
+def format_2026_VIC_election_for_Kalman():
+    election_year = '2026'
+
+    # Load data
+    os.chdir('/home/dania-freidgeim/Australian Election/StateElectionPolls')
+    formatted_df = pd.read_csv("StateVICPolls2026.csv")
+    election_date = pd.Timestamp('2026-10-12') # adjust to recency
+
+    dates = pd.to_datetime(formatted_df.iloc[:, 0].apply(parse_date_range))
+    formatted_df['Day_index'] = (dates - election_date).dt.days
+
+    # 3. Keep only the exact columns you need (puts Day_index first)
+    formatted_df = formatted_df[['Day_index', 'COAL', 'ALP', 'GRN', 'ON','OTH', 'Sample size']]
+
+    # 4. Enforce numeric types and round
+    party_cols = ['COAL', 'ALP', 'GRN', 'ON','OTH']
+    formatted_df[party_cols] = formatted_df[party_cols].apply(pd.to_numeric, errors='raise').round(3)
+    formatted_df['Sample size'] = pd.to_numeric(formatted_df['Sample size'], errors='coerce').astype('Int64')
+
+    # 5. Sort, append Election column, and save
+    formatted_df = formatted_df.sort_values(by='Day_index').reset_index(drop=True)
+    formatted_df['Election'] = election_year
+
+    import pdb; pdb.set_trace()
+
+    formatted_df.to_csv('/home/dania-freidgeim/Australian Election/Victorian Election/VIC-2026/VIC_2026_Polling_for_Kalman_filter.csv', index=False)
+
+    
+
+format_2026_VIC_election_for_Kalman()
 format_2026_election_for_Kalman()

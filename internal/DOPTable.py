@@ -3,6 +3,8 @@ import numpy as np
 from pathlib import Path
 import os
 import pickle
+from typing import Optional
+
 
 import sys
 import pdb
@@ -172,7 +174,7 @@ class DOPTable:
                     print(f"\n[BOUNDARY ALERT] The terminal pile for {j} just hit 0!")
                     print(f"Target extraction remainder: {remaining_amount:.2f} votes.")
                     print("Dropping into debugger so you can inspect the state...")
-                    import pdb; pdb.set_trace()
+                    #import pdb; pdb.set_trace()
 
                     active_candidates.remove(j)
                     
@@ -336,13 +338,45 @@ class DOPTable:
 
         return current_table
 
-    def remove_candidate_stochastic(self, target_X, lambda_base=0.75, gamma_base=0.5, dirichlet_K=500):
+    @staticmethod
+    def _sample_dirichlet_safe(base_probs: np.ndarray, K: float, rng: Optional[np.random.Generator] = None) -> np.ndarray:
+        """
+        Applies Dirichlet epistemic noise exclusively to historically non-zero flows,
+        strictly preserving structural zeroes.
+        """
+        if rng is None:
+            rng = np.random.default_rng()
+
+        non_zero_mask = base_probs > 1e-9
+        if not np.any(non_zero_mask) or K is None:
+            return base_probs
+
+        active_alpha = base_probs[non_zero_mask] * K
+        active_alpha = np.maximum(active_alpha, 1e-6)
+
+        sampled_active = rng.dirichlet(active_alpha)
+
+        out = np.zeros_like(base_probs)
+        out[non_zero_mask] = sampled_active
+        return out
+
+    def remove_candidate_stochastic(
+        self, 
+        target_X: str, 
+        lambda_base: float = 0.75, 
+        gamma_base: float = 0.5, 
+        dirichlet_K: float = 500.0,
+        rng: Optional[np.random.Generator] = None
+    ):
         """
         Executes a single stochastic Monte Carlo run of the Reverse-Chronological extraction algorithm.
-        Returns a new DOPTable object.
+        Incorporates epistemic parameter uncertainty and Dirichlet flow variance while enforcing
+        bounded continuous water-filling extraction (_safe_extract) to preserve the fractional simplex.
         """
-        import numpy as np
-        
+
+        if rng is None:
+            rng = np.random.default_rng()
+
         r_X_idx = next((i for i, rnd in enumerate(self.rounds) if rnd['eliminated'] == target_X), -1)
         if r_X_idx == -1:
             raise ValueError(f"{target_X} not found in elimination history.")
@@ -354,25 +388,21 @@ class DOPTable:
         pile_X = {j: T_X[j] for j in M}
 
         cf_rounds = []
-        
-        # =====================================================================
-        # 1. TIER 1: SYSTEMIC EPISTEMIC UNCERTAINTY 
-        # Set the "political climate" parameters for this specific simulation
-        # =====================================================================
-        
-        # lambda: Ideological mixture (Mean ~0.75). Direct beta natively bounds [0, 1].
-        # a=15, b=5 naturally peaks at 0.75 and provides realistic density down to ~0.50.
-        sampled_lambda = np.random.beta(15, 5) 
-        
-        # theta (Gravity): Uniformly sample to allow massive structural swings in T_hat.
-        # 0.1 = Strong major party protection (low flow). 0.6 = High rate symmetry (massive flow).
-        sampled_theta = np.random.uniform(0.1, 0.6)
-        
-        # gamma (Barrier Strength): Soft variance +/- 20% around the base to prevent algorithmic rigidity
-        sampled_gamma = gamma_base * np.random.uniform(0.8, 1.2)
 
         # =====================================================================
-        # 2. THE BACKPROPAGATION LOOP
+        # 1. EPISTEMIC PARAMETER UNCERTAINTY (Model Misspecification Bounds)
+        # =====================================================================
+        # Information mixture: Beta(15, 5) centers around 0.75 in [0, 1]
+        sampled_lambda = float(rng.beta(15, 5))
+
+        # Gravity scaling: Tightly clustered around square-root baseline (0.50)
+        sampled_theta = float(np.clip(rng.normal(0.5, 0.05), 0.3, 0.7))
+
+        # Barrier decay rate: +/- 20% variance around baseline regularizer
+        sampled_gamma = float(gamma_base * rng.uniform(0.8, 1.2))
+
+        # =====================================================================
+        # 2. BACKPROPAGATION LOOP
         # =====================================================================
         for i in range(r_X_idx - 1, -1, -1):
             rnd_k = self.rounds[i]
@@ -385,49 +415,45 @@ class DOPTable:
 
             sum_pile = sum(pile_X.values())
             sum_eta = sum(T_k[j] for j in M_k)
-            
-            # --- DIRICHLET JITTER ON HISTORICAL FLOWS ---
-            # Mimics natural behavioral polling variance (Margin of Error)
-            base_pi = np.array([pile_X.get(j, 0) / sum_pile if sum_pile > 0 else 0 for j in M])
-            base_eta = np.array([T_k[j] / sum_eta if sum_eta > 0 else 0 for j in M_k])
-            
+
+            # --- DIRICHLET JITTER ON FLOW PROBABILITIES ---
+            base_pi = np.array([pile_X.get(j, 0.0) / sum_pile if sum_pile > 0 else 0.0 for j in M])
+            base_eta = np.array([T_k[j] / sum_eta if sum_eta > 0 else 0.0 for j in M_k])
+
             if dirichlet_K and sum_pile > 0 and sum_eta > 0:
-                # Add 1e-3 to prevent log(0) errors in the Dirichlet sampler for empty piles
-                jittered_pi = np.random.dirichlet(np.maximum(base_pi * dirichlet_K, 1e-3))
-                jittered_eta = np.random.dirichlet(np.maximum(base_eta * dirichlet_K, 1e-3))
+                jittered_pi = self._sample_dirichlet_safe(base_pi, dirichlet_K, rng)
+                jittered_eta = self._sample_dirichlet_safe(base_eta, dirichlet_K, rng)
                 pi_X = {j: jittered_pi[idx] for idx, j in enumerate(M)}
                 eta_k = {j: jittered_eta[idx] for idx, j in enumerate(M_k)}
             else:
                 pi_X = {j: base_pi[idx] for idx, j in enumerate(M)}
                 eta_k = {j: base_eta[idx] for idx, j in enumerate(M_k)}
 
-            w_prior_2a = {j: (1 - sampled_lambda) * pi_X.get(j, 0) + sampled_lambda * eta_k.get(j, 0) for j in M}
-            w_prior_2b = {j: sampled_lambda * pi_X.get(j, 0) + (1 - sampled_lambda) * eta_k.get(j, 0) for j in M}
+            w_prior_2a = {j: (1.0 - sampled_lambda) * pi_X.get(j, 0.0) + sampled_lambda * eta_k.get(j, 0.0) for j in M}
+            w_prior_2b = {j: sampled_lambda * pi_X.get(j, 0.0) + (1.0 - sampled_lambda) * eta_k.get(j, 0.0) for j in M}
 
-            base_vol_X = max(0, sum_pile - T_k_X)
+            base_vol_X = max(0.0, sum_pile - T_k_X)
 
-            # --- STOCHASTIC SYMMETRY (T_hat) ---
-            # Completely deterministic calculation based on the radically uniform sampled_theta
+            # --- COUNTERFACTUAL GRAVITY SYMMETRY ---
             if V_k > 0 and base_vol_X > 0:
                 T_hat_X_k = T_k_X * ((base_vol_X / V_k) ** sampled_theta)
             else:
                 T_hat_X_k = 0.0
-            
-            # --- TIER 2: GLOBAL REGULARIZER (The Expected Mean Calibrator) ---
-            # Throttles ideological demand prior to execution to protect shrinking capacities
-            alpha = 3.0  
+
+            # --- TIER 2: CUBIC LOG-BARRIERS (Protection of Depleting Pools) ---
+            alpha = 3.0
             log_barriers = {}
             for j in M:
-                C_j = pile_X.get(j, 0)
+                C_j = pile_X.get(j, 0.0)
                 if C_j <= 1e-9:
                     log_barriers[j] = -float('inf')
                 else:
-                    D_j = (w_prior_2a.get(j, 0) * T_k_X) + (w_prior_2b.get(j, 0) * T_hat_X_k)
+                    D_j = (w_prior_2a.get(j, 0.0) * T_k_X) + (w_prior_2b.get(j, 0.0) * T_hat_X_k)
                     rho_j = D_j / C_j
                     log_barriers[j] = -sampled_gamma * (rho_j ** alpha)
-            
-            max_log_b = max(log_barriers.values()) if log_barriers else 0
-            
+
+            max_log_b = max(log_barriers.values()) if log_barriers else 0.0
+
             w_2a_safe, w_2b_safe = {}, {}
             for j in M:
                 if log_barriers[j] == -float('inf'):
@@ -435,34 +461,33 @@ class DOPTable:
                     w_2b_safe[j] = 0.0
                 else:
                     barrier = np.exp(log_barriers[j] - max_log_b)
-                    w_2a_safe[j] = w_prior_2a.get(j, 0) * barrier
-                    w_2b_safe[j] = w_prior_2b.get(j, 0) * barrier
-                    
+                    w_2a_safe[j] = w_prior_2a.get(j, 0.0) * barrier
+                    w_2b_safe[j] = w_prior_2b.get(j, 0.0) * barrier
+
             sum_w_2a = sum(w_2a_safe.values())
             sum_w_2b = sum(w_2b_safe.values())
-            
-            # These are the mathematically safe expected target weights
-            w_2a = {j: w_2a_safe[j] / sum_w_2a if sum_w_2a > 0 else 0 for j in M}
-            w_2b = {j: w_2b_safe[j] / sum_w_2b if sum_w_2b > 0 else 0 for j in M}
 
-            # --- TIER 3: ALEATORIC EXECUTION (Wallenius) ---
-            # Discrete, physically aware sampling that adds natural variance around the safe mean
-            withdrawal_2a = self._wallenius_extract(T_k_X, w_2a, pile_X)
-            for j in M: 
-                pile_X[j] -= withdrawal_2a.get(j, 0)
+            w_2a = {j: w_2a_safe[j] / sum_w_2a if sum_w_2a > 0 else 0.0 for j in M}
+            w_2b = {j: w_2b_safe[j] / sum_w_2b if sum_w_2b > 0 else 0.0 for j in M}
 
-            withdrawal_2b = self._wallenius_extract(T_hat_X_k, w_2b, pile_X)
-            for j in M: 
-                pile_X[j] -= withdrawal_2b.get(j, 0)
+            # --- TIER 3: BOUNDED WATER-FILLING EXTRACTION ---
+            withdrawal_2a = self._safe_extract(T_k_X, w_2a, pile_X)
+            for j in M:
+                pile_X[j] -= withdrawal_2a.get(j, 0.0)
 
-            # --- RE-INTEGRATION ---
+            withdrawal_2b = self._safe_extract(T_hat_X_k, w_2b, pile_X)
+            for j in M:
+                pile_X[j] -= withdrawal_2b.get(j, 0.0)
+
+            # --- RE-INTEGRATION INTO TERMINAL POOL ---
             pile_X[k] = sum(withdrawal_2b.values())
             M.append(k)
 
             T_star_k = {}
             for j in M:
-                if j == k: continue
-                val = T_k.get(j, 0) + withdrawal_2a.get(j, 0) + withdrawal_2b.get(j, 0)
+                if j == k:
+                    continue
+                val = T_k.get(j, 0.0) + withdrawal_2a.get(j, 0.0) + withdrawal_2b.get(j, 0.0)
                 if val > 1e-9:
                     T_star_k[j] = val
 
@@ -473,12 +498,12 @@ class DOPTable:
             })
 
         # =====================================================================
-        # 3. FORM THE COUNTERFACTUAL TABLE
+        # 3. CONSTRUCT COUNTERFACTUAL COUNT 0 TABLE
         # =====================================================================
         cf_count_0 = {}
         for c, v in self.count_0.items():
             if c != target_X:
-                cf_count_0[c] = v + pile_X.get(c, 0)
+                cf_count_0[c] = v + pile_X.get(c, 0.0)
 
         for i in range(r_X_idx + 1, len(self.rounds)):
             rnd = self.rounds[i]
@@ -490,6 +515,33 @@ class DOPTable:
 
         new_candidates = [c for c in self.candidates if c != target_X]
         return self.__class__._from_raw(new_candidates, cf_count_0, cf_rounds, self.div_nm)
+
+    def remove_candidates_stochastic(
+        self, 
+        targets: list[str], 
+        lambda_base: float = 0.75, 
+        gamma_base: float = 0.5, 
+        dirichlet_K: float = 500.0,
+        rng: Optional[np.random.Generator] = None
+    ):
+        """
+        Removes multiple candidates stochastically in strict reverse-elimination order.
+        Prevents matrix cross-contamination across candidate removals.
+        """
+        elim_indices = {rnd['eliminated']: i for i, rnd in enumerate(self.rounds) if rnd['eliminated'] in targets}
+        sorted_targets = sorted(elim_indices.keys(), key=lambda x: elim_indices[x], reverse=True)
+
+        current_table = self
+        for t in sorted_targets:
+            current_table = current_table.remove_candidate_stochastic(
+                target_X=t,
+                lambda_base=lambda_base,
+                gamma_base=gamma_base,
+                dirichlet_K=dirichlet_K,
+                rng=rng
+            )
+
+        return current_table
 
     def to_dataframe(self):
         """Reconstructs the standard DataFrame format from internal state."""
@@ -663,6 +715,99 @@ class DOPTable:
         for c in history[0].keys():
             if c not in cf_count_0:
                 cf_count_0[c] = history[0][c]
+
+        return DOPTable._from_raw(self.candidates.copy(), cf_count_0, cf_rounds, self.div_nm)
+    
+
+    def adjust_3cp_incumbency(self, ia_adjustments: dict, incumbent_party: str):
+        """
+        Symmetrically strips or adds Incumbency Advantage at the 3CP stage. Tracks ONLY the 3CP adjustment backwards to Count 0.
+        Guarantees minor parties are never artificially distorted by matrix inversion, and strictly quarantines the incumbent's primary vote adjustment.
+        Adjustment is direct: negative value in ia_adjustments = removal of mass
+        """
+        # 1. Forward pass to establish historical baseline states
+        history = [self.count_0.copy()]
+        for rnd in self.rounds:
+            prev = history[-1].copy()
+            prev[rnd['eliminated']] = 0.0  
+            for c, v in rnd['transfers'].items():
+                prev[c] += v
+            history.append(prev)
+
+        # 2. Locate 3CP Stage
+        r_3cp_idx = next((i for i, h in enumerate(history) if sum(1 for v in h.values() if v > 1e-9) == 3), -1)
+        if r_3cp_idx == -1:
+            raise ValueError("Could not locate 3CP stage in this DOP Table.")
+
+        # 3. Initialize the Delta Vector at 3CP (Works for both positive and negative values)
+        deltas = {c: 0.0 for c in self.candidates}
+        for cand, adj in ia_adjustments.items():
+            if cand in history[r_3cp_idx]:
+                deltas[cand] = adj
+
+        # 4. Backward Delta Pull-Back (Un-mixing the Pink/Purple Votes)
+        for i in range(r_3cp_idx - 1, -1, -1):
+            rnd = self.rounds[i]
+            elim_cand = rnd['eliminated']
+            transfers = rnd['transfers']
+            post_tallies = history[i + 1] 
+            
+            reclaimed_delta = 0.0
+            
+            for recv_cand, trans_vol in transfers.items():
+                # INCUMBENT QUARANTINE: The incumbent's delta is preserved intact.
+                if recv_cand == incumbent_party or trans_vol <= 1e-9:
+                    continue
+                    
+                post_tally = post_tallies.get(recv_cand, 0.0)
+                if post_tally > 1e-9:
+                    # Proportion of the receiving candidate's tally that came from the eliminated candidate
+                    q = trans_vol / post_tally
+                    
+                    # Pull the delta back (works symmetrically if delta is + or -)
+                    pulled = deltas[recv_cand] * q
+                    deltas[recv_cand] -= pulled
+                    reclaimed_delta += pulled
+                    
+            deltas[elim_cand] = reclaimed_delta
+
+        # 5. Apply isolated deltas to establish Counterfactual Count 0
+        cf_count_0 = self.count_0.copy()
+        for c, delta in deltas.items():
+            cf_count_0[c] = max(0.0, cf_count_0.get(c, 0.0) + delta)
+
+        # Normalize CF Count 0 to perfectly preserve total formal votes
+        total_cf = sum(cf_count_0.values())
+        total_orig = sum(self.count_0.values())
+        if total_cf > 1e-9:
+            cf_count_0 = {k: v * (total_orig / total_cf) for k, v in cf_count_0.items()}
+
+        # 6. Forward Simulation to reconstruct full intermediate rounds
+        cf_rounds = []
+        cf_state = cf_count_0.copy()
+
+        for rnd in self.rounds:
+            k = rnd['eliminated']
+            orig_transfers = rnd['transfers']
+            
+            cf_V_elim = cf_state.get(k, 0.0)
+            cf_transfers = {}
+            sum_orig_t = sum(orig_transfers.values())
+            
+            if sum_orig_t > 1e-9:
+                for j, t_vol in orig_transfers.items():
+                    prop = t_vol / sum_orig_t
+                    cf_transfers[j] = cf_V_elim * prop
+            
+            cf_state[k] = 0.0
+            for j, v in cf_transfers.items():
+                cf_state[j] = cf_state.get(j, 0.0) + v
+                
+            cf_rounds.append({
+                'eliminated': k,
+                'V_elim': cf_V_elim,
+                'transfers': cf_transfers
+            })
 
         return DOPTable._from_raw(self.candidates.copy(), cf_count_0, cf_rounds, self.div_nm)
 

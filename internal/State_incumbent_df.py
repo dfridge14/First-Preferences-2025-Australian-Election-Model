@@ -218,7 +218,7 @@ if state == 'VIC':
         is_active = final_df['inc_name'].isin(active_this_year)
         final_df[tenure_col] = np.where(is_active, final_df[tenure_col], np.nan)
 
-    
+    import pdb; pdb.set_trace()
     os.chdir(Path.home() / 'Australian Election/Victorian Election')
     final_df.to_csv('VIC-Incumbents-df-2006-2026.csv', index=False)
     import pdb; pdb.set_trace()

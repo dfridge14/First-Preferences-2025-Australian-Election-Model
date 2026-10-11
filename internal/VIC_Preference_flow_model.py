@@ -5,6 +5,11 @@ from pathlib import Path
 from collections import Counter
 import re
 import pickle
+import json
+
+
+from scipy.optimize import minimize
+import statsmodels.api as sm
 
 # automatic error debugging
 import sys
@@ -449,7 +454,7 @@ combination_counts = tally_df.value_counts().reset_index(name='Electorate_Count'
 
 print(combination_counts)
 
-import pdb; pdb.set_trace()
+#import pdb; pdb.set_trace()
 
 
 
@@ -589,7 +594,7 @@ def merge_coalition_preferences(df):
                 # Overwrite the historical 3CP row with the synthetic 3CP row
                 out_df.loc[idx_3cp] = new_row_3cp
 
-                import pdb; pdb.set_trace()
+                #import pdb; pdb.set_trace()
 
 LH_DOP_dict = {}
 
@@ -622,7 +627,7 @@ def get_LC_FPs(LC_results, div_list):
         
     
 
-    import pdb; pdb.set_trace()
+    #import pdb; pdb.set_trace()
 
     return pd.concat(LC_FPs_dict, axis=1)
 
@@ -630,9 +635,9 @@ def get_LC_FPs(LC_results, div_list):
 LC_FPs_df =  get_LC_FPs(LC_results, div_list)
 
 
-import pdb; pdb.set_trace()
+#import pdb; pdb.set_trace()
 
-def build_3CP_model_dataset(data_year, LH_DOP_dict, LC_results, LA_candidates, Ideology_map, open_seats, incumbent_parties, incumbency_df, target_cp=3):
+def build_3CP_model_dataset(data_year, LH_DOP_dict, LC_results, LA_candidates, Ideology_map, open_seats, incumbent_parties, incumbency_df, demographic_df, target_cp=3):
     """
     Builds the complete DataFrame for the ALS model, merging LH preferences 
     and dynamically extracting UH first preferences.
@@ -641,6 +646,8 @@ def build_3CP_model_dataset(data_year, LH_DOP_dict, LC_results, LA_candidates, I
     
     meta_cols = {'div_nm', 'CandRemaining', 'TOTAL', 'CountType'}
     rows = []
+
+    demo_lookup = demographic_df.set_index('district_name')['classification'].to_dict()
     
     for div, df in LH_DOP_dict.items():
 
@@ -728,7 +735,7 @@ def build_3CP_model_dataset(data_year, LH_DOP_dict, LC_results, LA_candidates, I
             'is_open': div in open_seats,
             'incumbent_party': incumbent_party,   
             'years_served': years_served,  
-            'demographic_region': None, # To be populated externally later
+            'demographic_region': demo_lookup.get(div, None),
             
             # UH results
             'uh_alp': uh_shares['ALP'],
@@ -746,19 +753,150 @@ def build_3CP_model_dataset(data_year, LH_DOP_dict, LC_results, LA_candidates, I
         
     return pd.DataFrame(rows).set_index('electorate')
 
+def append_geometric_mean_quotients(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates the Compositional Geometric Mean (g_c) and Location Quotients (q_c)
+    for the 3CP parties, strictly grouped by topology to ensure apples-to-apples comparisons.
+    """
+    df = df.copy()
+    
+    # Initialize the new Q columns with neutral gravity (1.0)
+    df['q_alp'] = 1.0
+    df['q_coal'] = 1.0
+    df['q_minor'] = 1.0
+    
+    # Calculate Q strictly within each valid topology group
+    for topo in ['ALP_COAL_Left', 'ALP_COAL_Right']:
+        mask = df['topology'] == topo
+        
+        if not mask.any():
+            continue
+            
+        subset = df[mask]
+        
+        # Helper function for safe geometric mean (ignoring zeros)
+        def safe_geom_mean(series):
+            valid_vals = series[series > 1e-6]
+            if len(valid_vals) == 0:
+                return 1.0
+            return np.exp(np.mean(np.log(valid_vals)))
+            
+        # 1. Calculate Topology-Specific Geometric Means
+        g_alp = safe_geom_mean(subset['uh_alp'])
+        g_coal = safe_geom_mean(subset['uh_coal'])
+        g_minor = safe_geom_mean(subset['uh_3cp_minor'])
+        
+        # 2. Calculate Location Quotients (Local Vote / Geometric Mean)
+        df.loc[mask, 'q_alp'] = subset['uh_alp'] / g_alp
+        df.loc[mask, 'q_coal'] = subset['uh_coal'] / g_coal
+        
+        # For the minor party, ensure we don't divide by zero if g_minor somehow failed
+        if g_minor > 0:
+            df.loc[mask, 'q_minor'] = subset['uh_3cp_minor'] / g_minor
+            
+    return df
+
 incumbency_df = pd.read_csv(Path.home() / 'Australian Election/Victorian Election/VIC-Incumbents-df-2006-2026.csv')
-df_3cp_model = build_3CP_model_dataset(data_year, LH_DOP_dict, LC_results, LA_Candidates, Ideology_map, open_seats, incumbent_parties, incumbency_df, target_cp=3)
+demographic_df = pd.read_csv(f'Demographic-classification-{data_year}.csv')
+df_3cp_model = build_3CP_model_dataset(data_year, LH_DOP_dict, LC_results, LA_Candidates, Ideology_map, open_seats, incumbent_parties, incumbency_df, demographic_df,target_cp=3)
 
+df_3cp_model = append_geometric_mean_quotients(df_3cp_model) # adds quotients relative to party's geometric mean LC vote share
 
-import pdb; pdb.set_trace()
+#import pdb; pdb.set_trace()
 
+def inspect_district_flows(df: pd.DataFrame, E_matrix: np.ndarray, div: str, W_left: np.ndarray, W_right: np.ndarray, beta: float = 0.5):
+    """
+    Detailed diagnostic printout for a single district.
+    Can be called directly from pdb: inspect_district_flows(df, 'Richmond', W_left, W_right, beta)
+    """
+    if div not in df.index:
+        print(f"Error: {div} not found in dataframe.")
+        return
+
+    row = df.loc[div]
+    topo = row['topology']
+    
+    if topo == 'ALP_COAL_Left':
+        W_global = W_left
+    elif topo == 'ALP_COAL_Right':
+        W_global = W_right
+    else:
+        print(f"Unsupported topology: {topo}")
+        return
+
+    dest_cols = ['ALP', 'COAL', 'Minor']
+    abs_rows = ['Left_Min', 'Right_Min', 'Other_Min']
+
+    # 1. Location Quotients & Local Matrix Construction
+    q = row[['q_alp', 'q_coal', 'q_minor']].values.astype(float)
+    q_safe = np.clip(q, 1e-6, None)
+    
+    # Broadcast q (1x3) to match E (3x3)
+    q_power = q_safe[np.newaxis, :] ** (beta * E_matrix)
+    
+    W_local = W_global * q_power
+    W_local = W_local / (W_local.sum(axis=1, keepdims=True) + 1e-12)
+
+    # 2. Vote Flow Math
+    u_pres = row[['uh_alp', 'uh_coal', 'uh_3cp_minor']].values.astype(float)
+    u_abs = row[['uh_left_minor', 'uh_right_minor', 'uh_other_minor']].values.astype(float)
+    
+    # 3x3 matrix of actual fractional vote transfers: Abs_j -> Dest_k
+    transfer_matrix = u_abs[:, np.newaxis] * W_local
+    flows_in = transfer_matrix.sum(axis=0)
+    
+    pred_y = u_pres + flows_in
+    actual_y = row[['lh_alp', 'lh_coal', 'lh_minor']].values.astype(float)
+    residuals = actual_y - pred_y
+
+    # -------------------------------------------------------------
+    # FORMATTED TERMINAL OUTPUT
+    # -------------------------------------------------------------
+    print(f"\n{'='*70}")
+    print(f"DIAGNOSTIC TRACE: {div.upper()} ({topo})")
+    print(f"Incumbent: {row.get('incumbent_party', 'None')} | Open: {row.get('is_open', False)}")
+    print(f"{'='*70}")
+
+    # Section A: Location Quotients
+    print("\n--- 1. PARTISAN GRAVITY (Q TENSORS & ELASTICITY) ---")
+    df_q = pd.DataFrame({'UH Primary (v_i)': u_pres, 'Quotient (q = v/g)': q}, index=dest_cols)
+    print(df_q.round(4).to_string())
+    
+    print("\n  [Ideological Elasticity Matrix (E)]")
+    print(pd.DataFrame(E_matrix, index=abs_rows, columns=dest_cols).round(2).to_string())
+    
+    print(f"\n  [Final Multipliers (q^(beta*E)) | beta={beta}]")
+    print(pd.DataFrame(q_power, index=abs_rows, columns=dest_cols).round(4).to_string())
+    # Section B: Matrices Comparison
+    print("\n--- 2. TRANSITION PROBABILITIES (W_global -> W_local) ---")
+    df_w_comp = pd.DataFrame(index=abs_rows)
+    for idx_c, c in enumerate(dest_cols):
+        df_w_comp[f'{c}_base'] = W_global[:, idx_c]
+        df_w_comp[f'{c}_local'] = W_local[:, idx_c]
+    print(df_w_comp.round(4).to_string())
+
+    # Section C: Absolute Vote Flow Deconstruction
+    print("\n--- 3. ABSOLUTE VOTE TRANSFERS (Absent UH % -> LH Destination %) ---")
+    df_trans = pd.DataFrame(transfer_matrix, index=abs_rows, columns=dest_cols)
+    df_trans['Total_Absent_Pool'] = u_abs
+    print(df_trans.round(4).to_string())
+
+    # Section D: Balance Sheet & Residuals
+    print("\n--- 4. FINAL 3CP BALANCE SHEET ---")
+    df_balance = pd.DataFrame({
+        'UH_Pres': u_pres,
+        'UH_Flows_In': flows_in,
+        'Pred_LH': pred_y,
+        'Actual_LH': actual_y,
+        'Raw_Residual': residuals
+    }, index=dest_cols)
+    print(df_balance.round(4).to_string())
+    print(f"{'='*70}\n")
 
 # run optimisation
 
-from scipy.optimize import minimize
-import statsmodels.api as sm
 
-def fit_transition_matrix(df_subset, dirichlet_alpha=1.1, penalty_weight=0.003):
+def fit_transition_matrix(df_subset, E_matrix, dirichlet_alpha=1.1, penalty_weight=0.003, popularity_attraction=0.2):
     """
     Fits a 3x3 row-stochastic transition matrix W.
     Rows = Absent UH Groups: [Left, Right, Other]
@@ -775,13 +913,27 @@ def fit_transition_matrix(df_subset, dirichlet_alpha=1.1, penalty_weight=0.003):
     
     # Target LH outcomes
     Y_actual = df_subset[['lh_alp_clean', 'lh_coal_clean', 'lh_minor_clean']].values
+    Q = df_subset[['q_alp', 'q_coal', 'q_minor']].values
+    Q_beta = np.clip(Q, 1e-6, None) ** popularity_attraction
 
     gamma = penalty_weight * len(df_subset)
 
     # Objective: Minimize Sum of Squared Errors, with push away from 0
     def loss(w_flat):
         W = w_flat.reshape((3, 3))
-        Y_pred = U_pres + U_abs @ W
+        
+        # Q is shape (N, 3). We reshape to (N, 1, 3)
+        # E is shape (3, 3). We reshape to (1, 3, 3)
+        # Q ** (beta * E) automatically broadcasts to shape (N, 3, 3)!
+        
+        Q_power = Q[:, np.newaxis, :] ** (popularity_attraction * E_matrix[np.newaxis, :, :])
+        
+        # Modulate statewide W by the ideologically-filtered local gravity
+        W_local = W[np.newaxis, :, :] * Q_power
+        W_local = W_local / (W_local.sum(axis=2, keepdims=True) + 1e-12)
+        
+        flows = np.einsum('ij,ijk->ik', U_abs, W_local)
+        Y_pred = U_pres + flows
         mse = np.sum((Y_actual - Y_pred) ** 2)
         
         # Dirichlet Log-Barrier (clip to prevent log(0) domain errors in SLSQP)
@@ -803,7 +955,7 @@ def fit_transition_matrix(df_subset, dirichlet_alpha=1.1, penalty_weight=0.003):
     return res.x.reshape((3, 3))
 
 
-def run_2stage_inference(df, max_iter=30, tol=1e-4, shrinkage_lambda=0.4):
+def run_2stage_inference(df, max_iter=30, tol=1e-4, shrinkage_lambda=1.5, split_lambda = 0.2, popularity_attraction = 0.2):
     """
     Runs the Iterative Alternating Least Squares model on df_3cp_model.
     """
@@ -838,9 +990,21 @@ def run_2stage_inference(df, max_iter=30, tol=1e-4, shrinkage_lambda=0.4):
         else:
             fit_mask_left = mask_left
             fit_mask_right = mask_right
+
+        E_L = np.array([
+            [0.2, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+            [0.2, 0.2, 0.2]
+        ])
+        
+        E_R = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, 0.2, 1.0],
+            [0.2, 0.2, 0.2]
+        ])
             
-        W_left = fit_transition_matrix(df[fit_mask_left])
-        W_right = fit_transition_matrix(df[fit_mask_right])
+        W_left = fit_transition_matrix(df[fit_mask_left], E_matrix = E_L, popularity_attraction=popularity_attraction)
+        W_right = fit_transition_matrix(df[fit_mask_right], E_matrix = E_R,popularity_attraction=popularity_attraction)
 
         print(W_left)
         print(W_right)
@@ -848,15 +1012,28 @@ def run_2stage_inference(df, max_iter=30, tol=1e-4, shrinkage_lambda=0.4):
         # Predict 3CP for ALL seats based on new matrices
         Y_pred = np.zeros((len(df), 3)) # Cols: [ALP, COAL, Minor]
         
-        # Apply Left Matrix
+        # Apply Left Matrix with local Q^(beta * E) modulation
         U_pres_L = df.loc[mask_left, ['uh_alp', 'uh_coal', 'uh_3cp_minor']].values
         U_abs_L  = df.loc[mask_left, ['uh_left_minor', 'uh_right_minor', 'uh_other_minor']].values
-        Y_pred[mask_left] = U_pres_L + U_abs_L @ W_left
         
-        # Apply Right Matrix
+        Q_L = np.clip(df.loc[mask_left, ['q_alp', 'q_coal', 'q_minor']].values, 1e-6, None)
+        # Q_L is (N, 3). E_L is (3, 3). We broadcast both to (N, 3, 3)
+        Q_power_L = Q_L[:, np.newaxis, :] ** (popularity_attraction * E_L[np.newaxis, :, :])
+        
+        W_local_L = W_left[np.newaxis, :, :] * Q_power_L
+        W_local_L = W_local_L / (W_local_L.sum(axis=2, keepdims=True) + 1e-12)
+        Y_pred[mask_left] = U_pres_L + np.einsum('ij,ijk->ik', U_abs_L, W_local_L)
+
+        # Apply Right Matrix with local Q^(beta * E) modulation
         U_pres_R = df.loc[mask_right, ['uh_alp', 'uh_coal', 'uh_3cp_minor']].values
         U_abs_R  = df.loc[mask_right, ['uh_left_minor', 'uh_right_minor', 'uh_other_minor']].values
-        Y_pred[mask_right] = U_pres_R + U_abs_R @ W_right
+        
+        Q_R = np.clip(df.loc[mask_right, ['q_alp', 'q_coal', 'q_minor']].values, 1e-6, None)
+        Q_power_R = Q_R[:, np.newaxis, :] ** (popularity_attraction * E_R[np.newaxis, :, :])
+        
+        W_local_R = W_right[np.newaxis, :, :] * Q_power_R
+        W_local_R = W_local_R / (W_local_R.sum(axis=2, keepdims=True) + 1e-12)
+        Y_pred[mask_right] = U_pres_R + np.einsum('ij,ijk->ik', U_abs_R, W_local_R)
         
         # Create a temporary dataframe mapping predictions
         df_pred = pd.DataFrame(Y_pred, index=df.index, columns=['pred_alp', 'pred_coal', 'pred_minor'])
@@ -882,10 +1059,18 @@ def run_2stage_inference(df, max_iter=30, tol=1e-4, shrinkage_lambda=0.4):
         
         # Create dummy variables for demographic region
         if 'demographic_region' in reg_df.columns and reg_df['demographic_region'].notna().any():
-            region_dummies = pd.get_dummies(reg_df['demographic_region'], drop_first=True, dtype=float)
-            X = pd.concat([reg_df[['log_tenure', 'is_coalition']], region_dummies], axis=1)
+            # Use drop_first=False so we can explicitly control the baseline
+            region_dummies = pd.get_dummies(reg_df['demographic_region'], dtype=float)
+            
+            # Force 'Inner Metropolitan' to be the baseline
+            if 'Inner Metropolitan' in region_dummies.columns:
+                region_dummies = region_dummies.drop(columns=['Inner Metropolitan'])
+                
+            #X = pd.concat([reg_df[['log_tenure', 'is_coalition']], region_dummies], axis=1)
+            X = pd.concat([reg_df[['log_tenure']], region_dummies], axis=1)
         else:
-            X = reg_df[['log_tenure', 'is_coalition']]
+            #X = reg_df[['log_tenure', 'is_coalition']]
+            X = reg_df[['log_tenure']]
             
         X = sm.add_constant(X)
         y = reg_df['raw_residual']
@@ -896,7 +1081,8 @@ def run_2stage_inference(df, max_iter=30, tol=1e-4, shrinkage_lambda=0.4):
         # Structural prediction + Shrunk local shock
         structural_alpha = ia_model.predict(X)
         local_shock = y - structural_alpha
-        shrunk_alpha = structural_alpha + (local_shock / (1.0 + shrinkage_lambda))
+        #shrunk_alpha = structural_alpha + (local_shock / (1.0 + shrinkage_lambda))
+        shrunk_alpha = np.maximum(0.0, structural_alpha + (local_shock / (1.0 + shrinkage_lambda))) # CHECK - not sure if appropriate
         
         # ---------------------------------------------------------
         # Check Convergence & Cleanse
@@ -911,7 +1097,21 @@ def run_2stage_inference(df, max_iter=30, tol=1e-4, shrinkage_lambda=0.4):
         if max_delta < tol and iteration > 0:
             print("Converged!")
             break
+
+        # --- DIAGNOSTIC: Check Mixed-Sign Challenger Residuals ---
+        print("\n=== DISTRICTS WITH MIXED-SIGN CHALLENGER RESIDUALS ===")
+        for idx in df[incumbent_mask].index:
+            inc_k = 'minor' if df.loc[idx, 'incumbent_party'] == 'Left' else df.loc[idx, 'incumbent_party'].lower()
+            chals = [k for k in ['alp', 'coal', 'minor'] if k != inc_k]
             
+            r1 = df.loc[idx, f'lh_{chals[0]}'] - df_pred.loc[idx, f'pred_{chals[0]}']
+            r2 = df.loc[idx, f'lh_{chals[1]}'] - df_pred.loc[idx, f'pred_{chals[1]}']
+            
+            # Flag if one is strictly positive and the other is strictly negative
+            if (r1 > 0.00 and r2 < -0.00) or (r2 > 0.00 and r1 < -0.00):
+                print(f"Seat: {idx:15} | Inc: {inc_k:5} | {chals[0].upper()} Res: {r1:+.4f} | {chals[1].upper()} Res: {r2:+.4f}")
+        print("=====================================================\n")
+        
         # Cleanse incumbent LH votes for the next loop
         for idx in df[incumbent_mask].index:
             ia = df.loc[idx, 'alpha_ia']
@@ -923,34 +1123,175 @@ def run_2stage_inference(df, max_iter=30, tol=1e-4, shrinkage_lambda=0.4):
             df.loc[idx, 'lh_minor_clean'] = df.loc[idx, 'lh_minor']
             
             # Apply disgorgement: subtract from incumbent, distribute equally to challengers
-            if inc_party == 'ALP':
-                df.loc[idx, 'lh_alp_clean'] -= ia
-                df.loc[idx, 'lh_coal_clean'] += ia / 2.0
-                df.loc[idx, 'lh_minor_clean'] += ia / 2.0
-            elif inc_party == 'COAL':
-                df.loc[idx, 'lh_coal_clean'] -= ia
-                df.loc[idx, 'lh_alp_clean'] += ia / 2.0
-                df.loc[idx, 'lh_minor_clean'] += ia / 2.0
-            elif inc_party == 'Left':
-                df.loc[idx, 'lh_minor_clean'] -= ia
-                df.loc[idx, 'lh_alp_clean'] += ia / 2.0
-                df.loc[idx, 'lh_coal_clean'] += ia / 2.0
+            #if inc_party == 'ALP':
+            #    df.loc[idx, 'lh_alp_clean'] -= ia
+            #    df.loc[idx, 'lh_coal_clean'] += ia / 2.0
+            #    df.loc[idx, 'lh_minor_clean'] += ia / 2.0
+            #elif inc_party == 'COAL':
+            #    df.loc[idx, 'lh_coal_clean'] -= ia
+            #    df.loc[idx, 'lh_alp_clean'] += ia / 2.0
+            #    df.loc[idx, 'lh_minor_clean'] += ia / 2.0
+            #elif inc_party == 'Left':
+            #    df.loc[idx, 'lh_minor_clean'] -= ia
+            #    df.loc[idx, 'lh_alp_clean'] += ia / 2.0
+            #    df.loc[idx, 'lh_coal_clean'] += ia / 2.0
+
+            # Map incumbent party to column suffix
+            inc_key = 'minor' if inc_party == 'Left' else inc_party.lower()
+            chal_keys = [k for k in ['alp', 'coal', 'minor'] if k != inc_key]
+
+            # 1. Compute raw deficits for the two challengers
+            r_c1 = df.loc[idx, f'lh_{chal_keys[0]}'] - df_pred.loc[idx, f'pred_{chal_keys[0]}']
+            r_c2 = df.loc[idx, f'lh_{chal_keys[1]}'] - df_pred.loc[idx, f'pred_{chal_keys[1]}']
+
+            d1, d2 = max(0.0, -r_c1), max(0.0, -r_c2)
+            sum_d = d1 + d2
+
+            # 2. Raw weights with fallback if neither is in deficit
+            w1_raw, w2_raw = (d1 / sum_d, d2 / sum_d) if sum_d > 1e-9 else (0.5, 0.5)
+
+            # 3. Regularize toward 50-50 prior
+            w1 = (1.0 - split_lambda) * w1_raw + (split_lambda * 0.5)
+            w2 = (1.0 - split_lambda) * w2_raw + (split_lambda * 0.5)
+
+            # 4. Disgorge from incumbent and distribute to challengers
+            df.loc[idx, f'lh_{inc_key}_clean'] -= ia
+            df.loc[idx, f'lh_{chal_keys[0]}_clean'] += ia * w1
+            df.loc[idx, f'lh_{chal_keys[1]}_clean'] += ia * w2
 
     import pdb; pdb.set_trace()
     return df, W_left, W_right, ia_model
 
 # Run it:
-final_df, W_left, W_right, ia_model = run_2stage_inference(df_3cp_model)
+df_3cp_model = df_3cp_model.loc[df_3cp_model.index != 'Bass',] # Bass is double div!
+final_df, W_left, W_right, ia_model = run_2stage_inference(df_3cp_model, popularity_attraction=0.65)
 print(ia_model.summary())
 
+import pdb; pdb.set_trace()
+
+def generate_and_export_ia_adjustments(
+    master_df: pd.DataFrame, 
+    final_df: pd.DataFrame, 
+    ia_model, 
+    dop_table_dict: dict, 
+    csv_path: str = f"VIC-{data_year}-IA-adjustments.csv",
+    json_path: str = f"VIC-{data_year}-IA-model-params.json"
+):
+    """
+    Extracts IA adjustments from the ALS output, predicts for unmodeled seats, 
+    calculates Square-Root splits for INDs, and exports decoupling files.
+    """
+    ia_adjustments = []
+    
+    # 1. Export lightweight IA Model Parameters for Step 6
+    params_dict = {
+        'coefficients': ia_model.params.to_dict(),
+        'sigma_resid': float(np.sqrt(ia_model.mse_resid))
+    }
+    with open(json_path, 'w') as f:
+        json.dump(params_dict, f)
+        
+    # 2. Iterate all incumbent seats
+    valid_parties = ["ALP", "COAL", "Left", "Right", "Centre"]
+    incumbents = master_df[(~master_df["is_open"]) & (master_df["incumbent_party"].isin(valid_parties))]
+
+    for div, row in incumbents.iterrows():
+        if div not in dop_table_dict: continue
+        table_df = dop_table_dict[div]
+        
+        # Grab raw 3CP candidates and their votes
+        row_3cp = table_df[(table_df["CandRemaining"] == 3) & (table_df["CountType"] == "Votes")]
+        if row_3cp.empty: continue
+            
+        meta_cols = {"div_nm", "CandRemaining", "TOTAL", "CountType"}
+        active_3cp = {c: float(row_3cp[c].values[0]) for c in table_df.columns if c not in meta_cols and pd.notna(row_3cp[c].values[0]) and float(row_3cp[c].values[0]) > 0}
+        
+        if len(active_3cp) != 3: continue
+            
+        # Match Incumbent
+        inc_party = row["incumbent_party"]
+        inc_cand = None
+        if inc_party in active_3cp: inc_cand = inc_party
+        elif inc_party == "COAL":
+            inc_cand = next((c for c in ["LP", "NP", "LNP"] if c in active_3cp), None)
+        elif inc_party == "Left":
+            inc_cand = next((c for c in ["GRN"] if c in active_3cp), None)
+        elif inc_party == "Centre":
+            inc_cand = next((c for c in active_3cp if 'IND' in c), None)
+            
+        if not inc_cand: continue
+            
+        challengers = {c: v for c, v in active_3cp.items() if c != inc_cand}
+        ch_keys = list(challengers.keys())
+        
+        # CASE A: MODELED SEAT (Extract exact regularized deltas from final_df)
+        if div in final_df.index and abs(final_df.loc[div, "alpha_ia"]) > 1e-7:
+            f_row = final_df.loc[div]
+            
+            # Find the delta mappings based on standard topology
+            deltas = {
+                'ALP': f_row['lh_alp_clean'] - f_row['lh_alp'],
+                'COAL': f_row['lh_coal_clean'] - f_row['lh_coal'],
+                'Minor': f_row['lh_minor_clean'] - f_row['lh_minor']
+            }
+            
+            # Map structural columns back to actual ballot candidates
+            adj_dict = {inc_cand: -f_row['alpha_ia']}
+            for c in ch_keys:
+                if c == 'ALP': adj_dict[c] = deltas['ALP']
+                elif c in ['LP', 'NP', 'LNP']: adj_dict[c] = deltas['COAL']
+                else: adj_dict[c] = deltas['Minor']
+                
+        # CASE B: UNMODELED SEAT / IND (Predict Alpha & Square-Root Split)
+        else:
+            log_tenure = np.log1p(max(0.0, float(row.get("years_served", 0.0))))
+            x_dict = {"const": 1.0, "log_tenure": log_tenure}
+            
+            region = row.get("demographic_region", "")
+            for col in params_dict['coefficients'].keys():
+                if region and col.endswith(region): x_dict[col] = 1.0
+                elif col not in x_dict: x_dict[col] = 0.0
+                    
+            x_vec = np.array([x_dict[col] for col in params_dict['coefficients'].keys()])
+            alpha = float(np.dot(x_vec, np.array(list(params_dict['coefficients'].values()))))
+            
+            sum_sqrt = sum(np.sqrt(v) for v in challengers.values())
+            adj_dict = {inc_cand: -alpha}
+            for c, v in challengers.items():
+                weight = np.sqrt(v) / sum_sqrt if sum_sqrt > 0 else 0.5
+                adj_dict[c] = alpha * weight
+                
+        ia_adjustments.append({
+            'electorate': div,
+            'inc_cand': inc_cand,
+            'ia_alpha': adj_dict[inc_cand] * -1,
+            'chal_1': ch_keys[0], 'chal_1_adj': adj_dict[ch_keys[0]],
+            'chal_2': ch_keys[1], 'chal_2_adj': adj_dict[ch_keys[1]]
+        })
+
+    pd.DataFrame(ia_adjustments).to_csv(csv_path, index=False)
+    print(f"Exported {len(ia_adjustments)} IA Adjustments to {csv_path}")
+    return ia_adjustments
+
+csv_filename = f"VIC-{data_year}-IA-adjustments.csv"
+json_filename = f"VIC-{data_year}-IA-model-params.json"
 
 
+# Call the export function
+ia_adjustments_list = generate_and_export_ia_adjustments(
+    master_df=df_3cp_model,        # Your pre-loop dataset containing all seats (including INDs)
+    final_df=final_df,             # The ALS converged output with the 'lh_x_clean' columns
+    ia_model=ia_model,             # The fitted statsmodels OLS object
+    dop_table_dict=DOP_table_dict, # The raw historical DOP tables for name matching
+    csv_path=csv_filename,
+    json_path=json_filename
+)
+
+print(f"Success! {csv_filename} and {json_filename} are ready for the simulation engine.")
+import pdb; pdb.set_trace()
 
 
-
-
-
-def generate_full_ia_adjustments(
+def generate_full_ia_adjustments_old(
     master_df: pd.DataFrame,
     final_df: pd.DataFrame,
     ia_model,
@@ -1076,7 +1417,7 @@ def generate_full_ia_adjustments(
     return ia_adjustments
 
 # build adjustments for ALL incumbent seats (including those with IND in 3CP)
-ia_adjustments_dict = generate_full_ia_adjustments(
+ia_adjustments_dict = generate_full_ia_adjustments_old(
     master_df=df_3cp_model,  # Full dataset before topology filtering
     final_df=final_df,  # Converged output with shrunk alphas
     ia_model=ia_model,  # Fitted statsmodels OLS object

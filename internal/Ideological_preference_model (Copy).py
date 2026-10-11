@@ -48,11 +48,30 @@ with open(f'{data_year}_complete_DOP_table_dict.pkl', 'rb') as f:
     if data_year == '2022':
         del DOP_table_dict['Narracan']
 
-with open('ia_adjustments_dict.pkl', 'rb') as f:
-    ia_adjustments_dict = pickle.load(f)
 
 LC_FPs_df = pd.read_csv(f'{data_year}-LC-First-Prefs-df.csv', index_col = 'PartyAb')
 
+# IA adjustments
+ia_csv_path = f"VIC-{data_year}-IA-adjustments.csv"
+ia_df = pd.read_csv(ia_csv_path)
+
+ia_adjustments_dict = {}
+for _, row in ia_df.iterrows():
+    div = row['electorate']
+    adj = {}
+    # The incumbent is taxed their alpha
+    inc_cand = row['inc_cand']
+    if pd.notna(inc_cand):
+        adj[inc_cand] = -float(row['ia_alpha'])
+    # Challengers receive their adj mass
+    chal_1 = row['chal_1']
+    if pd.notna(chal_1):
+        adj[chal_1] = float(row['chal_1_adj'])
+    chal_2 = row['chal_2']
+    if pd.notna(chal_2):
+        adj[chal_2] = float(row['chal_2_adj'])
+        
+    ia_adjustments_dict[div] = adj
 
 def get_party_bloc(party: str, party_df: pd.DataFrame) -> str:
     """Helper to extract ideological bloc for any party in party_df."""
@@ -666,6 +685,10 @@ def run_clustered_bootstrap(observations: list, n_iterations: int = 100, n_start
             print(f"  Bootstrap Progress: {i + 1}/{n_iterations} completed ({time.time() - start_time:.1f}s)")
 
     bootstrap_array = np.vstack(bootstrap_results) 
+
+    np.save(f'bootstrapped_thetas_{data_year}.npy', bootstrap_array)
+    print(f"Saved raw bootstrap matrix to 'bootstrapped_thetas.npy' (Shape: {bootstrap_array.shape})")
+
     means = np.mean(bootstrap_array, axis=0)
     ci_lower = np.percentile(bootstrap_array, 2.5, axis=0)
     ci_upper = np.percentile(bootstrap_array, 97.5, axis=0)
@@ -730,6 +753,68 @@ def inspect_electorate_fit(district_name: str, model: AggregateLatentLogit, obse
         
     print("\n" + "=" * 74 + "\n")
 
+# =====================================================================
+# 5. MOMENT-MATCHING DIRICHLET TO RESIDUALS
+# =====================================================================
+
+def calculate_global_dirichlet_precision(model, observations):
+    """
+    Method of Moments estimator for Dirichlet precision (ν), evaluating the model 
+    across ALL elimination counts to capture true operational variance.
+    """
+    BLOCS = ['ALP', 'COAL', 'Left', 'Right', 'Centre']
+    
+    global_sq_errors = []
+    global_p_hats = []
+    bloc_sq_errors = {b: [] for b in range(5)}
+    
+    alpha, beta, gamma = model.unpack_params(model.theta)
+    
+    for obs in observations:
+        # Evaluate model on the specific menu of this count
+        s_hat = model.evaluate_state_allocation(
+            obs.lc_mass, obs.active_cands, obs.c_cap, obs.menu_size,
+            obs.cand_to_bloc, obs.cand_demand, alpha, beta, gamma
+        )
+        
+        for cand in obs.active_cands:
+            b_idx = obs.cand_to_bloc[cand]
+            pred = s_hat.get(cand, 0.0)
+            act = obs.empirical_shares.get(cand, 0.0)
+            
+            sq_err = (pred - act) ** 2
+            
+            global_sq_errors.append(sq_err)
+            global_p_hats.append(pred)
+            bloc_sq_errors[b_idx].append(sq_err)
+
+    # Calculate Global Nu (Method of Moments)
+    global_mse = float(np.mean(global_sq_errors))
+    global_mean_p = float(np.mean(global_p_hats))
+    
+    if global_mse > 1e-9:
+        global_nu = (global_mean_p * (1.0 - global_mean_p)) / global_mse - 1.0
+    else:
+        global_nu = 1000.0
+        
+    global_nu = float(np.clip(global_nu, 20.0, 1500.0))
+
+    print("\n" + "=" * 65)
+    print(" DIRICHLET PRECISION (ν) CALIBRATION (ALL COUNTS) ")
+    print("=" * 65)
+    print(f"Global Model MSE:  {global_mse:.6f} (RMSE: {np.sqrt(global_mse):.2%})")
+    print(f"Global Precision (ν): {global_nu:.1f}")
+    print("-" * 65)
+    print(f"{'Diagnostic by Bloc':<18} | {'RMSE (Error)':<14}")
+    print("-" * 65)
+    
+    for b_idx in range(5):
+        if bloc_sq_errors[b_idx]:
+            rmse = np.sqrt(np.mean(bloc_sq_errors[b_idx]))
+            print(f"{BLOCS[b_idx]:<18} | {rmse:>13.2%}")
+            
+    print("=" * 65 + "\n")
+    return global_nu
 
 
 
@@ -792,19 +877,23 @@ if 1:
         print("\n=== SHARED STRUCTURAL PARAMETERS ===")
         print(globals_df.round(4))
 
+
+    dirichlet_nu = calculate_global_dirichlet_precision(final_model, full_obs)
+    import pdb; pdb.set_trace()
+
     # Run the diagnostics on the final model using the full dataset!
-    inspect_electorate_fit('Eureka', final_model, full_obs)
-    inspect_electorate_fit('Bass', final_model, full_obs)
-    inspect_electorate_fit('Bentleigh', final_model, full_obs)
-    inspect_electorate_fit('Macedon', final_model, full_obs)
-    inspect_electorate_fit('Melbourne', final_model, full_obs)
+    #inspect_electorate_fit('Eureka', final_model, full_obs)
+    #inspect_electorate_fit('Bass', final_model, full_obs)
+    #inspect_electorate_fit('Bentleigh', final_model, full_obs)
+    #inspect_electorate_fit('Macedon', final_model, full_obs)
+    #inspect_electorate_fit('Melbourne', final_model, full_obs)
 
 
 
     print("\n--- RUNNING CLUSTERED BOOTSTRAP ---")
     # Taking it down to 50 iterations with 2 starts just to make it run faster for your first full test
-    #bootstrap_summary = run_clustered_bootstrap(full_transitions, n_iterations=50, n_starts=2)
-
+    #bootstrap_summary = run_clustered_bootstrap(full_transitions, n_iterations=100, n_starts=3)
+    #import pdb; pdb.set_trace()
     # Save everything
     #with open("final_victorian_model.pkl", "wb") as f:
     #    pickle.dump(final_model, f)
@@ -1585,6 +1674,7 @@ def diagnose_and_recalibrate_party(
     
     raw_kappa = float(diag_df['Realization_Ratio'].median())
 
+
     # Apply Bayesian Shrinkage towards 1.0 
     N = len(diag_df)
     # Shrinkage hyperparametera : 5 electorates fives ~25% weight to empirical kappa. 20 electorates gives 80% weight. 50 gives 97%.
@@ -1596,6 +1686,9 @@ def diagnose_and_recalibrate_party(
     W = N_p / (N_p + K_p) # ADD: make W probabilistic 
     
     shrunk_kappa = (W * raw_kappa) + ((1 - W) * 1.0)
+
+    print(raw_kappa, party_abbr, shrunk_kappa)
+    import pdb; pdb.set_trace()
 
     return diag_df, shrunk_kappa
 
@@ -2462,7 +2555,7 @@ import pdb; pdb.set_trace()
 
 def is_minor_bloc_party(party: str, party_df: pd.DataFrame) -> bool:
     """Identifies minor parties to strictly protect ALP, LP, NP from the orphan pools."""
-    return party not in ['ALP', 'LP', 'NP', 'LNP', 'IND']
+    return party not in ['ALP', 'LP', 'NP', 'LNP', 'IND','GRN']
 
 def apply_LC_orphan_capture(
     cands_to_add: List[str],

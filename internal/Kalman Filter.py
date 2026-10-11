@@ -233,6 +233,7 @@ def obtain_kalman_polling_averages(Grand_CAGO_polling_df, to_plot = False, is_Fa
         density_series = poll_sizes_series.rolling(window=window, min_periods=1).sum()
         # Keep only the days you are storing means for (days_kept)
         density_kept = density_series.loc[days_kept].values
+        density_kept = density_kept.copy()
         density_kept[density_kept == 0] = LOW_DENSITY_SS
         party_df['Density'] = density_kept
 
@@ -261,10 +262,11 @@ def df_to_alr(df, ref_col):
     return df_alr
 
 
-df = obtain_kalman_polling_averages(pd.read_csv('Farrer_Byelection_Polling_for_Kalman_filter.csv'), is_Farrer_2026=True, to_plot=True)
+#df = obtain_kalman_polling_averages(pd.read_csv('Farrer_Byelection_Polling_for_Kalman_filter.csv'), is_Farrer_2026=True, to_plot=True)
+#df = obtain_kalman_polling_averages(pd.read_csv('/home/dania-freidgeim/Australian Election/Victorian Election/VIC-2026/VIC_2026_Polling_for_Kalman_filter.csv'), is_Farrer_2026=False, to_plot=True)
 import pdb; pdb.set_trace()
 
-Global_daily_polling_averages = obtain_kalman_polling_averages(Grand_CAGO_polling_df)
+Global_daily_polling_averages = obtain_kalman_polling_averages(Grand_CAGO_polling_df, to_plot=True)
 
 
 alr_df = df_to_alr(Global_daily_polling_averages[['COAL','ALP','GRN','OTH']],ref_col='COAL')

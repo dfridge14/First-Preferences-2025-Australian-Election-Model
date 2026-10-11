@@ -113,32 +113,32 @@ def scrape_2012_councillors_direct():
     return df
 
 
-# get 2016 and 2020 councillors
+# get 2016, 2020, 2024 councillors from repository, add 2012 councillors from VEC scrape
 
-councillors_2020 = pd.read_excel('VIC-2020-Council-Candidates.xlsx').rename(columns={'council_name': 'Council_Name', 'candidate_name': 'Candidate'})
-councillors_2016 = pd.read_excel('VIC-2016-Council-Candidates.xlsx').rename(columns={'council_name': 'Council_Name', 'candidate_name': 'Candidate'})
+if not os.path.exists("VEC_Councillors.csv"):
+    councillors_2024 = pd.read_excel('VIC-2024-Council-Candidates.xlsx').rename(columns={'council_name': 'Council_Name', 'candidate_name': 'Candidate'})
+    councillors_2020 = pd.read_excel('VIC-2020-Council-Candidates.xlsx').rename(columns={'council_name': 'Council_Name', 'candidate_name': 'Candidate'})
+    councillors_2016 = pd.read_excel('VIC-2016-Council-Candidates.xlsx').rename(columns={'council_name': 'Council_Name', 'candidate_name': 'Candidate'})
 
-elected_2020 = councillors_2020.loc[councillors_2020['elected']==1,['Council_Name','Candidate']]
-elected_2016 = councillors_2016.loc[councillors_2016['elected']==1,['Council_Name','Candidate']]
+    elected_2024 = councillors_2024.loc[councillors_2024['elected']==1,['Council_Name','Candidate']]
+    elected_2020 = councillors_2020.loc[councillors_2020['elected']==1,['Council_Name','Candidate']]
+    elected_2016 = councillors_2016.loc[councillors_2016['elected']==1,['Council_Name','Candidate']]
 
-elected_2020['Candidate_Formatted'] = elected_2020['Candidate'].apply(format_name)
-elected_2016['Candidate_Formatted'] = elected_2016['Candidate'].apply(format_name)
+    elected_2024['Candidate_Formatted'] = elected_2024['Candidate'].apply(format_name)
+    elected_2020['Candidate_Formatted'] = elected_2020['Candidate'].apply(format_name)
+    elected_2016['Candidate_Formatted'] = elected_2016['Candidate'].apply(format_name)
 
-elected_2020.insert(0, 'Year', 2020)
-elected_2016.insert(0, 'Year', 2016)
+    elected_2024.insert(0, 'Year', 2024)
+    elected_2020.insert(0, 'Year', 2020)
+    elected_2016.insert(0, 'Year', 2016)
 
-df_2012 = scrape_2012_councillors_direct()
+    df_2012 = scrape_2012_councillors_direct()
 
-councillors_df = pd.concat([df_2012,elected_2016,elected_2020], axis = 0)
-import pdb; pdb.set_trace()
-councillors_df.to_csv("VEC_Councillors.csv", index=False)
-
-
-
-
+    councillors_df = pd.concat([df_2012,elected_2016,elected_2020, elected_2024], axis = 0)
+    import pdb; pdb.set_trace()
+    councillors_df.to_csv("VEC_Councillors.csv", index=False)
 
 
-import pdb; pdb.set_trace()
 
 
 
@@ -354,13 +354,15 @@ def build_election_ind_df(year, page_title, election_date_str):
     total_elapsed = round(time.time() - start_time, 1)
     print(f"\n[{year}] Completed all {total_cands} candidates in {total_elapsed}s (Cached revisions: {len(REV_CACHE)})", flush=True)
     return pd.DataFrame(results)
-# Run for 2014, 2018, and 2022
+
+
+
+# Run for 2014, 2018, 2022, 2026 (currently partial)
 elections = [
+    {"year": 2026, "page": "Candidates_of_the_2026_Victorian_state_election", "date": "2026-11-28"},
     {"year": 2022, "page": "Candidates_of_the_2022_Victorian_state_election", "date": "2022-11-26"},
     {"year": 2018, "page": "Candidates_of_the_2018_Victorian_state_election", "date": "2018-11-24"},
-    {"year": 2014, "page": "Candidates_of_the_2014_Victorian_state_election", "date": "2014-11-29"}
-   
-    
+    {"year": 2014, "page": "Candidates_of_the_2014_Victorian_state_election", "date": "2014-11-29"}    
 ]
 
 all_ind_dfs = [build_election_ind_df(e["year"], e["page"], e["date"]) for e in elections]

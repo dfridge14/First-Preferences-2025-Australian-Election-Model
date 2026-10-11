@@ -1241,7 +1241,10 @@ major_sitout_dict = {'Cook':'ALP','Fremantle':'LP','Perth':'LP','Cooper':'COAL',
 
 div = 'Farrer'
 
-#get_senate_allocation(Formal_prefs_dict, Senate_party_abvs_dict, 'Gippsland', ['COAL','ALP','GRN'], ['DHJP'], [])
+Centre22 = ['AUD','SPP','DHJP','']
+Left22 = ['REAS','HMP','AJP','AUP','SAL','SOPA','VNS']
+Right22 = ['AUVA','UAPP','CYA','ASP','ON','CEC','GAP','LDP','IMO']
+get_senate_allocation(Formal_prefs_dict, Senate_party_abvs_dict, 'Gippsland', ['COAL','ALP','GRN'], ['DHJP'], [])
 import pdb; pdb.set_trace()
 
 Normal_allocation, wo_HTV_allocation = get_senate_allocation(Formal_prefs_dict, Senate_party_abvs_dict, div, tcp_pair_parties[div], [major_sitout_dict[div]], HTV_parties_dict.get(div,[]))
