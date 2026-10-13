@@ -1,11 +1,7 @@
 name: Generate Plotly Figures
 
 on:
-  workflow_dispatch: # Allows manual trigger from your phone with one tap
-  push:
-    paths:
-      - 'scripts/**'
-      - '.github/workflows/generate.yml'
+  workflow_dispatch: 
 
 jobs:
   run-pipeline:
@@ -26,13 +22,17 @@ jobs:
       - name: Install dependencies
         run: pip install numpy pandas plotly pyarrow
 
-      - name: Run generation script
+      - name: Generate HTML tables
+        run: python generate_tables.py
+
+      - name: Generate Plotly charts
         run: python generate_plotly.py
 
-      - name: Commit and push generated HTML figures
+      - name: Commit and push generated files
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add output/
-          git commit -m "Auto-generate Plotly charts [skip ci]" || echo "No changes to commit"
+          git add output/ output_tables/
+          git commit -m "Auto-generate charts and tables" || echo "No changes to commit"
           git push
+          
