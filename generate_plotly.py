@@ -284,8 +284,8 @@ if __name__ == "__main__":
     <iframe id="plotFrame" class="plot-frame" src="" allowtransparency="true"></iframe>
     
     <!-- Bottom Data Table -->
-    <iframe id="tableFrame" class="table-frame" src="" allowtransparency="true"></iframe>
-    
+    <iframe id="tableFrame" class="table-frame" src="" allowtransparency="true" onload="this.style.height = this.contentWindow.document.body.scrollHeight + 20 + 'px';"></iframe>
+
     <script>
         function updateDashboard(slug) {{
             // Loads the plot from the current folder
