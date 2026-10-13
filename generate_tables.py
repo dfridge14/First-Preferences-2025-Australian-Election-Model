@@ -37,7 +37,6 @@ party_colors = {
 }
 
 def parse_independent(col_name):
-    """ Converts 'IND_Zoe_Daniel' or 'IND_Daniel' to 'Ind. Daniel' """
     parts = str(col_name).strip().split('_')
     last_name = parts[-1] if len(parts) > 1 else 'Unknown'
     return f"Ind. {last_name}"
@@ -49,22 +48,18 @@ def generate_step_table_html(df_steps, district_name, output_dir="output_tables"
     os.makedirs(output_dir, exist_ok=True)
     
     if len(df_steps) < 8:
-        print(f"Skipping {district_name}: DataFrame has fewer than 8 rows ({len(df_steps)}).")
         return None
 
-    # Convert to percentage if raw decimals
     numeric_cols = df_steps.select_dtypes(include=[np.number])
     if numeric_cols.mean().max() <= 1.0:
         df_steps = df_steps * 100
 
-    # Extract exact requested rows
-    r0 = df_steps.iloc[0].fillna(0)  # Row 0: Last Election
-    r1 = df_steps.iloc[1].fillna(0)  # Row 1: Incumbency Removal
-    r5 = df_steps.iloc[5].fillna(0)  # Row 5: Candidate Change
-    r6 = df_steps.iloc[6].fillna(0)  # Row 6: Polling Shift
-    r7 = df_steps.iloc[7].fillna(0)  # Row 7: Final Projection / Incumbency Adv
+    r0 = df_steps.iloc[0].fillna(0)
+    r1 = df_steps.iloc[1].fillna(0)
+    r5 = df_steps.iloc[5].fillna(0)
+    r6 = df_steps.iloc[6].fillna(0)
+    r7 = df_steps.iloc[7].fillna(0)
 
-    # Mathematically exact step shifts
     shifts = {
         'Baseline': r0,
         'Inc_Rem': r1 - r0,
@@ -74,113 +69,123 @@ def generate_step_table_html(df_steps, district_name, output_dir="output_tables"
         'Final': r7
     }
 
-    # Sort parties descending based on Final Result
-    party_order = r7.sort_values(ascending=False).index.tolist()
+    # Track cumulative totals at each step to determine "aliveness" windows
+    cumulatives = { 0: r0, 1: r1, 2: r5, 3: r6, 4: r7 }
 
-    # Move 'Other' to the bottom
+    # Check if entire shift columns are completely dead (sum < 0.05)
+    col_dead = {
+        1: shifts['Inc_Rem'].abs().sum() < 0.05,
+        2: shifts['Cand_Change'].abs().sum() < 0.05,
+        3: shifts['Poll_Shift'].abs().sum() < 0.05,
+        4: shifts['Inc_Adv'].abs().sum() < 0.05
+    }
+
+    party_order = r7.sort_values(ascending=False).index.tolist()
     if 'Other' in party_order:
         party_order.remove('Other')
         party_order.append('Other')
 
-    # Farrer Style CSS + 6-Data-Column Grid
     html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet">
     <style>
+        /* Removes forced vertical scrolling constraints */
+        body {{ margin: 0; padding: 0; background: transparent; overflow-y: hidden; }}
         .model-flow-container {{ font-family: 'Poppins', sans-serif; max-width: 1250px; margin: 0 auto; overflow-x: auto; padding-bottom: 10px; display: flex; flex-direction: column; align-items: center; }}
         .model-flow-container::-webkit-scrollbar {{ height: 8px; -webkit-appearance: none; }}
         .model-flow-container::-webkit-scrollbar-thumb {{ background: #cbd5e1; border-radius: 4px; }}
         
-        /* Desktop Grid: Party (150px) + 6 Data Columns */
         .model-flow-grid {{ display: grid; grid-template-columns: 150px repeat(6, minmax(85px, 1fr)); gap: 6px; min-width: 800px; margin: 0 auto; align-items: center; justify-content: start; }}
-        
         .flow-header {{ font-weight: 700; color: #475569; font-size: 0.85rem; text-align: center; padding-bottom: 10px; border-bottom: 2px solid #cbd5e1; margin-bottom: 10px; line-height: 1.25; }}
         
-        /* Sticky Left Column */
-        .party-label-header, .party-label {{ position: sticky; left: 0; background-color: #ffffff; z-index: 10; height: 100%; margin: 0 !important; padding: 1px 1px; display: flex; align-items: center; box-sizing: border-box; border-right: 1px solid #f1f5f9; }}
-        .party-label-header {{ border-bottom: 2px solid #94a3b8 !important; font-size: 0.95rem; font-weight: 700; color: #334155; }}
-        .party-label {{ font-weight: 700; font-size: 0.95rem; line-height: 1.2; }}
+        /* Opaque sticky left column matched to site background */
+        .party-label-header, .party-label {{ position: sticky; left: 0; background-color: #2596be; z-index: 10; height: 100%; margin: 0; padding: 1px 1px; display: flex; align-items: center; box-sizing: border-box; }}
+        .party-label-header {{ border-bottom: 2px solid #94a3b8 !important; font-size: 0.95rem; font-weight: 700; color: #ffffff; text-shadow: 1px 1px 2px rgba(0,0,0,0.2); }}
+        .party-label {{ font-weight: 700; font-size: 0.95rem; line-height: 1.2; text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff; }}
         
-        /* Pill Styling */
         .data-cell {{ display: flex; justify-content: center; }}
         .vote-pill {{ box-sizing: border-box; border-radius: 8px; padding: 6px 12px; font-weight: 600; font-size: 0.9rem; width: 70px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        .pill-ghost {{ background-color: #f1f5f9; color: #94a3b8; box-shadow: none; border: 1px dashed #cbd5e1; }}
+        
+        /* Ghost pill inherits site background elegantly */
+        .pill-ghost {{ background-color: rgba(255, 255, 255, 0.4); color: #94a3b8; box-shadow: none; border: 1px dashed #cbd5e1; }}
         .spacer-right {{ margin-right: 16px; }}
 
-        /* Mobile Responsiveness */
         @media (max-width: 768px) {{
             .model-flow-container {{ margin: 0 5px; }}
             .model-flow-grid {{ grid-template-columns: 85px repeat(6, minmax(55px, 65px)); min-width: 450px; gap: 2px; }}
             .vote-pill {{ width: 50px; padding: 3px 4px; font-size: 0.75rem; border-radius: 6px; }}
             .flow-header {{ font-size: 0.65rem; padding-bottom: 4px; letter-spacing: -0.2px; line-height: 1.1; margin-bottom: 6px; }}
-            .party-label {{ font-size: 0.8rem; }}
+            .party-label {{ font-size: 0.8rem; text-shadow: none; background-color: #2596be; padding-left: 2px; }}
             .spacer-right {{ margin-right: 8px; }}
         }}
     </style>
 </head>
 <body>
     <div style="max-width: 1250px; margin: 1rem auto 1rem auto; font-family: 'Poppins', sans-serif;">
-        <h2 style="color: #6419a8; font-weight: 800; font-size: 1.8rem; margin-bottom: 8px; margin-top: 0;">Deconstructing the Model: {district_name}</h2>
-        <div style="display: inline-block; padding: 6px 16px; background: #f8fafc; border-radius: 6px; color: #475569; font-size: 0.9rem; font-weight: 500; letter-spacing: 0.2px; border: 1px solid #e2e8f0;">
+        <h2 style="color: #6419a8; font-weight: 800; font-size: 1.8rem; margin-bottom: 8px; margin-top: 0; text-shadow: 1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff;">Deconstructing the Model</h2>
+        <div style="display: inline-block; padding: 6px 16px; background: rgba(255,255,255,0.7); border-radius: 6px; color: #475569; font-size: 0.9rem; font-weight: 500; border: 1px solid #e2e8f0;">
             Tracking how incumbency, candidate changes, and polling swings shape each party's final projected vote.
         </div>
     </div>
     
     <div class="model-flow-container">
         <div class="model-flow-grid">
-             <div class="flow-header party-label-header">Party</div>
-            <div class="flow-header spacer-right">2022<br>Result</div>
-            <div class="flow-header">Incumbency<br>Removed</div>
-            <div class="flow-header">Parties<br>Contesting</div>
-            <div class="flow-header">Poll<br>Swing</div>
-            <div class="flow-header spacer-right">Incumbency<br>Added</div>
-            <div class="flow-header" style="color: #9333ea;">Model<br>Average</div>
+            <div class="flow-header party-label-header">Party</div>
+            <div class="flow-header spacer-right" style="color: #ffffff; text-shadow: 1px 1px 2px rgba(0,0,0,0.2);">2022<br>Result</div>
+            <div class="flow-header" style="color: #ffffff; text-shadow: 1px 1px 2px rgba(0,0,0,0.2);">Incumbency<br>Removed</div>
+            <div class="flow-header" style="color: #ffffff; text-shadow: 1px 1px 2px rgba(0,0,0,0.2);">Parties<br>Contesting</div>
+            <div class="flow-header" style="color: #ffffff; text-shadow: 1px 1px 2px rgba(0,0,0,0.2);">Poll<br>Swing</div>
+            <div class="flow-header spacer-right" style="color: #ffffff; text-shadow: 1px 1px 2px rgba(0,0,0,0.2);">Incumbency<br>Add</div>
+            <div class="flow-header" style="color: #9333ea; background: rgba(255,255,255,0.8); border-radius: 4px; padding: 2px;">Model<br>Average</div>
     """
 
-    def format_pill(val, color, is_shift=False, is_final=False):
-        # Handle zeros cleanly using ghost pills
+    def format_shift_pill(val, color, step_k, party):
+        col_is_dead = col_dead[step_k]
+        
+        # Calculate aliveness window
+        cumuls = [cumulatives[i].get(party, 0) for i in range(5)]
+        active_indices = [i for i, c_val in enumerate(cumuls) if c_val > 0.05]
+        party_is_alive = (active_indices[0] <= step_k <= active_indices[-1]) if active_indices else False
+
         if abs(val) < 0.05:
-            if is_shift:
+            # Ghost pill if column is completely zero or party is outside its active window
+            if col_is_dead or not party_is_alive:
                 return '<div class="vote-pill pill-ghost">-</div>'
             else:
-                return '<div class="vote-pill pill-ghost">0.0%</div>'
-        
-        # Build text format
-        sign = "+" if is_shift and val > 0 else ""
-        text_val = f"{sign}{val:.1f}" + ("%" if not is_shift else "")
-        
-        # Build inline styles
-        style = f"background-color: {color}; color: white;"
-        if is_shift:
-            style += " opacity: 0.6;"
-        if is_final:
-            style += " border: 2px solid #9333ea;"
-            
-        return f'<div class="vote-pill" style="{style}">{text_val}</div>'
+                # Colored zero '-' if party is currently alive
+                return f'<div class="vote-pill" style="background-color: {color}; color: white; opacity: 0.6;">-</div>'
+        else:
+            sign = "+" if val > 0 else ""
+            return f'<div class="vote-pill" style="background-color: {color}; color: white; opacity: 0.6;">{sign}{val:.1f}</div>'
 
-    # Generate party rows
+    def format_base_pill(val, color, is_final=False):
+        if abs(val) < 0.05:
+            return f'<div class="vote-pill pill-ghost" {"style=\'border: 2px solid #9333ea;\'" if is_final else ""}>0.0%</div>'
+        else:
+            style = f"background-color: {color}; color: white;"
+            if is_final: style += " border: 2px solid #9333ea;"
+            return f'<div class="vote-pill" style="{style}">{val:.1f}%</div>'
+
     for raw_party in party_order:
-        # Standardize party name and colors
         display_name = party_name_dict.get(raw_party, raw_party)
         if str(raw_party).startswith('IND_'):
             display_name = parse_independent(raw_party)
             
         color = party_colors.get(display_name, party_colors.get(raw_party, '#999999' if display_name.startswith('Ind') else '#7F8C8D'))
 
-        # Skip parties that never cross 0.05% at baseline OR final
         if shifts['Final'][raw_party] < 0.05 and shifts['Baseline'][raw_party] < 0.05:
             continue
 
         html += f"""
             <div class="party-label" style="color: {color};">{display_name}</div>
-            <div class="data-cell spacer-right">{format_pill(shifts['Baseline'][raw_party], color, is_shift=False)}</div>
-            <div class="data-cell">{format_pill(shifts['Inc_Rem'][raw_party], color, is_shift=True)}</div>
-            <div class="data-cell">{format_pill(shifts['Cand_Change'][raw_party], color, is_shift=True)}</div>
-            <div class="data-cell">{format_pill(shifts['Poll_Shift'][raw_party], color, is_shift=True)}</div>
-            <div class="data-cell spacer-right">{format_pill(shifts['Inc_Adv'][raw_party], color, is_shift=True)}</div>
-            <div class="data-cell">{format_pill(shifts['Final'][raw_party], color, is_shift=False, is_final=True)}</div>
+            <div class="data-cell spacer-right">{format_base_pill(shifts['Baseline'][raw_party], color, False)}</div>
+            <div class="data-cell">{format_shift_pill(shifts['Inc_Rem'][raw_party], color, 1, raw_party)}</div>
+            <div class="data-cell">{format_shift_pill(shifts['Cand_Change'][raw_party], color, 2, raw_party)}</div>
+            <div class="data-cell">{format_shift_pill(shifts['Poll_Shift'][raw_party], color, 3, raw_party)}</div>
+            <div class="data-cell spacer-right">{format_shift_pill(shifts['Inc_Adv'][raw_party], color, 4, raw_party)}</div>
+            <div class="data-cell">{format_base_pill(shifts['Final'][raw_party], color, True)}</div>
         """
 
     html += """
@@ -196,6 +201,21 @@ def generate_step_table_html(df_steps, district_name, output_dir="output_tables"
         f.write(html)
         
     return slug
+
+# ==========================================
+# 3. BATCH RUNNER
+# ==========================================
+if __name__ == "__main__":
+    pkl_file = "deterministic_traces.pkl"
+    if not os.path.exists(pkl_file):
+        sys.exit(1)
+
+    with open(pkl_file, "rb") as f:
+        all_district_steps = pickle.load(f)
+
+    for district in all_district_steps.keys():
+        generate_step_table_html(all_district_steps[district], district, output_dir="output_tables")
+ slug
 
 # ==========================================
 # 3. BATCH RUNNER
