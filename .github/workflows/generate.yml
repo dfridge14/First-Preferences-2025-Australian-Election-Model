@@ -20,7 +20,11 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install numpy pandas plotly pyarrow scipy
+        run: pip install numpy pandas plotly pyarrow scipy gdown
+
+      - name: Download data from Google Drive
+        run: |
+          gdown --folder "https://drive.google.com/drive/folders/1Mx0DlnAtJICcFgagFGmiGvcdoKQ-kw-1" -O internal/
 
       - name: Extract deterministic steps
         run: |
