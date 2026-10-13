@@ -23,7 +23,10 @@ jobs:
         run: pip install numpy pandas plotly pyarrow
 
       - name: Extract deterministic steps
-        run: python Simulate_Victorian_election_FPs.py
+        run: |
+          cd internal
+          python Simulate_Victorian_election_FPs.py
+          mv deterministic_traces.pkl ../
 
       - name: Generate HTML tables
         run: python generate_tables.py
