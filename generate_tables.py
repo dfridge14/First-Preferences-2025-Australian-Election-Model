@@ -150,11 +150,9 @@ def generate_step_table_html(df_steps, district_name, output_dir="output_tables"
         party_is_alive = (active_indices[0] <= step_k <= active_indices[-1]) if active_indices else False
 
         if abs(val) < 0.05:
-            # Ghost pill if column is completely zero or party is outside its active window
             if col_is_dead or not party_is_alive:
                 return '<div class="vote-pill pill-ghost">-</div>'
             else:
-                # Colored zero '-' if party is currently alive
                 return f'<div class="vote-pill" style="background-color: {color}; color: white; opacity: 0.6;">-</div>'
         else:
             sign = "+" if val > 0 else ""
@@ -162,11 +160,12 @@ def generate_step_table_html(df_steps, district_name, output_dir="output_tables"
 
     def format_base_pill(val, color, is_final=False):
         if abs(val) < 0.05:
-            return f'<div class="vote-pill pill-ghost" {"style=\'border: 2px solid #9333ea;\'" if is_final else ""}>0.0%</div>'
+            # FIX: Moved the style formatting outside the f-string to satisfy Python 3.11 parsing
+            extra_style = ' style="border: 2px solid #9333ea;"' if is_final else ''
+            return f'<div class="vote-pill pill-ghost"{extra_style}>0.0%</div>'
         else:
-            style = f"background-color: {color}; color: white;"
-            if is_final: style += " border: 2px solid #9333ea;"
-            return f'<div class="vote-pill" style="{style}">{val:.1f}%</div>'
+            border_style = " border: 2px solid #9333ea;" if is_final else ""
+            return f'<div class="vote-pill" style="background-color: {color}; color: white;{border_style}">{val:.1f}%</div>'
 
     for raw_party in party_order:
         display_name = party_name_dict.get(raw_party, raw_party)
@@ -215,29 +214,4 @@ if __name__ == "__main__":
 
     for district in all_district_steps.keys():
         generate_step_table_html(all_district_steps[district], district, output_dir="output_tables")
- slug
-
-# ==========================================
-# 3. BATCH RUNNER
-# ==========================================
-if __name__ == "__main__":
-    pkl_file = "deterministic_traces.pkl"
-    if not os.path.exists(pkl_file):
-        print(f"Error: Could not locate {pkl_file}. Run the simulation script to step 2 first.")
-        sys.exit(1)
-
-    print(f"Loading {pkl_file}...")
-    with open(pkl_file, "rb") as f:
-        all_district_steps = pickle.load(f)
-
-    districts = list(all_district_steps.keys())
-    print(f"Loaded step-by-step data for {len(districts)} districts.")
-    print("Generating HTML tables...")
-
-    for district in districts:
-        df_steps = all_district_steps[district]
-        generate_step_table_html(df_steps, district, output_dir="output_tables")
-        print(f"✓ Generated table for {district}")
-
-    print("\nCompleted! Tables saved to output_tables/ folder.")
-      
+    
