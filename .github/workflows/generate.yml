@@ -20,19 +20,13 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install numpy pandas plotly pyarrow scipy gdown
+        run: pip install numpy pandas plotly pyarrow
 
-      - name: Download data from Google Drive
-        run: |
       - name: Extract deterministic steps
         run: |
-          SCRIPT_PATH=$(find internal -name "Simulate_Victorian_election_FPs.py" | head -n 1)
-          SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
-          cd "$SCRIPT_DIR"
+          cd internal
           python Simulate_Victorian_election_FPs.py
-          mv deterministic_traces.pkl $GITHUB_WORKSPACE/
-
-
+          mv deterministic_traces.pkl ../
 
       - name: Generate HTML tables
         run: python generate_tables.py
