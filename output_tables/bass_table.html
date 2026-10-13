@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        .model-flow-container { font-family: 'Poppins', sans-serif; max-width: 1250px; margin: 0 auto; overflow-x: auto; padding-bottom: 10px; display: flex; flex-direction: column; align-items: center; }
+        .model-flow-container::-webkit-scrollbar { height: 8px; -webkit-appearance: none; }
+        .model-flow-container::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        
+        /* Desktop Grid: Party (150px) + 6 Data Columns */
+        .model-flow-grid { display: grid; grid-template-columns: 150px repeat(6, minmax(85px, 1fr)); gap: 6px; min-width: 800px; margin: 0 auto; align-items: center; justify-content: start; }
+        
+        .flow-header { font-weight: 700; color: #475569; font-size: 0.85rem; text-align: center; padding-bottom: 10px; border-bottom: 2px solid #cbd5e1; margin-bottom: 10px; line-height: 1.25; }
+        
+        /* Sticky Left Column */
+        .party-label-header, .party-label { position: sticky; left: 0; background-color: #ffffff; z-index: 10; height: 100%; margin: 0 !important; padding: 1px 1px; display: flex; align-items: center; box-sizing: border-box; border-right: 1px solid #f1f5f9; }
+        .party-label-header { border-bottom: 2px solid #94a3b8 !important; font-size: 0.95rem; font-weight: 700; color: #334155; }
+        .party-label { font-weight: 700; font-size: 0.95rem; line-height: 1.2; }
+        
+        /* Pill Styling */
+        .data-cell { display: flex; justify-content: center; }
+        .vote-pill { box-sizing: border-box; border-radius: 8px; padding: 6px 12px; font-weight: 600; font-size: 0.9rem; width: 70px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .pill-ghost { background-color: #f1f5f9; color: #94a3b8; box-shadow: none; border: 1px dashed #cbd5e1; }
+        .spacer-right { margin-right: 16px; }
+
+        /* Mobile Responsiveness */
+        @media (max-width: 768px) {
+            .model-flow-container { margin: 0 5px; }
+            .model-flow-grid { grid-template-columns: 85px repeat(6, minmax(55px, 65px)); min-width: 450px; gap: 2px; }
+            .vote-pill { width: 50px; padding: 3px 4px; font-size: 0.75rem; border-radius: 6px; }
+            .flow-header { font-size: 0.65rem; padding-bottom: 4px; letter-spacing: -0.2px; line-height: 1.1; margin-bottom: 6px; }
+            .party-label { font-size: 0.8rem; }
+            .spacer-right { margin-right: 8px; }
+        }
+    </style>
+</head>
+<body>
+    <div style="max-width: 1250px; margin: 1rem auto 1rem auto; font-family: 'Poppins', sans-serif;">
+        <h2 style="color: #6419a8; font-weight: 800; font-size: 1.8rem; margin-bottom: 8px; margin-top: 0;">Deconstructing the Model: Bass</h2>
+        <div style="display: inline-block; padding: 6px 16px; background: #f8fafc; border-radius: 6px; color: #475569; font-size: 0.9rem; font-weight: 500; letter-spacing: 0.2px; border: 1px solid #e2e8f0;">
+            Tracking how incumbency, candidate changes, and polling swings shape each party's final projected vote.
+        </div>
+    </div>
+    
+    <div class="model-flow-container">
+        <div class="model-flow-grid">
+             <div class="flow-header party-label-header">Party</div>
+            <div class="flow-header spacer-right">2022<br>Result</div>
+            <div class="flow-header">Incumbency<br>Removed</div>
+            <div class="flow-header">Parties<br>Contesting</div>
+            <div class="flow-header">Poll<br>Swing</div>
+            <div class="flow-header spacer-right">Incumbency<br>Added</div>
+            <div class="flow-header" style="color: #9333ea;">Model<br>Average</div>
+    
+            <div class="party-label" style="color: #EB8846;">One Nation</div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">0.0%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #EB8846; color: white; opacity: 0.6;">+6.2</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #EB8846; color: white; opacity: 0.6;">+25.6</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #EB8846; color: white; border: 2px solid #9333ea;">31.7%</div></div>
+        
+            <div class="party-label" style="color: #4053B2;">Liberal</div>
+            <div class="data-cell spacer-right"><div class="vote-pill" style="background-color: #4053B2; color: white;">30.1%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #4053B2; color: white; opacity: 0.6;">-0.3</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #4053B2; color: white; opacity: 0.6;">-7.1</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #4053B2; color: white; border: 2px solid #9333ea;">22.7%</div></div>
+        
+            <div class="party-label" style="color: #F04143;">Labor</div>
+            <div class="data-cell spacer-right"><div class="vote-pill" style="background-color: #F04143; color: white;">32.6%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #F04143; color: white; opacity: 0.6;">+0.6</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #F04143; color: white; opacity: 0.6;">-13.5</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #F04143; color: white; border: 2px solid #9333ea;">19.6%</div></div>
+        
+            <div class="party-label" style="color: #057e0d;">National</div>
+            <div class="data-cell spacer-right"><div class="vote-pill" style="background-color: #057e0d; color: white;">13.3%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #057e0d; color: white; opacity: 0.6;">+0.6</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #057e0d; color: white; opacity: 0.6;">-3.3</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #057e0d; color: white; border: 2px solid #9333ea;">10.5%</div></div>
+        
+            <div class="party-label" style="color: #6BBE6C;">Greens</div>
+            <div class="data-cell spacer-right"><div class="vote-pill" style="background-color: #6BBE6C; color: white;">8.1%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #6BBE6C; color: white; opacity: 0.6;">+1.1</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #6BBE6C; color: white; opacity: 0.6;">-0.1</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #6BBE6C; color: white; border: 2px solid #9333ea;">9.2%</div></div>
+        
+            <div class="party-label" style="color: #764E9A;">Animal Justice</div>
+            <div class="data-cell spacer-right"><div class="vote-pill" style="background-color: #764E9A; color: white;">2.6%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #764E9A; color: white; opacity: 0.6;">+0.8</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #764E9A; color: white; opacity: 0.6;">-0.5</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #764E9A; color: white; border: 2px solid #9333ea;">3.0%</div></div>
+        
+            <div class="party-label" style="color: #9B86A8;">Family First</div>
+            <div class="data-cell spacer-right"><div class="vote-pill" style="background-color: #9B86A8; color: white;">2.8%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #9B86A8; color: white; opacity: 0.6;">+0.4</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #9B86A8; color: white; opacity: 0.6;">-0.8</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #9B86A8; color: white; border: 2px solid #9333ea;">2.4%</div></div>
+        
+            <div class="party-label" style="color: #070706;">Victorian Socialists</div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">0.0%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #070706; color: white; opacity: 0.6;">+1.2</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #070706; color: white; opacity: 0.6;">-0.3</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #070706; color: white; border: 2px solid #9333ea;">0.9%</div></div>
+        
+            <div class="party-label" style="color: #7F8C8D;">DLP</div>
+            <div class="data-cell spacer-right"><div class="vote-pill" style="background-color: #7F8C8D; color: white;">3.5%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #7F8C8D; color: white; opacity: 0.6;">-3.5</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">0.0%</div></div>
+        
+            <div class="party-label" style="color: #999999;">Ind. Edwards</div>
+            <div class="data-cell spacer-right"><div class="vote-pill" style="background-color: #999999; color: white;">2.1%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #999999; color: white; opacity: 0.6;">-2.1</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">0.0%</div></div>
+        
+            <div class="party-label" style="color: #7F8C8D;">FPV</div>
+            <div class="data-cell spacer-right"><div class="vote-pill" style="background-color: #7F8C8D; color: white;">2.4%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #7F8C8D; color: white; opacity: 0.6;">-2.4</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">0.0%</div></div>
+        
+            <div class="party-label" style="color: #999999;">Ind. Jobe</div>
+            <div class="data-cell spacer-right"><div class="vote-pill" style="background-color: #999999; color: white;">2.3%</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill" style="background-color: #999999; color: white; opacity: 0.6;">-2.3</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell spacer-right"><div class="vote-pill pill-ghost">-</div></div>
+            <div class="data-cell"><div class="vote-pill pill-ghost">0.0%</div></div>
+        
+        </div>
+    </div>
+</body>
+</html>
+    
