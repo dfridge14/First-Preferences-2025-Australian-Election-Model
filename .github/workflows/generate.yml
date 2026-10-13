@@ -23,24 +23,21 @@ jobs:
         run: pip install numpy pandas plotly pyarrow scipy gdown
 
       - name: Download data from Google Drive
-        run: gdown --folder "https://drive.google.com/drive/folders/1w5qSOsBBqakOVK2rNLXb6P-lOJhXDUEb" -O internal/
+        run: gdown --folder "PASTE_YOUR_NEW_ELECTION_LITE_LINK_HERE" -O internal/
 
-      - name: Remove 'Copy of ' strictly from file names
+      - name: Remove 'Copy of ' from filenames
         run: |
-          python -c "
-          import os
-          # Walk through the directory tree
-          for root, dirs, files in os.walk('internal'):
-              for file_name in files:
-                  if 'Copy of ' in file_name:
-                      old_path = os.path.join(root, file_name)
-                      # Strip 'Copy of ' but keep the exact same folder location
-                      new_name = file_name.replace('Copy of ', '')
-                      new_path = os.path.join(root, new_name)
-                      os.rename(old_path, new_path)
-          "
-          # Print the structure so you can see it succeeded in the logs
-          ls -R internal/
+          # Recursively find all files containing "Copy of "
+          find internal -type f -name "*Copy of *" | while read -r filepath; do
+            # Extract the directory path
+            dir=$(dirname "$filepath")
+            # Extract the base filename
+            base=$(basename "$filepath")
+            # Replace "Copy of " with nothing in the filename
+            newbase=${base//Copy of /}
+            # Rename the file in its original directory
+            mv "$filepath" "$dir/$newbase"
+          done
 
       - name: Extract deterministic steps
         run: |
