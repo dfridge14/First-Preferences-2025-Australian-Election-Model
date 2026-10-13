@@ -22,6 +22,9 @@ jobs:
       - name: Install dependencies
         run: pip install numpy pandas plotly pyarrow
 
+      - name: Extract deterministic steps
+        run: python Simulate_Victorian_election_FPs.py
+
       - name: Generate HTML tables
         run: python generate_tables.py
 
@@ -32,7 +35,7 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add output/ output_tables/
+          git add output/ output_tables/ deterministic_traces.pkl
           git commit -m "Auto-generate charts and tables" || echo "No changes to commit"
           git push
           
