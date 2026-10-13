@@ -35,9 +35,8 @@ data_year = 2022
 election_year = data_year + 4
 
 
-base_dir = Path.home() / f"Australian Election/Victorian Election"
+base_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(base_dir)
-
 
 
 LC_results = pd.read_csv(f'VIC-{data_year}/VIC-{data_year}-LC-Votes-Electorate-Formatted.csv')
