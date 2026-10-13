@@ -307,4 +307,4 @@ if __name__ == "__main__":
     with open(index_path, "w") as f:
         f.write(dashboard_html)
 
-    print("\nCompleted! 2-in-1 Dashboard
+    print("\nCompleted! 2-in-1 Dashboard")
