@@ -20,7 +20,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install numpy pandas plotly pyarrow
+        run: pip install numpy pandas plotly pyarrow scipy
 
       - name: Extract deterministic steps
         run: |
