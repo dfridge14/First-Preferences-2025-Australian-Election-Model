@@ -24,7 +24,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install numpy pandas plotly
+        run: pip install numpy pandas plotly pyarrow
 
       - name: Run generation script
         run: python generate_plotly.py
