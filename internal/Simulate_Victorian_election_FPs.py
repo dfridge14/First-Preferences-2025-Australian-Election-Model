@@ -2639,6 +2639,14 @@ print(f"Trace completed for {len(deterministic_traces)} districts.")
 
 print("Step 7 Complete. Traces updated.")
 
+with open("deterministic_traces.pkl", "wb") as f:
+    pickle.dump(deterministic_traces, f)
+
+print("Successfully saved deterministic_traces.pkl")
+
+# Stop the script here to skip the heavy Monte Carlo simulations
+sys.exit(0)
+
 #import pdb; pdb.set_trace()
 
 # diagnostics
