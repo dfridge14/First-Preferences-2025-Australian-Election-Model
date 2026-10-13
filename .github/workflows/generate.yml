@@ -26,6 +26,12 @@ jobs:
         run: |
           gdown --folder "https://drive.google.com/drive/folders/1w5qSOsBBqakOVK2rNLXb6P-lOJhXDUEb" -O internal/
 
+      - name: Remove 'Copy of ' from filenames
+        run: |
+          find internal -depth -name "*Copy of *" | while read -r file; do
+            mv "$file" "${file//Copy of /}"
+          done
+
       - name: Extract deterministic steps
         run: |
           SCRIPT_PATH=$(find internal -name "Simulate_Victorian_election_FPs.py" | head -n 1)
