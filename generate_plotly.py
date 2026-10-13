@@ -48,20 +48,16 @@ party_colors = {
     'Other': '#7F8C8D'
 }
 
-# ==========================================
-# 2. INDEPENDENT PARSER FUNCTION
-# ==========================================
 def parse_independent(col_name):
     """ Converts 'IND_Zoe_Daniel' or 'IND_Daniel' to 'Ind. Daniel' """
     parts = str(col_name).strip().split('_')
     last_name = parts[-1] if len(parts) > 1 else 'Unknown'
     display_name = f"Ind. {last_name}"
-    # Farrer legacy style: "IND Dan."
     abbr = f"IND {last_name[:3].title()}."
     return display_name, abbr
 
 # ==========================================
-# 3. PLOT GENERATION FUNCTION
+# 2. PLOT GENERATION FUNCTION
 # ==========================================
 def make_single_electorate_violin_plot(df_raw, district_name, colors, output_dir="output"):
     os.makedirs(output_dir, exist_ok=True)
@@ -70,10 +66,8 @@ def make_single_electorate_violin_plot(df_raw, district_name, colors, output_dir
     if len(df_plot) > 1000:
         df_plot = df_plot.sample(n=1000, random_state=42)
 
-    # Clean columns and apply Independent regex
     clean_cols = []
     display_to_abbr = {}
-    
     for c in df_plot.columns:
         c_str = str(c).strip()
         if c_str.startswith('IND_'):
@@ -90,17 +84,14 @@ def make_single_electorate_violin_plot(df_raw, district_name, colors, output_dir
             
     df_plot.columns = clean_cols
 
-    # Convert to percentage
     numeric_cols = df_plot.select_dtypes(include=[np.number])
     if numeric_cols.mean().max() <= 1.0:
         df_pct = df_plot * 100
     else:
         df_pct = df_plot.copy()
 
-    # Sort parties
     numeric_pct = df_pct.select_dtypes(include=[np.number])
     party_order = numeric_pct.mean().sort_values(ascending=False).index.tolist()
-
     if 'Other' in party_order:
         party_order.remove('Other')
         party_order.append('Other')
@@ -123,14 +114,12 @@ def make_single_electorate_violin_plot(df_raw, district_name, colors, output_dir
         stats = summary_stats[party]
         display_name = party
         x_label = display_to_abbr.get(display_name, display_name[:4].upper())
-        
-        # Pull color from dict, or force #999999 if it is a dynamically generated Independent
         party_color = colors.get(display_name, '#999999' if display_name.startswith('Ind') else '#7F8C8D')
 
         dynamic_bw = 0.7 if stats['mean'] > 4.0 else 0.2
         dynamic_bw = 2.0 if stats['mean'] > 10.0 else dynamic_bw
 
-        # 1. Base Violin Shape
+        # 1. Base Violin Shape (Opacity set to 1.0)
         fig.add_trace(go.Violin(
             x=[x_label] * len(party_data),
             y=party_data,
@@ -145,10 +134,10 @@ def make_single_electorate_violin_plot(df_raw, district_name, colors, output_dir
             ),
             box_visible=False,
             meanline_visible=True,
-            meanline=dict(color='#5d3fd3'),
+            meanline=dict(color='#333333'),
             line_color='rgba(0,0,0,0)',
             fillcolor=party_color,
-            opacity=0.7,
+            opacity=1.0, 
             width=0.7,
             bandwidth=dynamic_bw,
             points=False
@@ -181,29 +170,38 @@ def make_single_electorate_violin_plot(df_raw, district_name, colors, output_dir
             showlegend=False
         ))
 
-    # Layout configuration
+    # Layout configuration (Height, Legend Position, and Title)
     fig.update_layout(
-        title=dict(text=f"{district_name} - Primary Vote Projection", x=0.05, font=dict(size=18)),
+        height=420,
+        title=dict(
+            text=f"<b>{district_name} - Projected First Preference Votes</b>", 
+            x=0.5, 
+            xanchor='center', 
+            font=dict(size=18)
+        ),
         showlegend=True,
         hovermode="closest",
         legend=dict(
-            font=dict(size=14),
+            font=dict(size=13),
             orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1,
+            yanchor="top",
+            y=-0.2,
+            xanchor="center",
+            x=0.5,
             bgcolor='rgba(255, 255, 255, 0)'
         ),
         violinmode="group",
         violingap=0.1,
-        margin=dict(l=35, r=25, t=50, b=40),
+        margin=dict(l=35, r=25, t=50, b=90),
         xaxis_tickangle=0,
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)'
     )
 
+    # Disable zoom interactions on the plot axes
+    fig.update_xaxes(fixedrange=True)
     fig.update_yaxes(
+        fixedrange=True,
         tick0=0,
         dtick=5,
         tickformat='.0f',
@@ -214,19 +212,19 @@ def make_single_electorate_violin_plot(df_raw, district_name, colors, output_dir
 
     slug = district_name.lower().replace(" ", "_").replace("'", "")
     
-    # JSON export for WP
+    # Save JSON for WordPress
     json_path = os.path.join(output_dir, f"{slug}_violin.json")
     with open(json_path, "w") as f:
         f.write(fig.to_json())
 
-    # HTML export for instant mobile viewing
+    # Save standalone HTML (Disables ModeBar options)
     html_path = os.path.join(output_dir, f"{slug}_violin.html")
-    fig.write_html(html_path, include_plotlyjs='cdn')
+    fig.write_html(html_path, include_plotlyjs='cdn', config={'displayModeBar': False, 'scrollZoom': False})
 
-    return fig
+    return slug
 
 # ==========================================
-# 4. BATCH RUNNER
+# 3. BATCH RUNNER & DASHBOARD BUILDER
 # ==========================================
 if __name__ == "__main__":
     pkl_file = "sim_results.pkl"
@@ -239,17 +237,57 @@ if __name__ == "__main__":
 
     colors = party_colors
     districts = list(sim_results.keys())
+    districts.sort()  # Sort alphabetically for the dropdown
     print(f"Loaded simulation data for {len(districts)} districts.")
 
-    # Run a test batch first (3 districts). Once you confirm it works, 
-    # change "districts[:3]" to just "districts" to run all 88 at once.
-    test_batch = districts[:3]
-    print(f"Generating test figures for: {test_batch}...")
-
-    for district in test_batch:
+    # Generating ALL electorates
+    print("Generating figures for all districts...")
+    
+    generated_slugs = {}
+    for district in districts:
         df_district = sim_results[district]
-        make_single_electorate_violin_plot(df_district, district, colors, output_dir="output")
-        print(f"Generated output/ for {district}")
+        slug = make_single_electorate_violin_plot(df_district, district, colors, output_dir="output")
+        generated_slugs[district] = slug
+        print(f"✓ Generated {district}")
 
-    print("\nCompleted. Files saved to output/ folder.")
-  
+    # ==========================================
+    # 4. GENERATE MOBILE DASHBOARD (INDEX.HTML)
+    # ==========================================
+    print("Building mobile dashboard...")
+    index_path = os.path.join("output", "index.html")
+    
+    options_html = ""
+    for name, slug in generated_slugs.items():
+        options_html += f'        <option value="{slug}">{name}</option>\n'
+
+    dashboard_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Electorate Dashboard</title>
+    <style>
+        body {{ font-family: -apple-system, sans-serif; margin: 0; padding: 20px 10px; background: #f9f9f9; text-align: center; }}
+        select {{ font-size: 16px; padding: 12px; margin-bottom: 15px; width: 95%; max-width: 400px; border-radius: 8px; border: 1px solid #ccc; }}
+        iframe {{ width: 100%; height: 500px; border: none; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }}
+    </style>
+</head>
+<body>
+    <select id="districtSelect" onchange="document.getElementById('plotFrame').src = this.value + '_violin.html'">
+{options_html}
+    </select>
+    <br>
+    <iframe id="plotFrame" src=""></iframe>
+    <script>
+        var sel = document.getElementById('districtSelect');
+        if (sel.options.length > 0) {{
+            document.getElementById('plotFrame').src = sel.options[0].value + '_violin.html';
+        }}
+    </script>
+</body>
+</html>"""
+
+    with open(index_path, "w") as f:
+        f.write(dashboard_html)
+
+    print("\nCompleted! Download 'index.html' from the output folder to view your dashboard.")
+    
