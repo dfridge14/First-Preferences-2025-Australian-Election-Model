@@ -23,7 +23,7 @@ jobs:
         run: pip install numpy pandas plotly pyarrow scipy gdown
 
       - name: Download data from Google Drive
-        run: gdown --folder "PASTE_YOUR_NEW_ELECTION_LITE_LINK_HERE" -O internal/
+        run: gdown --folder "https://drive.google.com/drive/folders/1w5qSOsBBqakOVK2rNLXb6P-lOJhXDUEb" -O internal/
 
       - name: Remove 'Copy of ' from filenames
         run: |
