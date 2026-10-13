@@ -25,27 +25,24 @@ jobs:
       - name: Download data from Google Drive
         run: gdown --folder "https://drive.google.com/drive/folders/1w5qSOsBBqakOVK2rNLXb6P-lOJhXDUEb" -O internal/
 
-      - name: Remove 'Copy of ' from filenames
+      - name: Fix Naming and Folder Structure
         run: |
-          # Recursively find all files containing "Copy of "
+          # 1. Clean the "Copy of" filenames
           find internal -type f -name "*Copy of *" | while read -r filepath; do
-            # Extract the directory path
             dir=$(dirname "$filepath")
-            # Extract the base filename
             base=$(basename "$filepath")
-            # Replace "Copy of " with nothing in the filename
             newbase=${base//Copy of /}
-            # Rename the file in its original directory
             mv "$filepath" "$dir/$newbase"
           done
+          
+          # 2. THE FIX: Move VIC-2022 and VIC-2026 out of the subfolder so the script can see them!
+          mv internal/Victorian\ election\ 2026\ data/* internal/ 2>/dev/null || true
 
       - name: Extract deterministic steps
         run: |
-          SCRIPT_PATH=$(find internal -name "Simulate_Victorian_election_FPs.py" | head -n 1)
-          SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
-          cd "$SCRIPT_DIR"
+          cd internal
           python Simulate_Victorian_election_FPs.py
-          mv deterministic_traces.pkl $GITHUB_WORKSPACE/
+          mv deterministic_traces.pkl ../
 
       - name: Generate HTML tables
         run: python generate_tables.py
