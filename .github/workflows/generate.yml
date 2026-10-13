@@ -25,12 +25,12 @@ jobs:
       - name: Download data from Google Drive
         run: |
           gdown --folder "https://drive.google.com/drive/folders/1Mx0DlnAtJICcFgagFGmiGvcdoKQ-kw-1" -O internal/
-
       - name: Extract deterministic steps
         run: |
-          cd internal
+          cd internal/*
           python Simulate_Victorian_election_FPs.py
-          mv deterministic_traces.pkl ../
+          mv deterministic_traces.pkl ../../
+
 
       - name: Generate HTML tables
         run: python generate_tables.py
