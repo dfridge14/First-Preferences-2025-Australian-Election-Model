@@ -23,14 +23,24 @@ jobs:
         run: pip install numpy pandas plotly pyarrow scipy gdown
 
       - name: Download data from Google Drive
-        run: |
-          gdown --folder "https://drive.google.com/drive/folders/1w5qSOsBBqakOVK2rNLXb6P-lOJhXDUEb" -O internal/
+        run: gdown --folder "https://drive.google.com/drive/folders/1w5qSOsBBqakOVK2rNLXb6P-lOJhXDUEb" -O internal/
 
-      - name: Remove 'Copy of ' from filenames
+      - name: Remove 'Copy of ' strictly from file names
         run: |
-          find internal -depth -name "*Copy of *" | while read -r file; do
-            mv "$file" "${file//Copy of /}"
-          done
+          python -c "
+          import os
+          # Walk through the directory tree
+          for root, dirs, files in os.walk('internal'):
+              for file_name in files:
+                  if 'Copy of ' in file_name:
+                      old_path = os.path.join(root, file_name)
+                      # Strip 'Copy of ' but keep the exact same folder location
+                      new_name = file_name.replace('Copy of ', '')
+                      new_path = os.path.join(root, new_name)
+                      os.rename(old_path, new_path)
+          "
+          # Print the structure so you can see it succeeded in the logs
+          ls -R internal/
 
       - name: Extract deterministic steps
         run: |
