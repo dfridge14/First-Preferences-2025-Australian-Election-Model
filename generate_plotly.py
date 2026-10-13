@@ -25,7 +25,7 @@ party_name_dict = {
 
 site_abbreviation_dict = {
     'Labor': 'LAB', 'Liberal': 'LIB', 'National': 'NAT', 'Coalition': 'COAL',
-    'Greens': 'GRN', 'Victorian Socialists': 'VSOC', 'Legalise Cannabis': 'LCP',
+    'Greens': 'GRN', 'Victorian Socialists': 'VS', 'Legalise Cannabis': 'LCP',
     'Animal Justice': 'AJP', 'Family First': 'FFP', 'Libertarian': 'LBT',
     'Shooters Fishers & Farmers': 'SFF', 'Australian Democrats': 'AUD',
     'One Nation': 'ON', 'Trumpet of Patriots': 'TOP', 'FUSION': 'FUSN',
@@ -95,6 +95,10 @@ def make_single_electorate_violin_plot(df_raw, district_name, colors, output_dir
     if 'Other' in party_order:
         party_order.remove('Other')
         party_order.append('Other')
+        
+    # Check max value across all traces to dynamically adjust Y-axis max limit
+    max_y_val = df_pct[party_order].max().max()
+    y_max_limit = 75 if max_y_val > 67 else 65
 
     summary_stats = {
         party: {
@@ -170,11 +174,11 @@ def make_single_electorate_violin_plot(df_raw, district_name, colors, output_dir
             showlegend=False
         ))
 
-    # Layout configuration (Height, Legend Position, and Title)
+    # Layout configuration
     fig.update_layout(
         height=420,
         title=dict(
-            text=f"<b>{district_name} - Projected First Preference Votes</b>", 
+            text="<b>Projected First Preference Votes</b>", 
             x=0.5, 
             xanchor='center', 
             font=dict(size=18)
@@ -188,7 +192,7 @@ def make_single_electorate_violin_plot(df_raw, district_name, colors, output_dir
             y=-0.2,
             xanchor="center",
             x=0.5,
-            bgcolor='rgba(255, 255, 255, 0)'
+            bgcolor='rgba(0,0,0,0)'
         ),
         violinmode="group",
         violingap=0.1,
@@ -198,26 +202,26 @@ def make_single_electorate_violin_plot(df_raw, district_name, colors, output_dir
         plot_bgcolor='rgba(0,0,0,0)'
     )
 
-    # Disable zoom interactions on the plot axes
     fig.update_xaxes(fixedrange=True)
     fig.update_yaxes(
         fixedrange=True,
         tick0=0,
-        dtick=5,
+        dtick=10,                      # Grid every 10%
+        showgrid=True,                 # Turn on grid
+        gridcolor='rgba(0,0,0,0.1)',   # Very thin, faint line
+        gridwidth=1,
         tickformat='.0f',
         ticksuffix='%',
         tickfont=dict(size=13),
-        range=[-1, 65]
+        range=[-1, y_max_limit]        # Dynamic top limit
     )
 
     slug = district_name.lower().replace(" ", "_").replace("'", "")
     
-    # Save JSON for WordPress
     json_path = os.path.join(output_dir, f"{slug}_violin.json")
     with open(json_path, "w") as f:
         f.write(fig.to_json())
 
-    # Save standalone HTML (Disables ModeBar options)
     html_path = os.path.join(output_dir, f"{slug}_violin.html")
     fig.write_html(html_path, include_plotlyjs='cdn', config={'displayModeBar': False, 'scrollZoom': False})
 
@@ -237,10 +241,9 @@ if __name__ == "__main__":
 
     colors = party_colors
     districts = list(sim_results.keys())
-    districts.sort()  # Sort alphabetically for the dropdown
+    districts.sort()
     print(f"Loaded simulation data for {len(districts)} districts.")
 
-    # Generating ALL electorates
     print("Generating figures for all districts...")
     
     generated_slugs = {}
@@ -250,9 +253,6 @@ if __name__ == "__main__":
         generated_slugs[district] = slug
         print(f"✓ Generated {district}")
 
-    # ==========================================
-    # 4. GENERATE MOBILE DASHBOARD (INDEX.HTML)
-    # ==========================================
     print("Building mobile dashboard...")
     index_path = os.path.join("output", "index.html")
     
@@ -260,15 +260,16 @@ if __name__ == "__main__":
     for name, slug in generated_slugs.items():
         options_html += f'        <option value="{slug}">{name}</option>\n'
 
+    # Notice the background is set to transparent in body and iframe styles
     dashboard_html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Electorate Dashboard</title>
     <style>
-        body {{ font-family: -apple-system, sans-serif; margin: 0; padding: 20px 10px; background: #f9f9f9; text-align: center; }}
-        select {{ font-size: 16px; padding: 12px; margin-bottom: 15px; width: 95%; max-width: 400px; border-radius: 8px; border: 1px solid #ccc; }}
-        iframe {{ width: 100%; height: 500px; border: none; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }}
+        body {{ font-family: -apple-system, sans-serif; margin: 0; padding: 20px 10px; background: transparent; text-align: center; }}
+        select {{ font-size: 16px; padding: 12px; margin-bottom: 15px; width: 95%; max-width: 400px; border-radius: 8px; border: 1px solid #ccc; background: white; }}
+        iframe {{ width: 100%; height: 450px; border: none; background: transparent; }}
     </style>
 </head>
 <body>
@@ -276,7 +277,7 @@ if __name__ == "__main__":
 {options_html}
     </select>
     <br>
-    <iframe id="plotFrame" src=""></iframe>
+    <iframe id="plotFrame" src="" allowtransparency="true"></iframe>
     <script>
         var sel = document.getElementById('districtSelect');
         if (sel.options.length > 0) {{
@@ -289,5 +290,5 @@ if __name__ == "__main__":
     with open(index_path, "w") as f:
         f.write(dashboard_html)
 
-    print("\nCompleted! Download 'index.html' from the output folder to view your dashboard.")
+    print("\nCompleted! Dashboard created.")
     
