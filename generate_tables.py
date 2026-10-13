@@ -130,13 +130,13 @@ def generate_step_table_html(df_steps, district_name, output_dir="output_tables"
     
     <div class="model-flow-container">
         <div class="model-flow-grid">
-            <div class="flow-header party-label-header">Party</div>
-            <div class="flow-header spacer-right">Last<br>Election</div>
-            <div class="flow-header">Incumbency<br>Removal</div>
-            <div class="flow-header">Candidate<br>Change</div>
-            <div class="flow-header">Polling<br>Shift</div>
-            <div class="flow-header spacer-right">Incumbency<br>Adv.</div>
-            <div class="flow-header" style="color: #9333ea;">Final<br>Projection</div>
+             <div class="flow-header party-label-header">Party</div>
+            <div class="flow-header spacer-right">2022<br>Result</div>
+            <div class="flow-header">Incumbency<br>Removed</div>
+            <div class="flow-header">Parties<br>Contesting</div>
+            <div class="flow-header">Poll<br>Swing</div>
+            <div class="flow-header spacer-right">Incumbency<br>Added</div>
+            <div class="flow-header" style="color: #9333ea;">Model<br>Average</div>
     """
 
     def format_pill(val, color, is_shift=False, is_final=False):
