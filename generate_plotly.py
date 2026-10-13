@@ -260,7 +260,7 @@ if __name__ == "__main__":
     for name, slug in generated_slugs.items():
         options_html += f'        <option value="{slug}">{name}</option>\n'
 
-    # Notice the background is set to transparent in body and iframe styles
+    # Notice the second iframe and the updated Javascript function
     dashboard_html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -269,19 +269,36 @@ if __name__ == "__main__":
     <style>
         body {{ font-family: -apple-system, sans-serif; margin: 0; padding: 20px 10px; background: transparent; text-align: center; }}
         select {{ font-size: 16px; padding: 12px; margin-bottom: 15px; width: 95%; max-width: 400px; border-radius: 8px; border: 1px solid #ccc; background: white; }}
-        iframe {{ width: 100%; height: 450px; border: none; background: transparent; }}
+        iframe {{ width: 100%; border: none; background: transparent; }}
+        .plot-frame {{ height: 450px; margin-bottom: 10px; }}
+        .table-frame {{ height: 500px; }}
     </style>
 </head>
 <body>
-    <select id="districtSelect" onchange="document.getElementById('plotFrame').src = this.value + '_violin.html'">
+    <select id="districtSelect" onchange="updateDashboard(this.value)">
 {options_html}
     </select>
     <br>
-    <iframe id="plotFrame" src="" allowtransparency="true"></iframe>
+    
+    <!-- Top Plotly Chart -->
+    <iframe id="plotFrame" class="plot-frame" src="" allowtransparency="true"></iframe>
+    
+    <!-- Bottom Data Table -->
+    <iframe id="tableFrame" class="table-frame" src="" allowtransparency="true"></iframe>
+    
     <script>
+        function updateDashboard(slug) {{
+            // Loads the plot from the current folder
+            document.getElementById('plotFrame').src = slug + '_violin.html';
+            
+            // Loads the table from the sibling output_tables folder
+            document.getElementById('tableFrame').src = '../output_tables/' + slug + '_table.html';
+        }}
+        
+        // Initialize on page load
         var sel = document.getElementById('districtSelect');
         if (sel.options.length > 0) {{
-            document.getElementById('plotFrame').src = sel.options[0].value + '_violin.html';
+            updateDashboard(sel.options[0].value);
         }}
     </script>
 </body>
@@ -290,5 +307,4 @@ if __name__ == "__main__":
     with open(index_path, "w") as f:
         f.write(dashboard_html)
 
-    print("\nCompleted! Dashboard created.")
-    
+    print("\nCompleted! 2-in-1 Dashboard
