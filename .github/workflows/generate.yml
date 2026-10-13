@@ -24,7 +24,7 @@ jobs:
 
       - name: Download data from Google Drive
         run: |
-          gdown --folder "https://drive.google.com/drive/folders/1Mx0DlnAtJICcFgagFGmiGvcdoKQ-kw-1" -O internal/
+          gdown --folder "https://drive.google.com/drive/folders/1w5qSOsBBqakOVK2rNLXb6P-lOJhXDUEb" -O internal/
       - name: Extract deterministic steps
         run: |
           cd internal/*
