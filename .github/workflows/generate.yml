@@ -20,7 +20,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install numpy pandas plotly pyarrow scipy gdown
+        run: pip install numpy pandas plotly pyarrow scipy gdown statsmodels
 
       - name: Download data from Google Drive
         run: gdown --folder "https://drive.google.com/drive/folders/1w5qSOsBBqakOVK2rNLXb6P-lOJhXDUEb" -O internal/
