@@ -284,7 +284,7 @@ if __name__ == "__main__":
     <iframe id="plotFrame" class="plot-frame" src="" allowtransparency="true"></iframe>
     
     <!-- Bottom Data Table -->
-    <iframe id="tableFrame" class="table-frame" src="" allowtransparency="true" scrolling="no" style="width: 100%; border: none; overflow: hidden;"></iframe>
+    <iframe id="tableFrame" class="table-frame" src="" style="width: 100%; height: 1200px; border: none; overflow: hidden;" scrolling="no" allowtransparency="true"></iframe>
 
     <script>
         function updateDashboard(slug) {{
