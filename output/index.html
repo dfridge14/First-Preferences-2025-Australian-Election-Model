@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Electorate Dashboard</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; margin: 0; padding: 20px 10px; background: #f9f9f9; text-align: center; }
+        select { font-size: 16px; padding: 12px; margin-bottom: 15px; width: 95%; max-width: 400px; border-radius: 8px; border: 1px solid #ccc; }
+        iframe { width: 100%; height: 500px; border: none; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    </style>
+</head>
+<body>
+    <select id="districtSelect" onchange="document.getElementById('plotFrame').src = this.value + '_violin.html'">
+        <option value="albert_park">Albert Park</option>
+        <option value="ashwood">Ashwood</option>
+        <option value="bass">Bass</option>
+        <option value="bayswater">Bayswater</option>
+        <option value="bellarine">Bellarine</option>
+        <option value="benambra">Benambra</option>
+        <option value="bendigo_east">Bendigo East</option>
+        <option value="bendigo_west">Bendigo West</option>
+        <option value="bentleigh">Bentleigh</option>
+        <option value="berwick">Berwick</option>
+        <option value="box_hill">Box Hill</option>
+        <option value="brighton">Brighton</option>
+        <option value="broadmeadows">Broadmeadows</option>
+        <option value="brunswick">Brunswick</option>
+        <option value="bulleen">Bulleen</option>
+        <option value="bundoora">Bundoora</option>
+        <option value="carrum">Carrum</option>
+        <option value="caulfield">Caulfield</option>
+        <option value="clarinda">Clarinda</option>
+        <option value="cranbourne">Cranbourne</option>
+        <option value="croydon">Croydon</option>
+        <option value="dandenong">Dandenong</option>
+        <option value="eildon">Eildon</option>
+        <option value="eltham">Eltham</option>
+        <option value="essendon">Essendon</option>
+        <option value="eureka">Eureka</option>
+        <option value="euroa">Euroa</option>
+        <option value="evelyn">Evelyn</option>
+        <option value="footscray">Footscray</option>
+        <option value="frankston">Frankston</option>
+        <option value="geelong">Geelong</option>
+        <option value="gippsland_east">Gippsland East</option>
+        <option value="gippsland_south">Gippsland South</option>
+        <option value="glen_waverley">Glen Waverley</option>
+        <option value="greenvale">Greenvale</option>
+        <option value="hastings">Hastings</option>
+        <option value="hawthorn">Hawthorn</option>
+        <option value="ivanhoe">Ivanhoe</option>
+        <option value="kalkallo">Kalkallo</option>
+        <option value="kew">Kew</option>
+        <option value="kororoit">Kororoit</option>
+        <option value="lara">Lara</option>
+        <option value="laverton">Laverton</option>
+        <option value="lowan">Lowan</option>
+        <option value="macedon">Macedon</option>
+        <option value="malvern">Malvern</option>
+        <option value="melbourne">Melbourne</option>
+        <option value="melton">Melton</option>
+        <option value="mildura">Mildura</option>
+        <option value="mill_park">Mill Park</option>
+        <option value="monbulk">Monbulk</option>
+        <option value="mordialloc">Mordialloc</option>
+        <option value="mornington">Mornington</option>
+        <option value="morwell">Morwell</option>
+        <option value="mulgrave">Mulgrave</option>
+        <option value="murray_plains">Murray Plains</option>
+        <option value="narracan">Narracan</option>
+        <option value="narre_warren_north">Narre Warren North</option>
+        <option value="narre_warren_south">Narre Warren South</option>
+        <option value="nepean">Nepean</option>
+        <option value="niddrie">Niddrie</option>
+        <option value="northcote">Northcote</option>
+        <option value="oakleigh">Oakleigh</option>
+        <option value="ovens_valley">Ovens Valley</option>
+        <option value="pakenham">Pakenham</option>
+        <option value="pascoe_vale">Pascoe Vale</option>
+        <option value="point_cook">Point Cook</option>
+        <option value="polwarth">Polwarth</option>
+        <option value="prahran">Prahran</option>
+        <option value="preston">Preston</option>
+        <option value="richmond">Richmond</option>
+        <option value="ringwood">Ringwood</option>
+        <option value="ripon">Ripon</option>
+        <option value="rowville">Rowville</option>
+        <option value="sandringham">Sandringham</option>
+        <option value="shepparton">Shepparton</option>
+        <option value="south_barwon">South Barwon</option>
+        <option value="south-west_coast">South-West Coast</option>
+        <option value="st_albans">St Albans</option>
+        <option value="sunbury">Sunbury</option>
+        <option value="sydenham">Sydenham</option>
+        <option value="tarneit">Tarneit</option>
+        <option value="thomastown">Thomastown</option>
+        <option value="warrandyte">Warrandyte</option>
+        <option value="wendouree">Wendouree</option>
+        <option value="werribee">Werribee</option>
+        <option value="williamstown">Williamstown</option>
+        <option value="yan_yean">Yan Yean</option>
+
+    </select>
+    <br>
+    <iframe id="plotFrame" src=""></iframe>
+    <script>
+        var sel = document.getElementById('districtSelect');
+        if (sel.options.length > 0) {
+            document.getElementById('plotFrame').src = sel.options[0].value + '_violin.html';
+        }
+    </script>
+</body>
+</html>
