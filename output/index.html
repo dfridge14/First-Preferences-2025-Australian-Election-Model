@@ -4,9 +4,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Electorate Dashboard</title>
     <style>
-        body { font-family: -apple-system, sans-serif; margin: 0; padding: 20px 10px; background: #f9f9f9; text-align: center; }
-        select { font-size: 16px; padding: 12px; margin-bottom: 15px; width: 95%; max-width: 400px; border-radius: 8px; border: 1px solid #ccc; }
-        iframe { width: 100%; height: 500px; border: none; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        body { font-family: -apple-system, sans-serif; margin: 0; padding: 20px 10px; background: transparent; text-align: center; }
+        select { font-size: 16px; padding: 12px; margin-bottom: 15px; width: 95%; max-width: 400px; border-radius: 8px; border: 1px solid #ccc; background: white; }
+        iframe { width: 100%; height: 450px; border: none; background: transparent; }
     </style>
 </head>
 <body>
@@ -102,7 +102,7 @@
 
     </select>
     <br>
-    <iframe id="plotFrame" src=""></iframe>
+    <iframe id="plotFrame" src="" allowtransparency="true"></iframe>
     <script>
         var sel = document.getElementById('districtSelect');
         if (sel.options.length > 0) {
