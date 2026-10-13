@@ -23,7 +23,11 @@ jobs:
         run: pip install numpy pandas plotly pyarrow scipy gdown statsmodels
 
       - name: Download data from Google Drive
-        run: gdown --folder "https://drive.google.com/drive/folders/1w5qSOsBBqakOVK2rNLXb6P-lOJhXDUEb" -O internal/
+        run: |
+          # Try to download up to 4 times, waiting 10 seconds between attempts if Google blocks it
+          for i in 1 2 3 4; do
+            gdown --folder "https://drive.google.com/drive/folders/1w5qSOsBBqakOVK2rNLXb6P-lOJhXDUEb" -O internal/ && break || sleep 10
+          done
 
       - name: Fix Naming and Folder Structure
         run: |
