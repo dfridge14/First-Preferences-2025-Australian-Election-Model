@@ -35,9 +35,8 @@ data_year = 2022
 election_year = data_year + 4
 
 
-base_dir = Path.home() / f"Australian Election/Victorian Election"
+base_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(base_dir)
-
 
 
 LC_results = pd.read_csv(f'VIC-{data_year}/VIC-{data_year}-LC-Votes-Electorate-Formatted.csv')
@@ -2639,6 +2638,14 @@ print(f"Trace completed for {len(deterministic_traces)} districts.")
 
 
 print("Step 7 Complete. Traces updated.")
+
+with open("deterministic_traces.pkl", "wb") as f:
+    pickle.dump(deterministic_traces, f)
+
+print("Successfully saved deterministic_traces.pkl")
+
+# Stop the script here to skip the heavy Monte Carlo simulations
+sys.exit(0)
 
 #import pdb; pdb.set_trace()
 

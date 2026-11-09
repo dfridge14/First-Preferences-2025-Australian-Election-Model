@@ -20,9 +20,8 @@ sys.excepthook = exception_handler
 data_year = '2022'
 
 
-base_dir = Path.home() / f"Australian Election/Victorian Election/VIC-{data_year}"
+base_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(base_dir)
-
 
 
 class DOPTable:
