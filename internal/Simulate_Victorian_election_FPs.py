@@ -142,6 +142,7 @@ else:
     #next_contesting_parties['Narracan'] = ['LP','GRN','ALP','ON','VNS','FFP']
     next_contesting_parties['Narracan'] = ['LP','GRN','ALP','ON','VNS','FFP']
     next_contesting_parties['Clarinda'].append('IND_Caroline_White')
+    next_contesting_parties['Macedon'].append('IND_Caroline_White')
 
 
     TARGET_2026_TEALS = {'Footscray': 'IND_Jess_Marsh', 'Mornington': 'IND_Melissa_Goffin', 'Hawthorn': 'IND_Shima_Ibuki'} # Sophie Torney already there
@@ -2047,7 +2048,7 @@ def execute_new_IND_injection(
     return {k: v / z_final for k, v in cf_c0_step5.items()}
 
 anomalous_districts = ['Narracan'] if data_year == 2022 else ['Richmond'] if data_year == 2018 else []
-num_simulations = 10
+num_simulations = 1000
 
 # We will store the results of the 1000 simulations here
 mc_results_c0 = []
@@ -2717,10 +2718,14 @@ final_model.set_params(baseline_theta)
 mc_results_c0 = []
 s_hat_a_dicts = []
 
+start= time.time()
 # =========================================================================
 # MONTE CARLO SIMULATION LOOP
 # =========================================================================
 for sim_idx in range(num_simulations):
+
+    if sim_idx % 50 == 1:
+        print("Completed", sim_idx - 1)
 
     # -------------------------------------------------------------
     # STEP 2: Stochastic Party Removal
@@ -2900,8 +2905,15 @@ for sim_idx in range(num_simulations):
 
     # Store the complete Step 7 realization for this Monte Carlo draw
     mc_results_c0.append(cf_c0_step7_dict)
-
+print(time.time() - start)
 # pd.DataFrame([result['Bentleigh'] for result in mc_results_c0])
+
+electorates = mc_results_c0[0].keys()
+FP_pred = {e: pd.DataFrame([res[e] for res in mc_results_c0]) for e in electorates}
+
+with open("sim_results.pkl", "wb") as f:
+    pickle.dump(FP_pred, f)
+
 import pdb; pdb.set_trace()
 
 

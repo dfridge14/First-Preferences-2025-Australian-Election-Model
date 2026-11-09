@@ -7,6 +7,9 @@ import re
 import pickle
 import json
 
+import requests
+import io
+
 
 from scipy.optimize import minimize
 import statsmodels.api as sm
@@ -23,79 +26,60 @@ def exception_handler(type, value, tb):
 
 sys.excepthook = exception_handler
 
-data_year = '2022'
+data_year = 2010
 
 base_dir = Path.home() / f"Australian Election/Victorian Election/VIC-{data_year}"
 os.chdir(base_dir)
 
 
 
-LC_results = pd.read_csv('VIC-2022-LC-Votes-Electorate-Formatted.csv')
-LA_results = pd.read_csv('VIC-2022-LA-Primary-Electorate-Formatted.csv')
+LC_results = pd.read_csv(f'VIC-{data_year}-LC-Votes-Electorate-Formatted.csv')
+LA_results = pd.read_csv(f'VIC-{data_year}-LA-Primary-Electorate-Formatted.csv')
 
-LA_Candidates = pd.read_csv('VIC-2022-LA-Candidates-Formatted.csv')
+if data_year < 2022:
+    LA_2CPs = pd.read_csv(f'VIC-{data_year}-LA-2CP-Electorate-Formatted.csv')
+
+LA_Candidates = pd.read_csv(f'VIC-{data_year}-LA-Candidates-Formatted.csv')
 
 # create df matching party code to party name
-party_df = pd.read_csv('VIC-2022-Parties.csv')
+party_df = pd.read_csv(f'VIC-{data_year}-Parties.csv')
 Ideology_map = party_df.set_index('PartyAb')['Ideo_category']
 IDEO_CATEGORIES = ['ALP','COAL','Left','Right','Centre']
 
 
-if 0:
-    div = 'Yan Yan'
-
-    div_LC_results = LC_results.loc[LC_results['div_nm'] == 'Yan Yean',]
-
-    # get total group votes using group (instead of party) to account for different COALition party names under same group
-    div_LC_results['group_votes'] = div_LC_results['group_code'].map(div_LC_results.groupby('group_code')['votes'].sum())
-
-    assert div_LC_results['votes'].sum() == div_LC_results.loc[div_LC_results['first_name'].isin(['Above-the-line','Informal']),'group_votes'].sum() # no vote totals lost
-
-    # series of UH votes per party
-    LC_party_votes = div_LC_results.loc[div_LC_results['first_name']=='Above-the-line',['PartyAb','group_votes']].sort_values(by='group_votes', ascending = False).set_index('PartyAb')
-
-    LH_UH_comp = LC_party_votes.div(LC_party_votes.sum(), axis=1)
-
-if 0: # obsolete as have access to full DOP table
-    
-    div_LA_results =  LA_results.loc[LA_results['div_nm'] == 'Yan Yean',]
-
-    # rename LP/NP to LNP
-    div_LA_results['PartyAb'] = div_LA_results['PartyAb'].replace({'LP': 'LNP','NP':'LNP'})
-
-    LA_party_votes = div_LA_results[['PartyAb','votes']].set_index('PartyAb')
-
-    # get comparisons
-    LC_party_votes['LA_votes'] = LA_party_votes.reindex(LC_party_votes.index).to_numpy()
-    #LH_UH_comp['difference'] = LH_UH_comp['LA_votes'] - LH_UH_comp['group_votes']
-
-
-
-def extract_DOP_table(LA_Candidates, div_list):
-
-    import requests
-    import io
-
+def extract_DOP_table(data_year, LA_Candidates, div_list):
 
     DOP_table_dict = {}
 
     # Provide a standard browser User-Agent so the VEC doesn't block the scraper
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
-    url_template = "https://www.vec.vic.gov.au/results/state-election-results/2022-state-election-results/results-by-district/{slug}-district-results/{slug}-results-distribution"
-
+    if data_year == 2022:
+        url_template = "https://www.vec.vic.gov.au/results/state-election-results/2022-state-election-results/results-by-district/{slug}-district-results/{slug}-results-distribution"
+    elif data_year == 2018:
+        url_template = "https://itsitecoreblobvecprd01.blob.core.windows.net/public-files/historical-results/state2018/distribution{slug}district.html"
+    elif data_year == 2014:
+        url_template = "https://itsitecoreblobvecprd01.blob.core.windows.net/public-files/historical-results/state2014/distribution{slug}district.html"
+    elif data_year == 2010:
+        url_template = "https://itsitecoreblobvecprd01.blob.core.windows.net/public-files/historical-results/state2010/state2010distribution{slug}district.html"
+    elif data_year == 2006:
+        url_template = "https://itsitecoreblobvecprd01.blob.core.windows.net/public-files/historical-results/state2006/state2006distribution{slug}district.html"
+ 
     # Hardcode fixes for any VEC URL typos
-    url_overrides = {'Pakenham': "https://www.vec.vic.gov.au/results/state-election-results/2022-state-election-results/results-by-district/pakenham-district-results/pakenham-results--distribution"}
-
+    if data_year == 2022:
+        url_overrides = {'Pakenham': "https://www.vec.vic.gov.au/results/state-election-results/2022-state-election-results/results-by-district/pakenham-district-results/pakenham-results--distribution"}
+    else:
+        url_overrides = {}
 
     for div in div_list:
 
         
         # read existing downloads if available
-        if Path('/home/dania-freidgeim/Australian Election/Victorian Election/VIC-2022/DOP', f'2022_DOP_{div}.csv').exists():
+        if Path(f'/home/dania-freidgeim/Australian Election/Victorian Election/VIC-{data_year}/DOP', f'{data_year}_DOP_{div}.csv').exists():
 
-            DOP_table_dict[div]  = pd.read_csv(f'DOP/2022_DOP_{div}.csv')
+            DOP_table_dict[div]  = pd.read_csv(f'DOP/{data_year}_DOP_{div}.csv')
 
-        elif Path('/home/dania-freidgeim/Australian Election/Victorian Election/VIC-2022/vec_downloads', f'2022_Indicative_DOP_{div}.csv').exists():
+        if (data_year == 2022) and Path(f'/home/dania-freidgeim/Australian Election/Victorian Election/VIC-{data_year}/vec_downloads', f'2022_Indicative_DOP_{div}.csv').exists():
+            # indicative DOP tables exist only for 2022 onwards!
             continue
 
         else:
@@ -103,7 +87,10 @@ def extract_DOP_table(LA_Candidates, div_list):
             if div in url_overrides:
                 url = url_overrides[div]
             else:
-                slug = div.lower().replace(" ", "-")
+                if data_year == 2022:
+                    slug = div.lower().replace(" ", "-")
+                elif data_year <= 2018:
+                    slug = div.lower().replace(" ", "")
                 url = url_template.format(slug=slug)
             
             try:
@@ -113,18 +100,23 @@ def extract_DOP_table(LA_Candidates, div_list):
                 response.raise_for_status() 
                 # 3. Pass the raw HTML text to pandas instead of the URL
                 tables = pd.read_html(io.StringIO(response.text))
+
+                
             
                 if not tables:
                     raise ValueError(f"No <table> elements found at {url}")
                 
                 # Assuming the preference distribution is the first table
-                DOP_table = tables[0]                
+                if data_year == 2022:
+                    DOP_table = tables[0]   
+                elif data_year <= 2018:
+                    DOP_table = tables[3]            
                 
                 print(f"Successfully extracted: {url}")
                 
             except Exception as e:
                 print(f"Failed to extract {url}: {e}")
-                if div in ['Niddrie','Pakenham']:
+                if (div in ['Niddrie','Pakenham']) and (data_year == 2022):
                     import pdb; pdb.set_trace()
                 continue
 
@@ -146,17 +138,11 @@ def extract_DOP_table(LA_Candidates, div_list):
             # 6. Create the match_name and mapping dictionary using the updated dataframe
 
             # dictionary mapping full candidate names to their party codes
-            party_mapping = dict(zip(LA_Candidates_div['candidate_name'], LA_Candidates_div['PartyAb']))
+            party_mapping = {str(k).upper().replace(" ", ""): v for k, v in zip(LA_Candidates_div['candidate_name'], LA_Candidates_div['PartyAb'])}
+            rename_dict = {col: party_mapping[str(col).upper().replace(" ", "")] for col in DOP_table.columns if str(col).upper().replace(" ", "") in party_mapping}
 
             # Apply the mapping to rename the matching columns in DOP_table
-            DOP_table = DOP_table.rename(columns=party_mapping)
-
-            
-
-            # create PrefPercent table & separate transfer % table?
-            DOP_pref_percent = DOP_table.copy()
-            #DOP_pref_percent.iloc[:,2:-2] = DOP_table.iloc[:,2:-2].div(DOP_table['TOTAL'], axis=0) 
-
+            DOP_table = DOP_table.rename(columns=rename_dict)
 
             DOP_table_dict[div] = DOP_table
 
@@ -165,9 +151,8 @@ def extract_DOP_table(LA_Candidates, div_list):
             DOP_table.to_csv(out_path, index=False)
 
     return DOP_table_dict
-    # 
 
-
+ 
 def download_indicative_preferences(data_year):
     import os
     import requests
@@ -307,43 +292,271 @@ def download_indicative_preferences(data_year):
 
     return DOP_indicative_table_dict
 
+def complete_and_impute_DOP_tables(DOP_table_dict, LA_results, LA_2CPs, Ideology_map):
+    meta_cols = {'div_nm', 'CandRemaining', 'TOTAL', 'CountType'}
+    
+    
+    # ---------------------------------------------------------
+    # PHASE 1: Format LA_2CPs & Learn Left/Right Flows Only
+    # ---------------------------------------------------------
+    la_2cp_dict = {}
+    for div, group in LA_2CPs.groupby('div_nm'):
+        la_2cp_dict[div] = dict(zip(group['PartyAb'], group['votes']))
 
+    learned_flows = []
+    for div, df in DOP_table_dict.items():
+        votes = df[df['CountType'] == 'Votes']
+
+
+        
+        # Check both standard 3CP and double-COAL 4CP rows
+        for tgt_cp in [3, 4]:
+            if not (votes['CandRemaining'] == tgt_cp).any(): continue
+            
+            r_fp = votes.iloc[0]
+            r_cp = votes[votes['CandRemaining'] == tgt_cp].iloc[0]
+            
+            cands = [c for c in df.columns if c not in meta_cols and pd.notna(r_cp[c]) and r_cp[c] > 0]
+            alp_col = next((c for c in cands if c == 'ALP'), None)
+            coal_cols = [c for c in cands if c in ['LNP', 'LP', 'NP']]
+            minor_cols = [c for c in cands if c not in ['ALP', 'LNP', 'LP', 'NP']]
+            
+            # Ensure topology matches exactly 1 Minor, 1 ALP, and 1+ COAL
+            if alp_col and coal_cols and len(minor_cols) == 1 and div in la_2cp_dict:
+                minor_col = minor_cols[0]
+                minor_ideo = Ideology_map.get(re.sub(r'\d+$', '', minor_col), 'Centre')
+
+
+                
+                # ONLY Learn from Left and Right
+                if minor_ideo not in ['Left', 'Right']: 
+                    break 
+
+                #if minor_ideo != 'Left':
+                #    import pdb; pdb.set_trace()
+                    
+                coal_2cp_col = next((c for c in coal_cols if c in la_2cp_dict[div]), None)
+                if alp_col in la_2cp_dict[div] and coal_2cp_col:
+                    
+                    # Alpha (Micro -> Minor)
+                    coal_fp_total = sum(r_fp[c] for c in coal_cols)
+                    tail_fp = r_fp['TOTAL'] - r_fp[alp_col] - coal_fp_total - r_fp[minor_col]
+                    minor_gain = r_cp[minor_col] - r_fp[minor_col]
+                    alpha = minor_gain / tail_fp if tail_fp > 0 else 0
+                    
+                    # Beta (Minor -> ALP at 2CP)
+                    alp_gain = la_2cp_dict[div][alp_col] - r_cp[alp_col]
+                    coal_cp_total = sum(r_cp[c] for c in coal_cols)
+                    coal_gain = la_2cp_dict[div][coal_2cp_col] - coal_cp_total
+                    
+                    total_gain = alp_gain + coal_gain
+                    beta = alp_gain / total_gain if total_gain > 0 else 0.5
+                    
+                    learned_flows.append({'ideo': minor_ideo, 'alpha': alpha, 'beta': beta})
+                    break # Success, stop checking rows for this division
+
+    # Average the flows by Ideology
+    emp_rates = pd.DataFrame(learned_flows).groupby('ideo').mean().to_dict('index') if learned_flows else {}
+    if 'Left' not in emp_rates: emp_rates['Left'] = {'alpha': 0.20, 'beta': 0.82}
+    if 'Right' not in emp_rates: emp_rates['Right'] = {'alpha': 0.20, 'beta': 0.35}
+
+
+    # ---------------------------------------------------------
+    # PHASE 2: Build 1-row FP tables for the entirely missing seats (won on first preferences)
+    # ---------------------------------------------------------
+    all_divs = LA_results['div_nm'].unique()
+    for div in all_divs:
+        if div not in DOP_table_dict:
+            df_div = LA_results[(LA_results['div_nm'] == div) & (LA_results['PartyAb'] != 'INFORMAL')]
+            cand_votes = df_div.set_index('PartyAb')['votes'].to_dict()
+            
+            # Start with the left-most columns
+            row = {
+                'div_nm': div, 
+                'CandRemaining': len(cand_votes)
+            }
+            # Insert candidate columns in the middle
+            row.update(cand_votes)
+            # Cap it off with the right-most columns
+            row['TOTAL'] = sum(cand_votes.values())
+            row['CountType'] = 'Votes'
+            
+            DOP_table_dict[div] = pd.DataFrame([row])
+
+    # ---------------------------------------------------------
+    # PHASE 3: Impute Missing Rows (Targeted Topologies Only)
+    # ---------------------------------------------------------
+    for div, df in DOP_table_dict.items():
+        votes = df[df['CountType'] == 'Votes']
+        if div not in la_2cp_dict:
+            raise ValueError(f"Missing div {div}")
+            
+        r_last = votes.loc[votes['CandRemaining'].idxmin()].copy()
+        cands = [c for c in df.columns if c not in meta_cols and pd.notna(r_last[c]) and r_last[c] > 0]
+        
+        alp_col = next((c for c in cands if c == 'ALP'), None)
+        coal_cols = [c for c in cands if c in ['LNP', 'LP', 'NP']]
+        
+        # Determine target CP: 4 if double-COAL, 3 if standard
+        target_cp = 4 if len(coal_cols) > 1 else 3
+        
+        # Skip if the target CP (or lower) has already been reached by the VEC
+        if votes['CandRemaining'].min() <= target_cp:
+            continue
+            
+        if not alp_col or not coal_cols: continue
+            
+        # Identify minor from the last available round
+        minors = sorted([c for c in cands if c not in ['ALP', 'LNP', 'LP', 'NP']], key=lambda c: float(r_last[c]), reverse=True)
+        if not minors: 
+            continue
+        
+        minor_col = minors[0]
+        minor_ideo = Ideology_map.get(re.sub(r'\d+$', '', minor_col), 'Centre')
+        
+        # SKIP Independents/Centre topologies for IA (with 2018 GRN override)
+        if minor_ideo not in ['Left', 'Right']:
+            # Force GRN if we are in 2018 and an IND polled higher than GRN on FPs
+            if data_year == 2010 and div == 'Murray Valley':
+                minor_col = 'CYA'
+                minor_ideo = 'Right'
+                minors = ['CYA'] + [p for p in minors if p != 'CYA']
+
+            elif data_year <= 2018 and 'GRN' in minors:
+                minor_col = 'GRN'
+                minor_ideo = 'Left'
+                minors = ['GRN'] + [p for p in minors if p != 'GRN']
+            else:
+                 # CHECK - 2006
+                import pdb; pdb.set_trace()
+                minor_col = 'GRN'
+                minor_ideo = 'Left'
+                minors = ['GRN'] + [p for p in minors if p != 'GRN']
+                #continue
+                # SKIP Independents/Centre topologies for IA
+            
+
+        # -----------------------------------------------------------------
+        # Dynamic 2CP Router
+        # -----------------------------------------------------------------
+        coal_lead_col = sorted(coal_cols, key=lambda c: float(r_last[c]), reverse=True)[0]
+        
+        alp_in_2cp = alp_col in la_2cp_dict[div]
+        coal_in_2cp = coal_lead_col in la_2cp_dict[div]
+        minor_in_2cp = minor_col in la_2cp_dict[div]
+        
+        micro_votes = sum(float(r_last[c]) for c in minors[1:])
+        
+        # Scenario A: Standard (ALP vs COAL 2CP) -> Minor is eliminated
+        if alp_in_2cp and coal_in_2cp:
+            alpha = emp_rates[minor_ideo]['alpha']
+            beta = emp_rates[minor_ideo]['beta']
+            
+            elim_cp_est = float(r_last[minor_col]) + (micro_votes * alpha)
+            alp_cp_est = float(la_2cp_dict[div][alp_col]) - (elim_cp_est * beta)
+            coal_cp_total_est = float(la_2cp_dict[div][coal_lead_col]) - (elim_cp_est * (1.0 - beta))
+            minor_cp_est = elim_cp_est
+
+        # Scenario B: ALP vs Minor (e.g. Preston: ALP vs GRN) -> COAL is eliminated
+        elif alp_in_2cp and minor_in_2cp:
+            alpha_coal = 0.20
+            beta_coal_to_alp = 0.75 # Historical Lib HTV flow to Labor over Greens
+            
+            coal_fp_total = sum(float(r_last[c]) for c in coal_cols)
+            elim_cp_est = coal_fp_total + (micro_votes * alpha_coal)
+            
+            alp_cp_est = float(la_2cp_dict[div][alp_col]) - (elim_cp_est * beta_coal_to_alp)
+            minor_cp_est = float(la_2cp_dict[div][minor_col]) - (elim_cp_est * (1.0 - beta_coal_to_alp))
+            coal_cp_total_est = elim_cp_est
+
+        # Scenario C: COAL vs Minor (e.g. NP vs IND) -> ALP is eliminated
+        elif coal_in_2cp and minor_in_2cp:
+            alpha_alp = 0.20
+            beta_alp_to_coal = 0.15 # Historical Labor flow to COAL over IND/GRN
+            
+            elim_cp_est = float(r_last[alp_col]) + (micro_votes * alpha_alp)
+            
+            coal_cp_total_est = float(la_2cp_dict[div][coal_lead_col]) - (elim_cp_est * beta_alp_to_coal)
+            minor_cp_est = float(la_2cp_dict[div][minor_col]) - (elim_cp_est * (1.0 - beta_alp_to_coal))
+            alp_cp_est = elim_cp_est
+            
+        else:
+            continue # Unhandled 2CP pairing, skip safely
+
+        # -----------------------------------------------------------------
+        # Apply Floors and Construct Synthetic Row
+        # -----------------------------------------------------------------
+        alp_cp_est = max(float(r_last[alp_col]), alp_cp_est)
+        minor_cp_est = max(float(r_last[minor_col]), minor_cp_est)
+        coal_last_total = sum(float(r_last[c]) for c in coal_cols)
+        coal_cp_total_est = max(coal_last_total, coal_cp_total_est)
+        
+        synth_cp = r_last.copy()
+        for c in cands: synth_cp[c] = np.nan
+        
+        synth_cp['CandRemaining'] = target_cp
+        synth_cp[alp_col] = round(alp_cp_est)
+        
+        if coal_last_total > 0:
+            for c in coal_cols:
+                synth_cp[c] = round(coal_cp_total_est * (float(r_last[c]) / coal_last_total))
+        else:
+            synth_cp[coal_cols[0]] = round(coal_cp_total_est)
+            
+        synth_coal_sum = sum(synth_cp[c] for c in coal_cols)
+        synth_cp[minor_col] = round(float(r_last['TOTAL']) - synth_cp[alp_col] - synth_coal_sum)
+        
+        DOP_table_dict[div] = pd.concat([df, pd.DataFrame([synth_cp])], ignore_index=True)
+
+
+        
+
+        # FIX - COAL double divs end up adding nothing to either NP and LP; this approximately cancels out leakage effects, but requires a rigorous fix...
+        
+    return DOP_table_dict
 
 # obtain DOP tables
 
 div_list = LA_Candidates['div_nm'].unique().tolist()
-DOP_table_dict = extract_DOP_table(LA_Candidates, div_list) # div_list
-DOP_indicative_table_dict = download_indicative_preferences(data_year)
+DOP_table_dict = extract_DOP_table(data_year, LA_Candidates, div_list) # div_list
 
 
+if data_year == 2022: # indicative tables only exist for 2022 onwards
+    DOP_indicative_table_dict = download_indicative_preferences(data_year)
 
 
-# Generate full distirbution table of votes (Yan Yean specific data)
+    # compare the primary votes formally with the indicative DOP table - 100 threshold
 
-if 0:
-    DOP_table = DOP_table_dict['Yan Yean']
-    votes_df = DOP_table[DOP_table['CountType'] == 'Votes'].copy()
+    for div in DOP_indicative_table_dict.keys():
 
-    meta_cols = {'div_nm', 'CandRemaining', 'TOTAL', 'CountType'}
-    party_cols = [col for col in votes_df.columns if col not in meta_cols]
+        indic_FPs = DOP_indicative_table_dict[div].iloc[0,2:-1].T
+        indic_FPs = indic_FPs.rename({'LP': 'LNP', 'NP': 'LNP'})
 
-    # 3. Optional: Map coalition names if LH_UH_comp uses 'LNP' instead of 'LP/NP'
-    coalition_map = {'LP': 'LNP', 'NP': 'LNP'}
-    votes_df = votes_df.rename(columns=coalition_map)
-    party_cols = [coalition_map.get(col, col) for col in party_cols]
+        # get primary votes in this div
+        div_LA_results =  LA_results.loc[LA_results['div_nm'] == div,]
 
-    # 4. Scale candidate vote columns by TOTAL to get proportions (matching LA_votes format)
-    votes_df[party_cols] = votes_df[party_cols].div(votes_df['TOTAL'], axis=0)
+        div_LA_results['PartyAb'] = div_LA_results['PartyAb'].replace({'LP': 'LNP','NP':'LNP'})
+        LA_party_votes = div_LA_results[['PartyAb','votes']].set_index('PartyAb')
 
-    # 5. Reshape into (PartyAb x CandRemaining) structure
-    # Set CandRemaining as index, slice party columns, transpose
-    counts_by_cand = (votes_df.set_index('CandRemaining')[party_cols].T.rename_axis('PartyAb'))
-    # Rename columns to clearly describe the count stages (e.g., 'votes_9_cand', 'votes_8_cand', ...)
-    counts_by_cand.columns = [f"votes_{c}_cand" for c in counts_by_cand.columns]
-    LH_UH_comp = LH_UH_comp.join(counts_by_cand, how='left')
+        formal_FPs = LA_party_votes.loc[LA_party_votes.index != 'INFORMAL',]
+        formal_FPs.loc['TOTAL'] = formal_FPs['votes'].sum()
 
-    #print(LH_UH_comp)
+        max_deviation = int((formal_FPs['votes'] - indic_FPs).max())
 
+        if max_deviation > 10:
+            #print('nontrivial vote deviation:', div, max_deviation)
+            1
+        # assume indicative DOP as the true DOP
+        DOP_table_dict[div] = DOP_indicative_table_dict[div]
+
+else:
+    # impute 3CP for electorates who don't have them using estimates from full DOPs # ADD more rigorous logic when time allows
+
+    # eliminate empty DOP tables if not available
+    #### sum([DOP_table_dict[div]['CandRemaining'].min()==2 for div in DOP_table_dict.keys()])
+
+    DOP_table_dict = {div: DOP_table_dict[div] for div in DOP_table_dict.keys() if DOP_table_dict[div]['CandRemaining'].min()>=2}
+    DOP_table_dict = complete_and_impute_DOP_tables(DOP_table_dict, LA_results, LA_2CPs, Ideology_map)
 
 
 # save to file
@@ -356,32 +569,6 @@ if not file.exists():
 
 
 
-
-# compare the primary votes formally with the indicative DOP table - 100 threshold
-
-for div in DOP_indicative_table_dict.keys():
-
-    indic_FPs = DOP_indicative_table_dict[div].iloc[0,2:-1].T
-    indic_FPs = indic_FPs.rename({'LP': 'LNP', 'NP': 'LNP'})
-
-    # get primary votes in this div
-    div_LA_results =  LA_results.loc[LA_results['div_nm'] == div,]
-
-    div_LA_results['PartyAb'] = div_LA_results['PartyAb'].replace({'LP': 'LNP','NP':'LNP'})
-    LA_party_votes = div_LA_results[['PartyAb','votes']].set_index('PartyAb')
-
-    formal_FPs = LA_party_votes.loc[LA_party_votes.index != 'INFORMAL',]
-    formal_FPs.loc['TOTAL'] = formal_FPs['votes'].sum()
-
-    max_deviation = int((formal_FPs['votes'] - indic_FPs).max())
-
-    if max_deviation > 10:
-        #print('nontrivial vote deviation:', div, max_deviation)
-        1
-
-
-    # assume indicative DOP as the true DOP
-    DOP_table_dict[div] = DOP_indicative_table_dict[div]
 
 
 
@@ -401,7 +588,7 @@ if not file.exists():
 
 
 # top 4 in each electorate
-if data_year == '2022':
+if data_year == 2022:
     LA_Candidates.loc[LA_Candidates['candidate_name']=='TAYLOR, Nina','incumbent'] = 0 # remove Nina Taylor
 seats_with_inc = LA_Candidates.loc[LA_Candidates['incumbent']==1,'div_nm'].unique().tolist()
 incumbent_parties = LA_Candidates.loc[LA_Candidates['incumbent'] == 1].set_index('div_nm')['PartyAb']
@@ -412,7 +599,7 @@ top_x = 3
 COAL_double_divs = []
 
 for div in div_list: # open_seats div_list
-    if (data_year == '2022') and (div == 'Narracan'):
+    if (data_year == 2022) and (div == 'Narracan'):
         continue
     else:
         DOP_curr = DOP_table_dict[div]
@@ -420,9 +607,12 @@ for div in div_list: # open_seats div_list
         x = top_x
 
         top_x_parties =  DOP_curr[(DOP_curr['CandRemaining'] <= top_x)].iloc[:, 2:-2].dropna(axis=1, how='all').columns.tolist()
-        if 'LP' in top_x_parties and 'NP' in top_x_parties:
+
+        if (('LP' in top_x_parties) and ('NP' in top_x_parties)) or not top_x_parties: # last condition is only pre-2022 COAL double divs
             x = top_x + 1
             COAL_double_divs.append(div)
+
+            assert ('LP' in DOP_curr[(DOP_curr['CandRemaining'] <= 4)].iloc[:, 2:-2].dropna(axis=1, how='all').columns) and ('NP' in DOP_curr[(DOP_curr['CandRemaining'] <= 4)].iloc[:, 2:-2].dropna(axis=1, how='all').columns)
 
         topx_rows = DOP_curr[(DOP_curr['CandRemaining'] <= x) & (DOP_curr['CountType'] == 'Votes')]
         party_cols = topx_rows.iloc[:, 2:-2] # isolate party cols
@@ -441,6 +631,9 @@ for div in div_list: # open_seats div_list
         counts['div_nm'] = div  # Keep track of the electorate name
         electorate_tallies.append(counts)
 
+        if 'Unknown' in counts:
+            import pdb; pdb.set_trace()
+
         
         # get ideological combination
 
@@ -453,16 +646,6 @@ tally_df = tally_df[IDEO_CATEGORIES]
 combination_counts = tally_df.value_counts().reset_index(name='Electorate_Count')
 
 print(combination_counts)
-
-#import pdb; pdb.set_trace()
-
-
-
-
-
-# Right: ON, UAPP, SFF, LDP, FFP, SDA, FPV, CAP, AVP
-# Centre: IND, SPP, TMP, ND, HAP, DHJP, DLP       DLP, TMP, ND, HAP, DHJP
-# Left: LGC(HMP), VS, AJP, RP(REAS)
 
 
 
@@ -600,9 +783,22 @@ LH_DOP_dict = {}
 
 for div in DOP_table_dict.keys():
     df = DOP_table_dict[div]
-    df = df.loc[df['CountType']=='Votes',]
+    df = df.loc[df['CountType']=='Votes'].copy()
 
-    LH_DOP_dict[div] = merge_coalition_preferences_old(df)
+    if data_year == 2022:
+
+        LH_DOP_dict[div] = merge_coalition_preferences_old(df)
+    else:
+        # Simple, robust bypass for pre-2022
+        if 'LP' in df.columns and 'NP' in df.columns:
+            # Sum the Coalition vote
+            df['LNP'] = df[['LP', 'NP']].sum(axis=1, min_count=1)
+            # Drop the split parties to prevent double-counting in the IA model
+            df = df.drop(columns=['LP', 'NP'])
+            # Coerce the imputed 4CP row into a 3CP row so build_3CP_model_dataset finds it
+            df.loc[df['CandRemaining'] == 4, 'CandRemaining'] = 3
+            
+        LH_DOP_dict[div] = df
 
 
 
@@ -616,19 +812,19 @@ def get_LC_FPs(LC_results, div_list):
         if div_LC_results.empty:
             continue
         # Get total group votes using group to account for different COALition party names
-        div_LC_results['group_votes'] = div_LC_results['group_code'].map(div_LC_results.groupby('group_code')['votes'].sum())
-        assert div_LC_results['votes'].sum() == div_LC_results.loc[(div_LC_results['first_name'].isin(['Above-the-line', 'Informal'])) | (div_LC_results['group_code']=='UG'), 'group_votes'].sum() # ensure no vote totals are lost; either ATL or UG candidates
+        div_LC_results['group_votes'] = div_LC_results['group_code'].map(div_LC_results.groupby('group_code')['votes'].sum()) 
+        atl_informal = div_LC_results.loc[div_LC_results['first_name'].isin(['Above-the-line', 'Informal']), 'group_votes'].sum()
+        ug_total = div_LC_results.loc[div_LC_results['group_code'] == 'UG', 'votes'].sum()
+        assert div_LC_results['votes'].sum() == atl_informal + ug_total # ensure no vote totals are lost
         # Series of UH FP votes per party
-        LC_party_votes = div_LC_results.loc[div_LC_results['first_name'] == 'Above-the-line', ['PartyAb', 'group_votes']].sort_values(by='group_votes', ascending=False).set_index('PartyAb')
-
-        LC_party_votes = LC_party_votes.groupby(level=0).sum() # group IND/UG together
-
-        LC_FPs_dict[div] = (LC_party_votes/LC_party_votes.sum())['group_votes'] # .rename(columns = {'group_votes': div})
+        # Extract UH FP votes per party (ATL) and ungrouped candidates (UG)
+        atl_votes = div_LC_results.loc[div_LC_results['first_name'] == 'Above-the-line', ['PartyAb', 'group_votes']]
+        ug_votes = div_LC_results.loc[div_LC_results['group_code'] == 'UG', ['PartyAb', 'votes']].rename(columns={'votes': 'group_votes'})
         
+        # Combine, aggregate duplicate party codes (e.g. IND), and calculate shares
+        LC_party_votes = pd.concat([atl_votes, ug_votes]).set_index('PartyAb').groupby(level=0).sum() # group IND/UG together
+        LC_FPs_dict[div] = (LC_party_votes / LC_party_votes.sum())['group_votes'] # .rename(columns = {'group_votes': div})        
     
-
-    #import pdb; pdb.set_trace()
-
     return pd.concat(LC_FPs_dict, axis=1)
 
 
@@ -651,7 +847,7 @@ def build_3CP_model_dataset(data_year, LH_DOP_dict, LC_results, LA_candidates, I
     
     for div, df in LH_DOP_dict.items():
 
-        if div == 'Narracan' and data_year == '2022':
+        if div == 'Narracan' and data_year == 2022:
             continue
 
         # Filter this specific electorate's dataframe for the 3CP stage
@@ -686,13 +882,16 @@ def build_3CP_model_dataset(data_year, LH_DOP_dict, LC_results, LA_candidates, I
         div_LC_results = LC_results.loc[LC_results['div_nm'] == div].copy()
         if div_LC_results.empty:
             continue
-            
+
         # Get total group votes using group to account for different COALition party names
         div_LC_results['group_votes'] = div_LC_results['group_code'].map(div_LC_results.groupby('group_code')['votes'].sum())
-        assert div_LC_results['votes'].sum() == div_LC_results.loc[(div_LC_results['first_name'].isin(['Above-the-line', 'Informal'])) | (div_LC_results['group_code']=='UG'), 'group_votes'].sum() # ensure no vote totals are lost; either ATL or UG candidates
-        # Series of UH FP votes per party
-        LC_party_votes = div_LC_results.loc[div_LC_results['first_name'] == 'Above-the-line', ['PartyAb', 'group_votes']].sort_values(by='group_votes', ascending=False).set_index('PartyAb')
-        
+        atl_informal = div_LC_results.loc[div_LC_results['first_name'].isin(['Above-the-line', 'Informal']), 'group_votes'].sum()
+        ug_total = div_LC_results.loc[div_LC_results['group_code'] == 'UG', 'votes'].sum()
+        assert div_LC_results['votes'].sum() == atl_informal + ug_total# Series of UH FP votes per party
+        atl_votes = div_LC_results.loc[div_LC_results['first_name'] == 'Above-the-line', ['PartyAb', 'group_votes']]
+        ug_votes = div_LC_results.loc[div_LC_results['group_code'] == 'UG', ['PartyAb', 'votes']].rename(columns={'votes': 'group_votes'})
+        LC_party_votes = pd.concat([atl_votes, ug_votes]).set_index('PartyAb').groupby(level=0).sum()
+
         total_uh = LC_party_votes['group_votes'].sum()
         if total_uh == 0:
             continue
@@ -893,8 +1092,9 @@ def inspect_district_flows(df: pd.DataFrame, E_matrix: np.ndarray, div: str, W_l
     print(df_balance.round(4).to_string())
     print(f"{'='*70}\n")
 
-# run optimisation
 
+
+# run optimisation
 
 def fit_transition_matrix(df_subset, E_matrix, dirichlet_alpha=1.1, penalty_weight=0.003, popularity_attraction=0.2):
     """
@@ -1162,8 +1362,11 @@ def run_2stage_inference(df, max_iter=30, tol=1e-4, shrinkage_lambda=1.5, split_
     import pdb; pdb.set_trace()
     return df, W_left, W_right, ia_model
 
-# Run it:
-df_3cp_model = df_3cp_model.loc[df_3cp_model.index != 'Bass',] # Bass is double div!
+if data_year == 2022:
+    df_3cp_model = df_3cp_model.loc[df_3cp_model.index != 'Bass',] # Bass is double div!
+else:
+    df_3cp_model = df_3cp_model # add any other changes
+
 final_df, W_left, W_right, ia_model = run_2stage_inference(df_3cp_model, popularity_attraction=0.65)
 print(ia_model.summary())
 
