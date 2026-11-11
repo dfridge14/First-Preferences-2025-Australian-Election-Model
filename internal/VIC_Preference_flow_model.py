@@ -26,7 +26,7 @@ def exception_handler(type, value, tb):
 
 sys.excepthook = exception_handler
 
-data_year = 2010
+data_year = 2006
 
 base_dir = Path.home() / f"Australian Election/Victorian Election/VIC-{data_year}"
 os.chdir(base_dir)
@@ -45,6 +45,8 @@ LA_Candidates = pd.read_csv(f'VIC-{data_year}-LA-Candidates-Formatted.csv')
 party_df = pd.read_csv(f'VIC-{data_year}-Parties.csv')
 Ideology_map = party_df.set_index('PartyAb')['Ideo_category']
 IDEO_CATEGORIES = ['ALP','COAL','Left','Right','Centre']
+
+
 
 
 def extract_DOP_table(data_year, LA_Candidates, div_list):
@@ -70,8 +72,62 @@ def extract_DOP_table(data_year, LA_Candidates, div_list):
     else:
         url_overrides = {}
 
-    for div in div_list:
+    def clean_2006_dop(df):
+        """
+        Cleans the messy 2006 VEC DOP tables by extracting raw numbers and 
+        mapping them strictly to the surviving active candidates.
+        """
+        desc_col = df.columns[0]
+        
+        # 1. Identify Candidate Names from the valid column headers
+        candidate_cols = []
+        for col in df.columns[1:]:
+            if 'Unnamed' not in str(col) and 'TOTAL' not in str(col).upper():
+                candidate_cols.append(col)
+                
+        # 2. Initialize a clean DataFrame template
+        clean_df = pd.DataFrame()
+        clean_df[desc_col] = df[desc_col]
+        
+        for cand in candidate_cols:
+            clean_df[cand] = np.nan
+        clean_df['TOTAL'] = np.nan
+        
+        # Track who is still in the race. Everyone starts active.
+        active_candidates = candidate_cols.copy()
+        
+        for idx, row in df.iterrows():
+            desc = str(row[desc_col])
+            
+            # Extract strictly the valid numbers from the row
+            numbers = [val for val in row[1:] if pd.notna(val)]
+            if not numbers:
+                continue
+                
+            # 3. Handle eliminations (Transfer rows)
+            if 'Transfer' in desc:
+                # We must identify the excluded candidate and remove them BEFORE mapping,
+                # because the VEC does not print a number (not even 0) for the transferrer.
+                desc_clean = desc.upper().replace(' ', '').replace(',', '')
+                for cand in active_candidates:
+                    cand_clean = cand.upper().replace(' ', '').replace(',', '')
+                    # Find which active candidate's name is buried in the "Transfer of..." description
+                    if cand_clean in desc_clean:
+                        active_candidates.remove(cand)
+                        break
+                        
+            total_val = numbers[-1]
+            cand_vals = numbers[:-1]
+            
+            # 4. Map the extracted values sequentially to the surviving candidates
+            for i, cand in enumerate(active_candidates):
+                clean_df.at[idx, cand] = cand_vals[i]
+                
+            clean_df.at[idx, 'TOTAL'] = total_val
+            
+        return clean_df
 
+    for div in div_list:
         
         # read existing downloads if available
         if Path(f'/home/dania-freidgeim/Australian Election/Victorian Election/VIC-{data_year}/DOP', f'{data_year}_DOP_{div}.csv').exists():
@@ -110,8 +166,11 @@ def extract_DOP_table(data_year, LA_Candidates, div_list):
                 if data_year == 2022:
                     DOP_table = tables[0]   
                 elif data_year <= 2018:
-                    DOP_table = tables[3]            
-                
+                    DOP_table = tables[3]   
+
+                if data_year == 2006:
+                    DOP_table = clean_2006_dop(DOP_table)  # remove right-aligned error on VEC page
+                                
                 print(f"Successfully extracted: {url}")
                 
             except Exception as e:
@@ -570,7 +629,13 @@ if not file.exists():
 
 
 
-
+from collections import Counter
+XCP = 4
+Counter(tuple(x for x in lst if not x.startswith('IND')) for lst in [sorted(DOP_table_dict[div][(DOP_table_dict[div]['CandRemaining'] <= XCP)].iloc[:, 2:-2].dropna(axis=1, how='all').columns.tolist()) for div in DOP_table_dict.keys() if any(x.startswith('IND') for x in DOP_table_dict[div][(DOP_table_dict[div]['CandRemaining'] <= XCP)].iloc[:, 2:-2].dropna(axis=1, how='all').columns)])
+IND_4CP_dict = {div:sorted(DOP_table_dict[div][(DOP_table_dict[div]['CandRemaining'] <= XCP)].iloc[:, 2:-2].dropna(axis=1, how='all').columns.tolist()) for div in DOP_table_dict.keys() if any(x.startswith('IND') for x in DOP_table_dict[div][(DOP_table_dict[div]['CandRemaining'] <= XCP)].iloc[:, 2:-2].dropna(axis=1, how='all').columns)}
+IND_4CP_divs= IND_4CP_dict.keys()
+# build the next_contesting_parties Dictionary; rename independents from INDX to IND_First_Last for easier tracking 
+import pdb; pdb.set_trace()
 
 
 # check for missing divs

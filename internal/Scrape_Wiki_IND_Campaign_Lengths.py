@@ -365,6 +365,29 @@ elections = [
     {"year": 2014, "page": "Candidates_of_the_2014_Victorian_state_election", "date": "2014-11-29"}    
 ]
 
+
+SCRAPE_2026_ONLY = 1
+
+import pdb; pdb.set_trace()
+
+if SCRAPE_2026_ONLY:
+    ind_name_change_2026 = {'Hitendra K. Joshi': 'Hitendra Joshi', 'Heena Sinha Cheung':'Heena Cheung', 'Mel Yuan': 'Melissa Yuan', 'Amanda Palioura': 'Amanda Paliouras', 'Kovi Shroot':'Yaakov Ziv Shroot', 'Steven Vendetti-Taylor':'Steven Venditti-Taylor','M.D. Omar Faruq': 'M.D. Faruq', 'Aidan McLindon': 'Aidan Mclindon', 'Will Fowles': 'William Fowles', 'Ashley Vandenburg':'Ashleigh Vandenberg', 'S.M. Zaberul Islam': 'Sm Islam'}
+
+    # delete 
+
+    ind_df_2026 = [build_election_ind_df(e["year"], e["page"], e["date"]) for e in [elections[0]]][0]
+    ind_df_2026 = ind_df_2026[~ind_df_2026['Candidate'].isin(['Alison Waters', 'Krzysztof Wojtowski'])] # falsely INDs on wiki
+    new_row = pd.DataFrame([{'Year': 2026, 'Electorate': 'Prahran', 'Candidate': 'George Leeton Watts', 'First_Wiki_Date': '2026-11-10T08:34:42Z', 'Campaign_Length_Days': 17}])
+    ind_df_2026 = pd.concat([ind_df_2026, new_row], ignore_index=True)
+    ind_df_2026['Candidate'] = ind_df_2026['Candidate'].replace(ind_name_change_2026)
+
+    df = pd.read_csv('IND_campaign_lengths_VIC.csv')
+    df = df.loc[df['Year']<2026]
+
+    combined_df = pd.concat([df, ind_df_2026], axis = 0)
+
+import pdb; pdb.set_trace()
+
 all_ind_dfs = [build_election_ind_df(e["year"], e["page"], e["date"]) for e in elections]
 ind_wiki_df = pd.concat(all_ind_dfs, ignore_index=True)
 print(ind_wiki_df.head(20))

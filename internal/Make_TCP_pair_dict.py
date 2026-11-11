@@ -22,7 +22,7 @@ base_dir = Path.home() / "Australian Election"
 os.chdir(base_dir)
 
 
-data_year = '2022'
+data_year = '2016'
 START_OF_PREFS = 2 # Prefs begin on the 3th column (after div_nm,pp_nm) - deleted stateab to accomodate 2016 file
 
 NAME_CHANGES_YEAR_DICT = {'2025':{},'2022': {},'2019':{},'2016':{'Denison':'Clark','Batman':'Cooper','McMillan':'Monash','Melbourne Ports':'Macnamara','Murray':'Nicholls','Wakefield':'Spence'},'2013':{'Fraser':'Fenner','Throsby':'Whitlam'},'2010':{},'2007':{'Prospect':'McMahon','Kalgoorlie':'Durack'},'2004':{}}
@@ -1191,7 +1191,7 @@ def make_TCP_pair_category_dict(data_year, party_category_dict={}):
     return TCP_pair_category_dict
 
 
-data_year = '2022'
+#data_year = '2022'
 
 # import Formal_prefs_dict for senate calibration
 with open(f"Formal_prefs_dict_{data_year}.pkl", "rb") as f:
@@ -1203,7 +1203,7 @@ with open(f"Senate_party_abvs_dict_{data_year}.pkl", "rb") as f:
 
 def get_senate_allocation(Formal_prefs_dict, Senate_party_abvs_dict, div, tcp_pair_parties, party_block, HTV_parties):
 
-    import pdb; pdb.set_trace()
+    #import pdb; pdb.set_trace()
 
     allocation_abvs_list = [p for p in tcp_pair_parties]
 
@@ -1214,7 +1214,7 @@ def get_senate_allocation(Formal_prefs_dict, Senate_party_abvs_dict, div, tcp_pa
     #Party_allocation = allocate_formal_preferences_to_allocation_set(data_year, Formal_prefs_dict[div].loc[Formal_prefs_dict[div]['Vote'] == party_to_allocate[0],], allocation_set, by_pp_id = False, as_percent = True)
     Party_allocation = allocate_formal_preferences_to_allocation_set(data_year, block_voters_df, allocation_set, by_pp_id = False, as_percent = True)
 
-    import pdb; pdb.set_trace()
+    #import pdb; pdb.set_trace()
 
     if HTV_parties:
         HTV_party_list =  convert_partyab_to_senate_group_names(HTV_parties, Formal_prefs_dict, Senate_party_abvs_dict, div)
@@ -1245,11 +1245,11 @@ Centre22 = ['AUD','SPP','DHJP','']
 Left22 = ['REAS','HMP','AJP','AUP','SAL','SOPA','VNS']
 Right22 = ['AUVA','UAPP','CYA','ASP','ON','CEC','GAP','LDP','IMO']
 get_senate_allocation(Formal_prefs_dict, Senate_party_abvs_dict, 'Gippsland', ['COAL','ALP','GRN'], ['DHJP'], [])
-import pdb; pdb.set_trace()
+#import pdb; pdb.set_trace()
 
-Normal_allocation, wo_HTV_allocation = get_senate_allocation(Formal_prefs_dict, Senate_party_abvs_dict, div, tcp_pair_parties[div], [major_sitout_dict[div]], HTV_parties_dict.get(div,[]))
-print(Normal_allocation)
-print(wo_HTV_allocation)
+#Normal_allocation, wo_HTV_allocation = get_senate_allocation(Formal_prefs_dict, Senate_party_abvs_dict, div, tcp_pair_parties[div], [major_sitout_dict[div]], HTV_parties_dict.get(div,[]))
+#print(Normal_allocation)
+#print(wo_HTV_allocation)
 
 
 
