@@ -810,3 +810,96 @@ class DOPTable:
 
         return DOPTable._from_raw(self.candidates.copy(), cf_count_0, cf_rounds, self.div_nm)
 
+    def strip_incumbency_forward(self, target_ia: float, incumbent_party: str):
+        """
+        1. Strips IA at Count 0 via sqrt(gravity) among active challengers.
+        2. Propagates the deltas FORWARD through the DOP rounds.
+        3. Quarantines the incumbent from receiving any positive delta transfers.
+        4. Caps at the 3CP stage (ignores the 2CP elimination round).
+        """
+        # =========================================================
+        # 1. COUNT 0: SQUARE-ROOT GRAVITY STRIP
+        # =========================================================
+        cf_count_0 = self.count_0.copy()
+        deltas = {c: 0.0 for c in self.candidates}
+        
+        actual_strip = min(float(target_ia), cf_count_0.get(incumbent_party, 0.0))
+        
+        if actual_strip > 1e-9:
+            active_challengers = [c for c, v in cf_count_0.items() if c != incumbent_party and v > 1e-9]
+            if active_challengers:
+                deltas[incumbent_party] = -actual_strip
+                sum_sqrt = sum(np.sqrt(cf_count_0[c]) for c in active_challengers)
+                for c in active_challengers:
+                    weight = np.sqrt(cf_count_0[c]) / sum_sqrt if sum_sqrt > 1e-9 else (1.0 / len(active_challengers))
+                    deltas[c] = actual_strip * weight
+
+        # Apply deltas and strictly normalize Count 0
+        for c in self.candidates:
+            cf_count_0[c] = max(0.0, cf_count_0[c] + deltas[c])
+            
+        tot_orig, tot_cf = sum(self.count_0.values()), sum(cf_count_0.values())
+        if tot_cf > 1e-9:
+            cf_count_0 = {k: v * (tot_orig / tot_cf) for k, v in cf_count_0.items()}
+
+        # =========================================================
+        # 2. FORWARD PROPAGATION THROUGH ROUNDS
+        # =========================================================
+        cf_rounds = []
+        running_deltas = deltas.copy()
+        cf_state = cf_count_0.copy()
+        
+        for rnd in self.rounds:
+            k = rnd['eliminated']
+            orig_transfers = rnd['transfers']
+            delta_k = running_deltas.get(k, 0.0)
+            
+            cf_V_elim = cf_state.get(k, 0.0)
+            cf_transfers = {}
+            sum_orig_t = sum(orig_transfers.values())
+
+            if sum_orig_t > 1e-9:
+                delta_transfers = {j: 0.0 for j in orig_transfers}
+                
+                # =========================================================
+                # 3. QUARANTINED DELTA ROUTING
+                # =========================================================
+                if abs(delta_k) > 1e-12:
+                    if k != incumbent_party:
+                        # QUARANTINE: Only non-incumbents receive the stripped mass
+                        non_inc_receivers = [j for j in orig_transfers if j != incumbent_party]
+                        sum_non_inc_t = sum(max(0.0, orig_transfers[j]) for j in non_inc_receivers)
+                        
+                        if sum_non_inc_t > 1e-9:
+                            for j in non_inc_receivers:
+                                delta_transfers[j] = delta_k * (orig_transfers[j] / sum_non_inc_t)
+                        elif non_inc_receivers:
+                            # Fallback: sqrt gravity if 100% of empirical transfers went to the incumbent
+                            sum_sq = sum(np.sqrt(max(0.0, cf_state.get(j, 0.0))) for j in non_inc_receivers)
+                            for j in non_inc_receivers:
+                                w_j = np.sqrt(max(0.0, cf_state.get(j, 0.0))) / sum_sq if sum_sq > 1e-9 else (1.0 / len(non_inc_receivers))
+                                delta_transfers[j] = delta_k * w_j
+                    else:
+                        # Edge Case: Incumbent eliminated -> their negative delta spreads proportionally
+                        for j in orig_transfers:
+                            delta_transfers[j] = delta_k * (orig_transfers[j] / sum_orig_t)
+
+                # Reconstruct transfer volume: Original empirical transfer + Routed Delta
+                for j in orig_transfers:
+                    cf_transfers[j] = max(0.0, orig_transfers[j] + delta_transfers.get(j, 0.0))
+            
+            # Prevent float drift: ensure transfers sum exactly to the eliminated candidate's new total
+            sum_cf_t = sum(cf_transfers.values())
+            if sum_cf_t > 1e-9 and cf_V_elim > 1e-9:
+                cf_transfers = {j: v * (cf_V_elim / sum_cf_t) for j, v in cf_transfers.items()}
+
+            cf_rounds.append({'eliminated': k, 'V_elim': cf_V_elim, 'transfers': cf_transfers})
+            
+            # Update States and Running Deltas for the next round
+            cf_state[k] = 0.0
+            running_deltas[k] = 0.0
+            for j, v in cf_transfers.items():
+                cf_state[j] = cf_state.get(j, 0.0) + v
+                running_deltas[j] = running_deltas.get(j, 0.0) + (cf_transfers[j] - orig_transfers[j])
+
+        return DOPTable._from_raw(self.candidates.copy(), cf_count_0, cf_rounds, self.div_nm)

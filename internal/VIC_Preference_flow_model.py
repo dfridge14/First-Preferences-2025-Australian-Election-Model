@@ -26,7 +26,7 @@ def exception_handler(type, value, tb):
 
 sys.excepthook = exception_handler
 
-data_year = 2006
+data_year = 2018
 
 base_dir = Path.home() / f"Australian Election/Victorian Election/VIC-{data_year}"
 os.chdir(base_dir)
@@ -442,6 +442,9 @@ def complete_and_impute_DOP_tables(DOP_table_dict, LA_results, LA_2CPs, Ideology
             
             DOP_table_dict[div] = pd.DataFrame([row])
 
+    DOP_table_dict_clean = {div: df.copy() for div, df in DOP_table_dict.items()} # without 3CP estimation
+    
+
     # ---------------------------------------------------------
     # PHASE 3: Impute Missing Rows (Targeted Topologies Only)
     # ---------------------------------------------------------
@@ -572,7 +575,7 @@ def complete_and_impute_DOP_tables(DOP_table_dict, LA_results, LA_2CPs, Ideology
 
         # FIX - COAL double divs end up adding nothing to either NP and LP; this approximately cancels out leakage effects, but requires a rigorous fix...
         
-    return DOP_table_dict
+    return DOP_table_dict, DOP_table_dict_clean
 
 # obtain DOP tables
 
@@ -613,9 +616,8 @@ else:
 
     # eliminate empty DOP tables if not available
     #### sum([DOP_table_dict[div]['CandRemaining'].min()==2 for div in DOP_table_dict.keys()])
-
     DOP_table_dict = {div: DOP_table_dict[div] for div in DOP_table_dict.keys() if DOP_table_dict[div]['CandRemaining'].min()>=2}
-    DOP_table_dict = complete_and_impute_DOP_tables(DOP_table_dict, LA_results, LA_2CPs, Ideology_map)
+    DOP_table_dict, DOP_table_dict_clean = complete_and_impute_DOP_tables(DOP_table_dict, LA_results, LA_2CPs, Ideology_map)
 
 
 # save to file
@@ -635,7 +637,7 @@ Counter(tuple(x for x in lst if not x.startswith('IND')) for lst in [sorted(DOP_
 IND_4CP_dict = {div:sorted(DOP_table_dict[div][(DOP_table_dict[div]['CandRemaining'] <= XCP)].iloc[:, 2:-2].dropna(axis=1, how='all').columns.tolist()) for div in DOP_table_dict.keys() if any(x.startswith('IND') for x in DOP_table_dict[div][(DOP_table_dict[div]['CandRemaining'] <= XCP)].iloc[:, 2:-2].dropna(axis=1, how='all').columns)}
 IND_4CP_divs= IND_4CP_dict.keys()
 # build the next_contesting_parties Dictionary; rename independents from INDX to IND_First_Last for easier tracking 
-import pdb; pdb.set_trace()
+#import pdb; pdb.set_trace()
 
 
 # check for missing divs
@@ -646,11 +648,14 @@ if len([div for div in div_list if div not in DOP_table_dict.keys()]) != 0:
 # save complete indicative DOP table dict
 file = Path(f'{data_year}_complete_DOP_table_dict.pkl')
 
+if data_year >= 2022:
+    DOP_table_dict_clean = DOP_table_dict.copy()
+
 if not file.exists():
     with open(file, 'wb') as f:
-        pickle.dump(DOP_table_dict, f)
+        pickle.dump(DOP_table_dict_clean, f)
 
-
+import pdb; pdb.set_trace()
 
 # top 4 in each electorate
 if data_year == 2022:
@@ -713,7 +718,7 @@ combination_counts = tally_df.value_counts().reset_index(name='Electorate_Count'
 print(combination_counts)
 
 
-
+#import pdb; pdb.set_trace()
 
 # create lh and uh dfs for estimating UH to 3CP flows and IA
 
@@ -856,12 +861,14 @@ for div in DOP_table_dict.keys():
     else:
         # Simple, robust bypass for pre-2022
         if 'LP' in df.columns and 'NP' in df.columns:
-            # Sum the Coalition vote
             df['LNP'] = df[['LP', 'NP']].sum(axis=1, min_count=1)
+            
+            # Recalculate CandRemaining WITHOUT LP and NP
+            party_cols = [c for c in df.columns if c not in ['div_nm', 'CandRemaining', 'CountType', 'TOTAL', 'LP', 'NP']]
+            df['CandRemaining'] = df[party_cols].notna().sum(axis=1)
             # Drop the split parties to prevent double-counting in the IA model
             df = df.drop(columns=['LP', 'NP'])
-            # Coerce the imputed 4CP row into a 3CP row so build_3CP_model_dataset finds it
-            df.loc[df['CandRemaining'] == 4, 'CandRemaining'] = 3
+            df = df.drop_duplicates(subset=['CandRemaining'], keep='last')
             
         LH_DOP_dict[div] = df
 
@@ -894,9 +901,9 @@ def get_LC_FPs(LC_results, div_list):
 
 
 LC_FPs_df =  get_LC_FPs(LC_results, div_list)
+LC_FPs_df.to_csv(f'{data_year}-LC-First-Prefs-df.csv')
 
-
-#import pdb; pdb.set_trace()
+import pdb; pdb.set_trace()
 
 def build_3CP_model_dataset(data_year, LH_DOP_dict, LC_results, LA_candidates, Ideology_map, open_seats, incumbent_parties, incumbency_df, demographic_df, target_cp=3):
     """
@@ -1060,11 +1067,18 @@ def append_geometric_mean_quotients(df: pd.DataFrame) -> pd.DataFrame:
             
     return df
 
+# create incumbents df
+inc_filename = f'VIC-{data_year}-Incumbents.csv'
+if not os.path.exists(inc_filename):
+    LA_Candidates.loc[LA_Candidates['incumbent']==1,['div_nm','candidate_name','PartyAb','incumbent']].to_csv(inc_filename, index=False)
+
 incumbency_df = pd.read_csv(Path.home() / 'Australian Election/Victorian Election/VIC-Incumbents-df-2006-2026.csv')
 demographic_df = pd.read_csv(f'Demographic-classification-{data_year}.csv')
 df_3cp_model = build_3CP_model_dataset(data_year, LH_DOP_dict, LC_results, LA_Candidates, Ideology_map, open_seats, incumbent_parties, incumbency_df, demographic_df,target_cp=3)
 
 df_3cp_model = append_geometric_mean_quotients(df_3cp_model) # adds quotients relative to party's geometric mean LC vote share
+
+
 
 #import pdb; pdb.set_trace()
 

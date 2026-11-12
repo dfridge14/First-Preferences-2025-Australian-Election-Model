@@ -31,7 +31,7 @@ def exception_handler(type, value, tb):
 
 sys.excepthook = exception_handler
 
-data_year = 2022
+data_year = 2018
 election_year = data_year + 4
 
 
@@ -44,6 +44,9 @@ LC_results = pd.read_csv(f'VIC-{data_year}/VIC-{data_year}-LC-Votes-Electorate-F
 LA_results = pd.read_csv(f'VIC-{data_year}/VIC-{data_year}-LA-Primary-Electorate-Formatted.csv')
 
 LA_Candidates = pd.read_csv(f'VIC-{data_year}/VIC-{data_year}-LA-Candidates-Formatted.csv')
+
+# electorate to region mapping
+electorate_to_region = LA_Candidates[['div_nm','region_name']].drop_duplicates().set_index('div_nm')['region_name'].to_dict() if data_year != 2006 else LC_results[['div_nm','region_name']].drop_duplicates().set_index('div_nm')['region_name'].to_dict()
 
 # create df matching party code to party name
 party_df = pd.read_csv(f'VIC-{data_year}/VIC-{data_year}-Parties.csv')
@@ -58,8 +61,8 @@ with open(f'VIC-{data_year}/{data_year}_complete_DOP_table_dict.pkl', 'rb') as f
     if data_year == 2022:
         del DOP_table_dict['Narracan'] # FIX: Narracan dealt with separately!
 
-with open(f'VIC-{data_year}/ia_adjustments_dict.pkl', 'rb') as f:
-    ia_adjustments_dict = pickle.load(f)
+#with open(f'VIC-{data_year}/ia_adjustments_dict.pkl', 'rb') as f:
+#    ia_adjustments_dict = pickle.load(f)
 
 LC_FPs_df = pd.read_csv(f'VIC-{data_year}/{data_year}-LC-First-Prefs-df.csv', index_col = 'PartyAb')
 
@@ -84,9 +87,156 @@ with open("add_new_IND_models_and_priors.pkl", "rb") as f:
 
 pool_model = add_new_IND_data['pool_model']
 split_model = add_new_IND_data['split_model']
-dop_lookup = add_new_IND_data['dop_lookup']
-mu_ind_to_ind_array = add_new_IND_data['mu_ind_to_ind']
+dop_lookups_by_year = add_new_IND_data['dop_lookups_by_year']
+mu_ind_to_ind_dict = add_new_IND_data['mu_ind_to_ind_dict']
 global_party_dict = add_new_IND_data['global_party_dict']
+
+mu_ind_to_ind_array = mu_ind_to_ind_dict[data_year]
+dop_lookup = dop_lookups_by_year[data_year]
+
+class AggregateLatentLogit:
+    """Aggregate Latent Class Logit Model with Cumulative State Evaluation.
+    Parameter vector theta has length 16.
+    """
+    def __init__(self, theta: np.ndarray = None):
+        self.n_pools = len(ORPHAN_POOLS)  # 3
+        self.n_blocs = len(BLOCS)  # 5
+        self.n_params = 16
+
+        if theta is not None:
+            self.set_params(theta)
+        else:
+            self.theta = self.get_default_priors()
+
+    def get_default_priors(self) -> np.ndarray:
+        # [alpha_COAL, alpha_Left, alpha_Right, alpha_Centre]
+        prior_left = np.array([-1.5, 2.0, -2.0, -0.5])
+        prior_right = np.array([1.5, -1.5, 2.0, 1.0])
+        prior_centre = np.array([0.0, 0.5, 0.5, 1.5])
+        # betas: [beta_mass, beta_cap, beta_menu]
+        prior_betas = np.array([1.0, 0.5, 0.1]) 
+        # gamma
+        prior_gamma = np.array([0.8])
+
+        return np.concatenate([prior_left, prior_right, prior_centre, prior_betas, prior_gamma])
+
+    def unpack_params(self, theta: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
+        alpha = np.zeros((self.n_pools, self.n_blocs), dtype=np.float64)
+        alpha[0, 1:] = theta[0:4]   # Left pool
+        alpha[1, 1:] = theta[4:8]   # Right pool
+        alpha[2, 1:] = theta[8:12]  # Centre pool
+        
+        beta = theta[12:15]  
+        gamma = float(theta[15])
+        
+        return alpha, beta, gamma
+
+    def set_params(self, theta: np.ndarray):
+        if len(theta) != self.n_params:
+            raise ValueError(f"Expected theta of length {self.n_params}, got {len(theta)}")
+        self.theta = np.asarray(theta, dtype=np.float64)
+
+    def compute_choice_probabilities(
+        self, lc_mass: np.ndarray, c_cap: np.ndarray, menu_size: np.ndarray, 
+        alpha: np.ndarray, beta_shared: np.ndarray
+    ) -> np.ndarray:
+        b_mass, b_cap, b_menu = beta_shared
+        
+        log_mass = np.log(np.maximum(lc_mass, 1e-6))
+        log_cap  = np.log(np.maximum(c_cap, 1e-6))
+        log_menu = np.log(np.maximum(menu_size, 1e-6))
+        
+        u_structural = (b_mass * log_mass) + (b_cap * log_cap) + (b_menu * log_menu)
+        v_matrix = alpha + u_structural[np.newaxis, :]
+
+        unavailable_mask = menu_size <= 0
+        v_matrix[:, unavailable_mask] = -1e9
+
+        v_max = np.max(v_matrix, axis=1, keepdims=True)
+        exp_v = np.exp(v_matrix - v_max) * (~unavailable_mask)[np.newaxis, :]
+        sum_exp_v = np.sum(exp_v, axis=1, keepdims=True)
+        sum_exp_v = np.where(sum_exp_v <= 1e-12, 1.0, sum_exp_v)
+
+        return exp_v / sum_exp_v
+
+    def evaluate_state_allocation(
+        self, lc_mass: np.ndarray, active_cands: List[str], c_cap: np.ndarray, 
+        menu_size: np.ndarray, cand_to_bloc: Dict[str, int], cand_demand: Dict[str, float], 
+        alpha: np.ndarray, beta: np.ndarray, gamma: float
+    ) -> Dict[str, float]:
+        
+        p_bloc_given_pool = self.compute_choice_probabilities(lc_mass, c_cap, menu_size, alpha, beta)
+
+        cand_intra_share = {}
+        for b_idx in range(self.n_blocs):
+            bloc_cands = [c for c in active_cands if cand_to_bloc[c] == b_idx]
+            if not bloc_cands: continue
+
+            eff_gamma = 1.0 if b_idx in [0, 1] else gamma 
+            sum_demand = sum((cand_demand[c] ** eff_gamma) for c in bloc_cands)
+            
+            if sum_demand > 1e-9:
+                for c in bloc_cands:
+                    cand_intra_share[c] = (cand_demand[c] ** eff_gamma) / sum_demand
+            else:
+                for c in bloc_cands:
+                    cand_intra_share[c] = 1.0 / len(bloc_cands)
+
+        s_hat = {c: 0.0 for c in active_cands}
+
+        # Base Demand Allocation
+        for b_idx in [0, 1]:  
+            for c in [c for c in active_cands if cand_to_bloc[c] == b_idx]:
+                s_hat[c] += lc_mass[b_idx] * cand_intra_share[c]
+
+        for b_idx in [2, 3, 4]:  
+            for c in [c for c in active_cands if cand_to_bloc[c] == b_idx]:
+                s_hat[c] += cand_demand[c]
+
+        # Orphan Routing
+        orphan_mass = np.zeros(self.n_pools, dtype=np.float64)
+        for p_idx, b_idx in enumerate([2, 3, 4]):
+            orphan_mass[p_idx] = lc_mass[b_idx] * max(0.0, 1.0 - c_cap[b_idx])
+
+        for p_idx in range(self.n_pools):
+            o_m = orphan_mass[p_idx]
+            if o_m <= 1e-12: continue
+            for b_idx in range(self.n_blocs):
+                prob_bloc = p_bloc_given_pool[p_idx, b_idx]
+                if prob_bloc <= 1e-12: continue
+                for c in [c for c in active_cands if cand_to_bloc[c] == b_idx]:
+                    s_hat[c] += o_m * prob_bloc * cand_intra_share[c]
+
+        return s_hat
+
+# Load minor flow model and bootstrapped realisations
+final_model = AggregateLatentLogit()
+
+MINOR_MODEL_FILE = f'VIC-{data_year}/2018_LC_flow_model_theta.npy'
+
+if os.path.exists(MINOR_MODEL_FILE):
+    print(f"Loading exact fully-estimated baseline parameters from {MINOR_MODEL_FILE}...")
+    baseline_theta = np.load(MINOR_MODEL_FILE)
+    final_model.set_params(baseline_theta)
+else:
+    raise FileNotFoundError(f"Missing {MINOR_MODEL_FILE}! Run training script to generate the definitive point estimate.")
+
+
+
+import pdb; pdb.set_trace()
+file_path = Path.home() / f"Australian Election/Victorian Election/VIC-{election_year}/TCP_state_dict_for_{election_year}.pkl"
+with open(file_path, "rb") as f:
+    TCP_state_dict = pickle.load(f)
+
+
+def get_party_bloc(party: str, party_df: pd.DataFrame) -> str:
+    """Helper to extract ideological bloc for any party in party_df."""
+    if str(party).startswith('IND'):
+        return 'Centre'
+    ideo_map = dict(zip(party_df['PartyAb'], party_df['Ideo_category']))
+    ideo_map.update({'LNP': 'COAL', 'LP': 'COAL', 'NP': 'COAL', 'ALP': 'ALP'})
+    return ideo_map.get(party, 'Centre')
+
 
 ALR_COLS = ['ALP', 'GRN', 'ON', 'OTH'] # for errors
 
@@ -396,17 +546,15 @@ def execute_strip_incumbency(dop_table_dict: dict, csv_path: str = f"VIC-{data_y
         if sum(table.count_0.get(c, 0.0) for c in ind_cands) > 0.15:
             static_high_ind_districts.add(div)
 
-        # Apply the exact historical strip
+        # Apply the strip with sqrt proportionality
         if div in ia_df.index:
             row = ia_df.loc[div]
             inc_cand = row['inc_cand']
-            adj = {
-                inc_cand: -row['ia_alpha'],
-                row['chal_1']: row['chal_1_adj'],
-                row['chal_2']: row['chal_2_adj']
-            }
-            
-            table = table.adjust_3cp_incumbency(adj, incumbent_party=inc_cand)
+            target_ia = float(row['ia_alpha'])
+            assert target_ia > 0
+
+            # The DOPTable method does the sqrt math AND the round propagation
+            table = table.strip_incumbency_forward(target_ia=target_ia, incumbent_party=inc_cand)
             
             # Save for Step 6 tracking
             ia_tracker_dict[div] = {
@@ -438,11 +586,169 @@ stripped_tables, static_high_ind_districts, ia_tracker_dict = execute_strip_incu
 
 #################################################### Step 2: Remove non-contesting parties and INDs (Simulated) #########################################################################################
 
+def remove_uneliminated_minors_via_model(
+    table: Any,
+    unelim_minors: List[str],
+    div: str,
+    lc_df: pd.DataFrame,
+    party_df: pd.DataFrame,
+    model: Any,
+    simulate: bool = False,
+    rng: Optional[np.random.Generator] = None
+) -> Any:
+    """
+    Model-driven minor party removal for when DOP table is not available. Uses State A vs State B Logit delta to extract weights, directly updating Count 0.
+    """
+    if not unelim_minors: return table
+    if rng is None: rng = np.random.default_rng()
+
+    menu_A = [c for c, v in table.count_0.items() if v > 1e-9 and not str(c).startswith('IND')]
+    menu_B = [c for c in menu_A if c not in unelim_minors]
+    if not menu_B: return table
+
+    lc_series = lc_df[div].dropna().copy() if div in lc_df.columns else pd.Series(dtype=float)
+    if lc_series.sum() > 1.5: lc_series = lc_series / 100.0
+
+    zero_lc_minors = [m for m in menu_A if lc_series.get(m, 0.0) <= 1e-9]
+    if zero_lc_minors and not lc_series.empty:
+        mod_lc = apply_LC_orphan_capture(zero_lc_minors, table.count_0, lc_series, party_df)
+    else:
+        mod_lc = lc_series.copy()
+
+    alpha, beta, gamma = model.unpack_params(model.theta)
+
+    # State A vs B Delta Calculation
+    ms_A, cap_A, ctb_A, cd_A, lc_mass_A = _build_state_vars(menu_A, mod_lc, table.count_0, party_df)
+    s_hat_A = model.evaluate_state_allocation(lc_mass_A, menu_A, cap_A, ms_A, ctb_A, cd_A, alpha, beta, gamma)
+
+    ms_B, cap_B, ctb_B, cd_B, lc_mass_B = _build_state_vars(menu_B, mod_lc, table.count_0, party_df)
+    s_hat_B = model.evaluate_state_allocation(lc_mass_B, menu_B, cap_B, ms_B, ctb_B, cd_B, alpha, beta, gamma)
+
+    pos_deltas = {c: max(0.0, s_hat_B.get(c, 0.0) - s_hat_A.get(c, 0.0)) for c in menu_B}
+    sum_deltas = sum(pos_deltas.values())
+
+    if sum_deltas > 1e-9:
+        cand_weights = {c: pos_deltas[c] / sum_deltas for c in menu_B}
+    else:
+        tot_b = sum(table.count_0.get(c, 0.0) for c in menu_B)
+        cand_weights = {c: (table.count_0[c] / tot_b if tot_b > 1e-9 else 1.0 / len(menu_B)) for c in menu_B}
+
+    if simulate and len(menu_B) > 1:
+        alpha_dir = np.array([max(1e-3, cand_weights[c] * 50.0) for c in menu_B])
+        draw = rng.dirichlet(alpha_dir)
+        cand_weights = {c: float(draw[i]) for i, c in enumerate(menu_B)}
+
+    # SIMPLIFIED: Directly shift Count 0 mass to Menu B survivors
+    for u_min in unelim_minors:
+        u_min_vol = table.count_0.pop(u_min, 0.0)
+        for c in menu_B:
+            table.count_0[c] = table.count_0.get(c, 0.0) + (u_min_vol * cand_weights[c])
+
+    table.candidates = [c for c in table.candidates if c not in unelim_minors]
+    return table
+
+def synthesize_dop_composition(div: str, region: str, dop_lookup: dict) -> dict:
+    """
+    Synthesizes the geographic hierarchy to return a normalized 5-bloc composition array
+    for un-defecting minor Independents.
+    """
+    BLOCS = ['ALP', 'COAL', 'Left', 'Right', 'Centre']
+    
+    # 1. Geographic Hierarchy Lookup
+    if div in dop_lookup.get('electorates', {}):
+        mu_raw = dop_lookup['electorates'][div].copy()
+    elif region in dop_lookup.get('regions', {}):
+        mu_raw = dop_lookup['regions'][region].copy()
+    else:
+        mu_raw = dop_lookup['state'].copy()
+        
+    # mu_raw might contain 5 items (Standard Blocs) or 6 items (including Repeat_IND).
+    # We only want the first 5 standard blocs for the pure anchor.
+    mu_standard = np.array(mu_raw[:5], dtype=np.float64)
+    
+    # 2. Strict Normalization
+    # We strip out any Repeat_IND probability and ensure 100% flows to the 5 standard blocs
+    mu_sum = np.sum(mu_standard)
+    if mu_sum > 1e-9:
+        mu_normalized = mu_standard / mu_sum
+    else:
+        # Absolute fallback if data is totally corrupted: dump to Centre
+        mu_normalized = np.array([0.0, 0.0, 0.0, 0.0, 1.0])
+        
+    # 3. Map to Dictionary Format for safe JSON-like storage
+    comp_dict = {b: float(mu_normalized[i]) for i, b in enumerate(BLOCS)}
+    
+    return comp_dict
+
+
+
+def remove_uneliminated_inds(table, unelim_inds, div, region, dop_lookup, party_df):
+    """
+    Synthetic IND Liquidation for candidates that survived DOP truncation.
+    Distributes primary vote (and any accumulated transfers) using the bloc priors.
+    """
+    BLOCS = ['ALP', 'COAL', 'Left', 'Right', 'Centre']
+
+    mu_dict = synthesize_dop_composition(div, region, dop_lookup)
+    
+    for u_ind in unelim_inds:
+        # Get active non-IND survivors
+        survivors = [c for c, v in table.count_0.items() if c != u_ind and v > 1e-9]
+        if not survivors:
+            continue 
+            
+        survivor_blocs = {b: [] for b in BLOCS}
+        bloc_totals = {b: 0.0 for b in BLOCS}
+        
+        for c in survivors:
+            b = get_party_bloc(c, party_df)
+            survivor_blocs[b].append(c)
+            bloc_totals[b] += table.count_0[c]
+            
+        populated_mu_sum = sum(mu_dict[b] for b in BLOCS if survivor_blocs[b])
+        
+        # Calculate reallocation weights
+        cand_weights = {}
+        if populated_mu_sum < 1e-9:
+            cand_weights = {c: 1.0 / len(survivors) for c in survivors}
+        else:
+            for b in BLOCS:
+                if not survivor_blocs[b]:
+                    continue
+                adjusted_mu_b = mu_dict[b] / populated_mu_sum
+                for c in survivor_blocs[b]:
+                    cand_share_in_bloc = table.count_0[c] / bloc_totals[b] if bloc_totals[b] > 1e-9 else (1.0 / len(survivor_blocs[b]))
+                    cand_weights[c] = adjusted_mu_b * cand_share_in_bloc
+
+        # Update Count 0
+        u_ind_vol = table.count_0.pop(u_ind, 0.0)
+        for c in survivors:
+            table.count_0[c] += (u_ind_vol * cand_weights[c])
+            
+        # Update any surviving intermediate rounds
+        if hasattr(table, 'rounds') and isinstance(table.rounds, list):
+            for rnd in table.rounds:
+                if 'transfers' in rnd and u_ind in rnd['transfers']:
+                    trans_vol = rnd['transfers'].pop(u_ind)
+                    for c in survivors:
+                        rnd['transfers'][c] = rnd['transfers'].get(c, 0.0) + (trans_vol * cand_weights[c])
+                        
+    table.candidates = [c for c in table.candidates if c not in unelim_inds]
+
+    #import pdb; pdb.set_trace()
+    return table
+
+
 
 def execute_party_removal(
     stripped_tables: Dict[str, Any],
     static_high_ind_districts: Set[str],
     next_contesting_parties: Dict[str, List[str]],
+    LC_FPs_df: pd.DataFrame,
+    party_df: pd.DataFrame,             
+    dop_lookup: dict,                   
+    electorate_to_region: Dict[str, str], 
+    model: Any,
     simulate: bool = True,
     rng: Optional[np.random.Generator] = None
 ) -> Dict[str, Any]:
@@ -456,39 +762,59 @@ def execute_party_removal(
 
     latent_tables = {}
     
-    for div, table in stripped_tables.items():
+    for div, orig_table in stripped_tables.items():
+        table = copy.deepcopy(orig_table)
         contesting_next = next_contesting_parties.get(div, [])
-        cands_to_remove = []
         is_high_ind = div in static_high_ind_districts
+
+        cands_to_remove = []
+        inds_to_remove = []
+        minors_to_remove = []
         
+        # Identify candidates to remove
         for c in table.candidates:
             if str(c).startswith('IND'):
-                if is_high_ind:
-                    continue  # Protect ALL INDs in high-IND seats
-                else:
-                    cands_to_remove.append(c)  # Liquidate ALL INDs in <=15% seats
-                continue
-                
-            # Party Handling: Remove obsolete minors
-            if c not in contesting_next and c not in ['ALP', 'LP', 'NP', 'LNP', 'GRN', 'COAL']:
+                if not is_high_ind:
+                    inds_to_remove.append(c)
+                    cands_to_remove.append(c)
+            elif c not in contesting_next and c not in ['ALP', 'LP', 'NP', 'LNP', 'GRN', 'COAL']:
+                minors_to_remove.append(c)
                 cands_to_remove.append(c)
-                
             # Missing Major Alert (e.g., Richmond 2018)
             elif c not in contesting_next and c in ['ALP', 'LP', 'NP', 'LNP', 'GRN', 'COAL']:
                 print(f"[ALERT] Major party {c} missing in {div}!")
-                import pdb; pdb.set_trace() # FIX - no longer COAL_double_div
-                
+                import pdb; pdb.set_trace()
         if not cands_to_remove:
-            latent_tables[div] = copy.deepcopy(table)
+            latent_tables[div] = table
             continue
-            
-        # Execute stochastic backpropagation
-        if simulate:
-            clean_table = table.remove_candidates_stochastic(cands_to_remove, rng=rng)
-        else:
-            clean_table = table.remove_candidates(cands_to_remove)
-            
-        latent_tables[div] = clean_table
+
+        # Partition by DOP-assisted removal vs empirical removal
+        elim_in_rounds = {rnd.get('eliminated') for rnd in table.rounds} if hasattr(table, 'rounds') else set()
+        elim_cands = [c for c in cands_to_remove if c in elim_in_rounds] # All candidates (IND or Minor) who actually have DOP table transfer data
+        
+        # Candidates who survived DOP truncation and need empirical removal
+        unelim_inds = [c for c in inds_to_remove if c not in elim_in_rounds]
+        unelim_minors = [c for c in minors_to_remove if c not in elim_in_rounds]
+
+        # Execute removals in sequence
+                
+        # 1. Unified DOP table removal
+        if elim_cands:
+            if simulate:
+                table = table.remove_candidates_stochastic(elim_cands, rng=rng)
+            else:
+                table = table.remove_candidates(elim_cands)
+                
+        # 2. Remove INDs using historical flows in dop_lookup
+        if unelim_inds:
+            region = electorate_to_region.get(div, 'Unknown')
+            table = remove_uneliminated_inds(table, unelim_inds, div, region, dop_lookup, party_df)
+
+        # 3. Remove minors via Logit flow model
+        if unelim_minors:
+            table = remove_uneliminated_minors_via_model(table, unelim_minors, div, LC_FPs_df, party_df, model, simulate=simulate, rng=rng)
+
+        latent_tables[div] = table
         
     return latent_tables
 
@@ -496,6 +822,11 @@ latent_tables = execute_party_removal(
     stripped_tables=stripped_tables,
     static_high_ind_districts=static_high_ind_districts,
     next_contesting_parties=next_contesting_parties,
+    LC_FPs_df=LC_FPs_df,
+    party_df=party_df,             
+    dop_lookup=dop_lookup,                  
+    electorate_to_region=electorate_to_region, 
+    model = final_model,
     simulate=True
 )
 
@@ -513,123 +844,6 @@ print(latent_tables['Bentleigh'].count_0)
 
 
 #################################################### Step 3: Add new parties to Count 0 (Simulated) #########################################################################################
-
-class AggregateLatentLogit:
-    """Aggregate Latent Class Logit Model with Cumulative State Evaluation.
-    Parameter vector theta has length 16.
-    """
-    def __init__(self, theta: np.ndarray = None):
-        self.n_pools = len(ORPHAN_POOLS)  # 3
-        self.n_blocs = len(BLOCS)  # 5
-        self.n_params = 16
-
-        if theta is not None:
-            self.set_params(theta)
-        else:
-            self.theta = self.get_default_priors()
-
-    def get_default_priors(self) -> np.ndarray:
-        # [alpha_COAL, alpha_Left, alpha_Right, alpha_Centre]
-        prior_left = np.array([-1.5, 2.0, -2.0, -0.5])
-        prior_right = np.array([1.5, -1.5, 2.0, 1.0])
-        prior_centre = np.array([0.0, 0.5, 0.5, 1.5])
-        # betas: [beta_mass, beta_cap, beta_menu]
-        prior_betas = np.array([1.0, 0.5, 0.1]) 
-        # gamma
-        prior_gamma = np.array([0.8])
-
-        return np.concatenate([prior_left, prior_right, prior_centre, prior_betas, prior_gamma])
-
-    def unpack_params(self, theta: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
-        alpha = np.zeros((self.n_pools, self.n_blocs), dtype=np.float64)
-        alpha[0, 1:] = theta[0:4]   # Left pool
-        alpha[1, 1:] = theta[4:8]   # Right pool
-        alpha[2, 1:] = theta[8:12]  # Centre pool
-        
-        beta = theta[12:15]  
-        gamma = float(theta[15])
-        
-        return alpha, beta, gamma
-
-    def set_params(self, theta: np.ndarray):
-        if len(theta) != self.n_params:
-            raise ValueError(f"Expected theta of length {self.n_params}, got {len(theta)}")
-        self.theta = np.asarray(theta, dtype=np.float64)
-
-    def compute_choice_probabilities(
-        self, lc_mass: np.ndarray, c_cap: np.ndarray, menu_size: np.ndarray, 
-        alpha: np.ndarray, beta_shared: np.ndarray
-    ) -> np.ndarray:
-        b_mass, b_cap, b_menu = beta_shared
-        
-        log_mass = np.log(np.maximum(lc_mass, 1e-6))
-        log_cap  = np.log(np.maximum(c_cap, 1e-6))
-        log_menu = np.log(np.maximum(menu_size, 1e-6))
-        
-        u_structural = (b_mass * log_mass) + (b_cap * log_cap) + (b_menu * log_menu)
-        v_matrix = alpha + u_structural[np.newaxis, :]
-
-        unavailable_mask = menu_size <= 0
-        v_matrix[:, unavailable_mask] = -1e9
-
-        v_max = np.max(v_matrix, axis=1, keepdims=True)
-        exp_v = np.exp(v_matrix - v_max) * (~unavailable_mask)[np.newaxis, :]
-        sum_exp_v = np.sum(exp_v, axis=1, keepdims=True)
-        sum_exp_v = np.where(sum_exp_v <= 1e-12, 1.0, sum_exp_v)
-
-        return exp_v / sum_exp_v
-
-    def evaluate_state_allocation(
-        self, lc_mass: np.ndarray, active_cands: List[str], c_cap: np.ndarray, 
-        menu_size: np.ndarray, cand_to_bloc: Dict[str, int], cand_demand: Dict[str, float], 
-        alpha: np.ndarray, beta: np.ndarray, gamma: float
-    ) -> Dict[str, float]:
-        
-        p_bloc_given_pool = self.compute_choice_probabilities(lc_mass, c_cap, menu_size, alpha, beta)
-
-        cand_intra_share = {}
-        for b_idx in range(self.n_blocs):
-            bloc_cands = [c for c in active_cands if cand_to_bloc[c] == b_idx]
-            if not bloc_cands: continue
-
-            eff_gamma = 1.0 if b_idx in [0, 1] else gamma 
-            sum_demand = sum((cand_demand[c] ** eff_gamma) for c in bloc_cands)
-            
-            if sum_demand > 1e-9:
-                for c in bloc_cands:
-                    cand_intra_share[c] = (cand_demand[c] ** eff_gamma) / sum_demand
-            else:
-                for c in bloc_cands:
-                    cand_intra_share[c] = 1.0 / len(bloc_cands)
-
-        s_hat = {c: 0.0 for c in active_cands}
-
-        # Base Demand Allocation
-        for b_idx in [0, 1]:  
-            for c in [c for c in active_cands if cand_to_bloc[c] == b_idx]:
-                s_hat[c] += lc_mass[b_idx] * cand_intra_share[c]
-
-        for b_idx in [2, 3, 4]:  
-            for c in [c for c in active_cands if cand_to_bloc[c] == b_idx]:
-                s_hat[c] += cand_demand[c]
-
-        # Orphan Routing
-        orphan_mass = np.zeros(self.n_pools, dtype=np.float64)
-        for p_idx, b_idx in enumerate([2, 3, 4]):
-            orphan_mass[p_idx] = lc_mass[b_idx] * max(0.0, 1.0 - c_cap[b_idx])
-
-        for p_idx in range(self.n_pools):
-            o_m = orphan_mass[p_idx]
-            if o_m <= 1e-12: continue
-            for b_idx in range(self.n_blocs):
-                prob_bloc = p_bloc_given_pool[p_idx, b_idx]
-                if prob_bloc <= 1e-12: continue
-                for c in [c for c in active_cands if cand_to_bloc[c] == b_idx]:
-                    s_hat[c] += o_m * prob_bloc * cand_intra_share[c]
-
-        return s_hat
-
-
 
 # calibrate kappas
 
@@ -883,13 +1097,7 @@ def draw_stochastic_kappas(
             
     return sim_kappas
 
-def get_party_bloc(party: str, party_df: pd.DataFrame) -> str:
-    """Helper to extract ideological bloc for any party in party_df."""
-    if str(party).startswith('IND'):
-        return 'Centre'
-    ideo_map = dict(zip(party_df['PartyAb'], party_df['Ideo_category']))
-    ideo_map.update({'LNP': 'COAL', 'LP': 'COAL', 'NP': 'COAL', 'ALP': 'ALP'})
-    return ideo_map.get(party, 'Centre')
+
 
 
 
@@ -1168,26 +1376,6 @@ def execute_new_minor_injection(
         
         
     return cf_c0_dict, s_hat_a_dict
-
-
-# Load minor flow model and bootstrapped realisations
-final_model = AggregateLatentLogit()
-
-MINOR_MODEL_FILE = f'VIC-{data_year}/model_theta_saved.npy'
-MINOR_MODEL_BOOTSTRAP = f'VIC-{data_year}/bootstrapped_thetas_{data_year}.npy'
-
-if os.path.exists(MINOR_MODEL_FILE):
-    print(f"Loading exact fully-estimated baseline parameters from {MINOR_MODEL_FILE}...")
-    baseline_theta = np.load(MINOR_MODEL_FILE)
-    final_model.set_params(baseline_theta)
-else:
-    raise FileNotFoundError(f"Missing {MINOR_MODEL_FILE}! Run training script to generate the definitive point estimate.")
-
-if os.path.exists(MINOR_MODEL_BOOTSTRAP):
-    print("Loading bootstrapped covariance matrix for epistemic uncertainty...")
-    bootstrapped_thetas = np.load(MINOR_MODEL_BOOTSTRAP)
-else:
-    raise FileNotFoundError(f"Missing {MINOR_MODEL_BOOTSTRAP}! Run training script first.")
 
 
 # Define synthetic targets with priors AND pseudo-sample sizes (pseudo_N); should be higher than typical as represents the only shrinkage available (heuristic: add 10 to instinctual pseudo-N)!
@@ -1728,7 +1916,8 @@ def model_teals_west(DOP_table_dict, final_model, baseline_theta, ia_csv_path, n
     stripped_tables, static_high_inds, _ = execute_strip_incumbency(archetype_dop, ia_csv_path)
 
     latent_tables = execute_party_removal(
-        stripped_tables, static_high_inds, next_contesting_parties, simulate=False, rng=rng_det
+        stripped_tables, static_high_inds, next_contesting_parties, LC_FPs_df=LC_FPs_df, party_df=party_df, 
+        dop_lookup=dop_lookup, electorate_to_region=electorate_to_region, model = final_model, simulate=False, rng=rng_det
     )
 
     augmented_c0_dict = {
@@ -1889,41 +2078,6 @@ teal_params, west_params = model_teals_west(DOP_table_dict, final_model, baselin
 # Get master independent composition dictionaries
 master_minor_IND_removal_profiles = {} # Compositions for eliminating minor IND (Un-defecting)
 
-def synthesize_dop_composition(div: str, region: str, dop_lookup: dict) -> dict:
-    """
-    Synthesizes the geographic hierarchy to return a normalized 5-bloc composition array
-    for un-defecting minor Independents.
-    """
-    BLOCS = ['ALP', 'COAL', 'Left', 'Right', 'Centre']
-    
-    # 1. Geographic Hierarchy Lookup
-    if div in dop_lookup.get('electorates', {}):
-        mu_raw = dop_lookup['electorates'][div].copy()
-    elif region in dop_lookup.get('regions', {}):
-        mu_raw = dop_lookup['regions'][region].copy()
-    else:
-        mu_raw = dop_lookup['state'].copy()
-        
-    # mu_raw might contain 5 items (Standard Blocs) or 6 items (including Repeat_IND).
-    # We only want the first 5 standard blocs for the pure anchor.
-    mu_standard = np.array(mu_raw[:5], dtype=np.float64)
-    
-    # 2. Strict Normalization
-    # We strip out any Repeat_IND probability and ensure 100% flows to the 5 standard blocs
-    mu_sum = np.sum(mu_standard)
-    if mu_sum > 1e-9:
-        mu_normalized = mu_standard / mu_sum
-    else:
-        # Absolute fallback if data is totally corrupted: dump to Centre
-        mu_normalized = np.array([0.0, 0.0, 0.0, 0.0, 1.0])
-        
-    # 3. Map to Dictionary Format for safe JSON-like storage
-    comp_dict = {b: float(mu_normalized[i]) for i, b in enumerate(BLOCS)}
-    
-    return comp_dict
-
-# electorate to region mapping
-electorate_to_region = LA_Candidates[['div_nm','region_name']].drop_duplicates().set_index('div_nm')['region_name'].to_dict()
 
 for div in next_contesting_parties.keys():
     # We want to capture 'IND' and 'TWP' (Teal/West) candidates
@@ -2071,7 +2225,8 @@ def execute_new_IND_injection(
         new_ind_features.get('Log_Generic_Lag', 0.0),
         new_ind_features.get('Has_New_Councillor', 0.0),
         new_ind_features.get('Log_Sum_New_Days', 0.0),
-        new_ind_features.get('Log_Repeat_Past', 0.0)
+        new_ind_features.get('Log_Repeat_Past', 0.0),
+        new_ind_features.get('Pool_Days_Missing', 0.0)
     ], dtype=np.float64)
     
     linear_pred = np.dot(x_pool, pool_model.params)
@@ -2092,14 +2247,15 @@ def execute_new_IND_injection(
     ind_votes = {}
     if num_new_inds == 1:
         c = new_candidates[0]
-        formatted_name = f"IND_{str(c['Candidate']).strip().title().replace(' ', '_')}" if election_year != 2026 else clean_ind_name(c['Candidate']) # REFINE: patch for 2026 cand names
+        formatted_name = f"IND_{str(c['Candidate']).strip().title().replace(' ', '_')}" if election_year != 2026 else clean_ind_name(c['Candidate'])
         ind_votes = {formatted_name: T_pool_sim} 
     else:
         log_scores = []
         for c in new_candidates:
             eff_days = c.get('Campaign_Length_Days', 0)
             is_counc = float(c.get('Is_Former_Councillor', False))
-            x_split = np.array([1.0, is_counc, np.log(eff_days + 1)])
+            days_missing = float(c.get('Days_Missing', 0.0))
+            x_split = np.array([1.0, is_counc, np.log(eff_days + 1), days_missing])
             eps = rng.normal(0, np.sqrt(split_model.mse_resid)) if simulate else 0.0
             pred_log = np.dot(x_split, split_model.params) + eps
             log_scores.append(pred_log)
@@ -2536,6 +2692,11 @@ def generate_deterministic_trace_run(
         stripped_tables=stripped_tables,
         static_high_ind_districts=static_high_ind_districts,
         next_contesting_parties=next_contesting_parties,
+        LC_FPs_df=LC_FPs_df,
+        party_df=party_df,             
+        dop_lookup=dop_lookup,                  
+        electorate_to_region=electorate_to_region, 
+        model = final_model,
         simulate=False,
         rng=rng_det
     )
@@ -2732,6 +2893,7 @@ def generate_deterministic_trace_run(
             simulate=False,                                   
             rng=rng_det
         )
+        import pdb; pdb.set_trace()
 
         # Append Step 7 to the trace
         debug_traces[div].loc['7_Step7 (Add 2026 IA)'] = pd.Series(cf_c0_step7)
@@ -2742,9 +2904,9 @@ mean_kappas = draw_stochastic_kappas(calibration_data, simulate=False)
 
 kalman_poll = {
         'COAL': 0.305,
-        'ALP': 0.225,
-        'GRN': 0.145,
-        'ON': 0.205,
+        'ALP': 0.215,
+        'GRN': 0.15,
+        'ON': 0.21,
         'OTH': 0.12
     }
 
@@ -2935,7 +3097,7 @@ days_to_election = 17
 
 sim_poll_errors, sim_elec_errors = predraw_polling_residual_simulation_error(days_to_election, num_simulations=num_simulations, NUM_DISTRICTS=88, rng=rng)
 
-NU_MINOR_PRECISION = 828.4
+NU_MINOR_PRECISION = {2022: 795, 2018: 748, 2014: 812,2010:762, 2006: 160}
 
 # Lock the model to the single MLE / optimal parameter set
 final_model.set_params(baseline_theta)
@@ -2958,6 +3120,11 @@ for sim_idx in range(num_simulations):
         stripped_tables=stripped_tables,
         static_high_ind_districts=static_high_ind_districts,
         next_contesting_parties=next_contesting_parties,
+        LC_FPs_df=LC_FPs_df,
+        party_df=party_df,             
+        dop_lookup=dop_lookup,                  
+        electorate_to_region=electorate_to_region, 
+        model = final_model,
         simulate=True,
         rng=rng 
     )
@@ -3154,12 +3321,151 @@ TCP_COMBINATION_INDEX = {
     ('Left','Left'):12, ('Right','Right'):13, ('COAL','COAL'):14
 }
 
-# 0: 115, 1: 14 and Nepean/SA, 2: 8, 3: 9, 4: 1 and Secret Harbour/SA, 5: 1, 6: 1 + SA, 7: 0, 8: 0,9: (8-) and Farrer/SA, 10: (14-), 11: (115-), 12: 0, 13: 0, 14: 0
-# LP/ON shifts: 
 
-file_path = Path.home() / f"Australian Election/Victorian Election/VIC-{election_year}/TCP_state_dict_for_{election_year}.pkl"
-with open(file_path, "rb") as f:
-    TCP_state_dict = pickle.load(f)
+
+def adjust_TCP_state_dict(TCP_state_dict, party_df, SIGMA_JOINT_BASE):
+
+    # rough notes
+    # 0: 115, 1: 14 and Nepean/SA, 2: 8, 3: 9, 4: 1 and Secret Harbour/SA, 5: 1, 6: 1 + SA, 7: 0, 8: 0,9: (8-) and Farrer/SA, 10: (14-), 11: (115-), 12: 0, 13: 0, 14: 0
+    # LP/ON shifts: 
+
+    # 6. {'IND': 75}
+    # 4. {'LP':34,'GRN':91,'HMP':56,'AJP':62,'Right':31} (and hence 11) w. 'ALP':91
+    # 9. {'LP':41,'NP':31,'GRN':92,'HMP':63, 'Centre':70,'Right':39}
+
+    if election_year == 2026:
+        UPDATED_FLOWS_ELECTION = {
+            6: {'IND': 75.0},
+            4: {'LP': 34.0, 'GRN': 91.0, 'HMP': 56.0, 'AJP': 62.0, 'Right': 31.0, 'Left':70, 'Centre':51},
+            9: {'LP': 41.0, 'NP': 31.0, 'GRN': 92.0, 'HMP': 63.0, 'Centre': 70.0, 'Right': 39.0, 'Left': 75},
+            11: {'LP': 34.0, 'GRN': 91.0, 'HMP': 56.0, 'AJP': 62.0, 'Right': 31.0, 'Left':70, 'Centre':51, 'ALP':90}
+        }
+    else:
+        UPDATED_FLOWS_ELECTION = {}
+
+    if election_year == 2026:
+        N_SOURCES = {
+            0: 115, 1: 14, 2: 8, 3: 9, 4: 1, 5: 1, 6: 1, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0, 13: 0, 14: 0
+        }
+    elif election_year == 2022:
+        N_SOURCES = {        }
+
+    EXTERNAL_ROWS = {4, 6, 9, 11} if election_year == 2026 else {}
+
+    SIGMA_JOINT_BASE = 0.045
+    EXTERNAL_UNCERTAINTY_PENALTY = 1.25
+
+    def compute_statewide_average_flows(tcp_dict: dict, party_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Computes the statewide average TCP flow for each minor party.
+        Calculates aggregated 'Left', 'Right', and 'Centre' columns.
+        """
+        # 1. Stack all electorate DataFrames and average them (ignores NaNs automatically)
+        all_dfs = pd.concat([df.rename(columns=lambda c: 'IND' if str(c).startswith('IND') else c).T.groupby(level=0).mean().T for df in tcp_dict.values()])
+        avg_df = all_dfs.groupby(all_dfs.index).mean()
+        
+        # 2. Create the Ideology columns
+        bloc_parties = {'Left': [], 'Right': [], 'Centre': []}
+        for col in avg_df.columns:
+            if str(col).startswith('IND'):
+                bloc = 'Centre'
+            else:
+                # Assumes get_party_bloc is defined
+                bloc = get_party_bloc(col, party_df) 
+                
+            if bloc in bloc_parties:
+                bloc_parties[bloc].append(col)
+                
+        # 3. Calculate mean across the row for each bloc (ignoring NaNs)
+        for bloc, parties in bloc_parties.items():
+            if parties:
+                # Average the parties belonging to this bloc
+                avg_df[bloc] = avg_df[parties].mean(axis=1)
+            else:
+                avg_df[bloc] = np.nan
+                
+        return avg_df
+    
+    def apply_tcp_adjustments(
+        tcp_dict: dict, 
+        avg_df: pd.DataFrame, 
+        updates: dict, 
+        party_df: pd.DataFrame
+    ) -> dict:
+        """
+        Computes Deltas from the statewide average and shifts local electorates. Applies bloc-level shifts to all parties inside that bloc.
+        """
+        adjusted_dict = copy.deepcopy(tcp_dict)
+        
+        # Compute the Deltas
+        # delta_matrix[row][party_or_bloc] = shift_value
+        delta_matrix = {row: {} for row in updates.keys()}
+        
+        for row_idx, target_flows in updates.items():
+            for col, target_val in target_flows.items():
+                base_val = avg_df.loc[row_idx, col]
+                if pd.notna(base_val):
+                    delta_matrix[row_idx][col] = target_val - base_val
+
+        # Apply Deltas to all electorates
+        for div, df in adjusted_dict.items():
+            for row_idx, deltas in delta_matrix.items():
+                for col_name, delta_val in deltas.items():
+                    
+                    # Check if it's a generic bloc
+                    if col_name in ['Left', 'Right', 'Centre']:
+                        for party_col in df.columns:
+                            p_bloc = 'Centre' if str(party_col).startswith('IND') else get_party_bloc(party_col, party_df)
+                            
+                            # Apply bloc delta ONLY IF the party doesn't have a specific target in this row
+                            if p_bloc == col_name and party_col not in deltas:
+                                df.loc[row_idx, party_col] = np.clip(df.loc[row_idx, party_col] + delta_val, 0.5, 99.5)
+                    
+                    # Otherwise apply the specific party delta
+                    else:
+                        if col_name in df.columns:
+                            df.loc[row_idx, col_name] = np.clip(df.loc[row_idx, col_name] + delta_val, 0.5, 99.5)
+                            
+        return adjusted_dict
+    
+    def build_joint_noise_vector(
+        n_sources: dict, 
+        external_rows: set, 
+        base_sigma: float, 
+        ext_penalty: float
+    ) -> np.ndarray:
+        """
+        Builds the 15-element sigma array for the TCP combinations. Applies small-sample expansion and external data penalties.
+        """
+        sigmas = np.zeros(15)
+        
+        for i in range(15):
+            n = n_sources.get(i, 0)
+            
+            # Enforce minimum Phantom N for completely unprecedented matchups (N=0)
+            eff_n = max(float(n), 0.5) 
+            
+            # Base expansion: sqrt((N+1)/N)
+            multiplier = np.sqrt((eff_n + 1.0) / eff_n)
+            
+            # External Penalty Stack
+            if i in external_rows:
+                multiplier *= ext_penalty
+                
+            sigmas[i] = base_sigma * multiplier
+            
+        return sigmas
+
+    # 1. Pre-process the historical data
+    avg_tcp_df = compute_statewide_average_flows(TCP_state_dict, party_df)
+
+    # 2. Shift the baselines
+    adjusted_TCP_state_dict = apply_tcp_adjustments(TCP_state_dict, avg_tcp_df, UPDATED_FLOWS_ELECTION, party_df)
+
+    # 3. Build the noise matrix
+    row_joint_sigmas = build_joint_noise_vector(N_SOURCES, EXTERNAL_ROWS, SIGMA_JOINT_BASE, EXTERNAL_UNCERTAINTY_PENALTY)
+
+    return adjusted_TCP_state_dict, row_joint_sigmas, avg_tcp_df
 
 def get_tcp_category(cand: str, party_df: pd.DataFrame) -> str:
     """Helper to map INDs correctly for the TCP Combination Index."""
@@ -3625,7 +3931,7 @@ def process_preference_distribution(
 
             else:
                 
-                import pdb; pdb.set_trace()
+                #import pdb; pdb.set_trace()
 
                 # FALLBACK (e.g., 3CP with 2 INDs -> 1 Non-IND) - split votes proportionally to initial shares - REFINE
 
@@ -3655,15 +3961,23 @@ def resolve_final_2cp(
     original_fp_df: pd.DataFrame,
     top2_df: pd.DataFrame,
     tcp_proportions_df: pd.DataFrame,
-    party_df: pd.DataFrame
+    party_df: pd.DataFrame,
+    joint_noise: np.ndarray = None,
+    rng: np.random.Generator = None,
+    sigma_ind: float = 0.03,
+    simulate: bool = True
 ) -> pd.DataFrame:
     """
     Distributes all eliminated original FP votes to the final 2CP pair
-    using strictly empirical historical TCP flows.
+    using stochastic empirical historical TCP flows, bounded between 0 and 1.
     """
     N_sims = len(original_fp_df)
     cands = original_fp_df.columns
     
+    # Fallback to zero-matrix if running deterministically
+    if joint_noise is None or not simulate:
+        joint_noise = np.zeros((N_sims, 15))
+        
     results = []
     
     for sim_idx in range(N_sims):
@@ -3678,9 +3992,12 @@ def resolve_final_2cp(
         top2_category = (cats_with_parties[0][0], cats_with_parties[1][0])
         first_party = cats_with_parties[0][1]
         
-        # 2. Fetch Flow Vector (Fallback to ALP/COAL if weird combination occurs)
+        # 2. Fetch Flow Vector
         row_index = TCP_COMBINATION_INDEX.get(top2_category, 0)
-        transfer_to_first = tcp_proportions_df.iloc[row_index]/100
+        transfer_to_first = tcp_proportions_df.iloc[row_index] / 100.0  # Normalize to 1.0
+        
+        # Extract the global joint shock for this specific TCP row and simulation
+        sim_joint_shock = joint_noise[sim_idx, row_index]
         
         # 3. Calculate Final Flows
         eliminated = [c for c in cands if c not in top2 and orig_fp[c] > 1e-9]
@@ -3688,8 +4005,15 @@ def resolve_final_2cp(
         
         for c in eliminated:
             vol = orig_fp[c]
-            # Default to 50/50 if a phantom party isn't in the TCP matrix
-            prop_first = transfer_to_first.get(c, 0.5) 
+            base_prop = transfer_to_first.get(c, 0.5) 
+            if pd.isna(base_prop):
+                base_prop = 0.5
+                
+            # Draw local idiosyncratic noise for this specific candidate
+            ind_shock = rng.normal(0, sigma_ind) if (simulate and rng is not None) else 0.0
+            
+            # 4. Apply shocks and rigidly bound between 0% and 100%
+            prop_first = np.clip(base_prop + sim_joint_shock + ind_shock, 0.0, 1.0)
             
             if p1 == first_party:
                 flow_p1 += vol * prop_first
@@ -3701,14 +4025,13 @@ def resolve_final_2cp(
         total_p1 = orig_fp[p1] + flow_p1
         total_p2 = orig_fp[p2] + flow_p2
         
-        # 4. Declare Winner
+        # 5. Declare Winner
         if total_p1 > total_p2:
             results.append({'Winner': p1, 'RunnerUp': p2, 'Winner_2CP': total_p1, 'RunnerUp_2CP': total_p2})
         else:
             results.append({'Winner': p2, 'RunnerUp': p1, 'Winner_2CP': total_p2, 'RunnerUp_2CP': total_p1})
             
     return pd.DataFrame(results, index=original_fp_df.index)
-
 
 def run_statewide_preference_simulation(
     FP_pred: dict,
@@ -3721,6 +4044,8 @@ def run_statewide_preference_simulation(
     specific_defection_dict: dict,
     fallback_defection_profile: dict,
     TCP_state_dict: dict,
+    row_joint_sigmas: np.ndarray,
+    sigma_ind: float,
     rng: np.random.Generator
 ):
     """
@@ -3735,6 +4060,12 @@ def run_statewide_preference_simulation(
     per_electorate_winning_tcp = defaultdict(list)
     
     per_simulation_winners = [[] for _ in range(n_sims)]
+
+    # Generate the global (N_sims x 15) joint noise array before looping through electorates
+    if rng is not None:
+        global_joint_noise = rng.normal(0, row_joint_sigmas, size=(n_sims, 15))
+    else:
+        global_joint_noise = None
     
     # 2. Iterate through all electorates
     for div, fp_sims_df in FP_pred.items():
@@ -3767,7 +4098,8 @@ def run_statewide_preference_simulation(
         # Step 5: Final 2CP Distribution & Winner Identification
         final_2cp_df = resolve_final_2cp(
             original_fp_df=fp_sims_df, top2_df=top2_df, 
-            tcp_proportions_df=TCP_state_dict[div], party_df=party_df
+            tcp_proportions_df=TCP_state_dict[div], party_df=party_df,
+            joint_noise=global_joint_noise,rng=rng,sigma_ind=sigma_ind,simulate=True
         )
         
         # Step 6: Populate Trackers
@@ -3803,6 +4135,11 @@ def run_statewide_preference_simulation(
 ordered_electorates = list(FP_pred.keys()) 
 sim_local_alr_dict = {electorate: sim_elec_errors[:, i, :] for i, electorate in enumerate(ordered_electorates)}
 
+# update TCP_state_dict
+sigma_joint = 0.045
+sigma_ind = 0.03
+TCP_state_dict, row_joint_sigmas, avg_tcp_df = adjust_TCP_state_dict(TCP_state_dict, party_df, sigma_joint)
+
 simulation_results = run_statewide_preference_simulation(
     FP_pred=FP_pred, 
     LC_FPs_df=LC_FPs_df, 
@@ -3814,6 +4151,8 @@ simulation_results = run_statewide_preference_simulation(
     specific_defection_dict=specific_defection_dict,     # Dict of specific Top-4 IND defection profiles
     fallback_defection_profile=fallback_defection_profile, # Your fallback dictionary
     TCP_state_dict=TCP_state_dict,                # The loaded pickle dictionary
+    row_joint_sigmas=row_joint_sigmas,
+    sigma_ind=sigma_ind,
     rng=rng
 )
 

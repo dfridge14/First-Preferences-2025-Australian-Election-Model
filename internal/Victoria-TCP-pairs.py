@@ -33,7 +33,7 @@ os.chdir(Path.home() / 'Australian Election')
 prev_federals = {2010:2010,2014:2013,2018:2016,2022:2022,2026:2025}
 
 
-election_year = 2026
+election_year = 2010
 
 
 party_df = pd.read_csv(f'Victorian Election/VIC-{election_year}/VIC-{election_year}-Parties.csv')
@@ -66,6 +66,18 @@ GEODATA_FOLDER = Path.home() / 'Australian Election/Victorian Election/Geodata'
 if election_year == 2026:
     federal_file = GEODATA_FOLDER / 'Federal-VIC-2024-shapefiles/E_VIC24_region.shp'
     state_file = GEODATA_FOLDER / 'State-VIC-2021-shapefiles/VIC-2021-New districts and regions.shp'
+elif election_year == 2022:
+    federal_file = GEODATA_FOLDER / 'Federal-VIC-2021-shapefiles/E_VIC21_region.shp'
+    state_file = GEODATA_FOLDER / 'State-VIC-2021-shapefiles/VIC-2021-New districts and regions.shp'
+elif election_year == 2018:
+    federal_file = GEODATA_FOLDER / 'Federal-VIC-2011-shapefiles/vic 24122010.shp'
+    state_file = GEODATA_FOLDER / 'State-VIC-2013-shapefiles/STATE_ASSEMBLY_2013.shp'
+elif election_year == 2014:
+    federal_file = GEODATA_FOLDER / 'Federal-VIC-2011-shapefiles/vic 24122010.shp'
+    state_file = GEODATA_FOLDER / 'State-VIC-2013-shapefiles/STATE_ASSEMBLY_2013.shp'
+elif election_year == 2010:
+    federal_file = GEODATA_FOLDER / 'Federal-National-2010-shapefiles/COM_ELB_2010_region.shp'
+    state_file = GEODATA_FOLDER / 'State-VIC-2001-shapefiles/STATE_ASSEMBLY_2001.shp'
 
 # Load and reproject to VicGrid for accurate square-meter calculations
 fed_gdf = gpd.read_file(federal_file).to_crs(epsg=3111)
@@ -83,14 +95,14 @@ overlap['weight'] = overlap['overlap_area'] / overlap['state_area']
 
 # Clean up to a simple mapping dictionary/dataframe: 
 # Fed_Name, State_Name, Weight
-overlap = overlap.rename(columns={'DISTRICT':'State_Dist', 'Elect_div': 'Federal_Div'})
+overlap = overlap.rename(columns={'DISTRICT':'State_Dist', 'Elect_div': 'Federal_Div', 'ELECT_DIV': 'Federal_Div'})
 overlap['State_Dist'] = overlap['State_Dist'].str.title()
 overlap_weights = overlap[['Federal_Div', 'State_Dist', 'weight']]
 overlap_weights['weight'] = overlap_weights['weight'] / overlap_weights.groupby('State_Dist')['weight'].transform('sum') # normalise so state districts are perfectly split
 
 
 # Obtain 2CP estimates
-with open(Path.home() / "Australian Election/TCP_pair_category_dict_for_2028.pkl", "rb") as f:
+with open(Path.home() / f"Australian Election/TCP_pair_category_dict_for_{prev_federals[election_year] + 3}.pkl", "rb") as f:
     TCP_transferred_to_first = pickle.load(f)
 TCP_COMBINATION_INDEX = {('ALP','COAL'): 0, ('COAL','IND'):1, ('ALP','IND'):2, ('ALP','Left'):3, ('ALP','Right'):4, ('COAL','Left'):5, ('COAL','Right'):6,  \
                                 ('LP','NP'): 7, ('IND','IND'): 8, ('IND','Right'):9, ('IND','Left'):10, ('Left','Right'):11, ('Left','Left'):12, ('Right','Right'):13, ('COAL','COAL'):14}
@@ -98,13 +110,7 @@ TCP_COMBINATION_INDEX = {('ALP','COAL'): 0, ('COAL','IND'):1, ('ALP','IND'):2, (
 # 1. Filter, clean, and flatten the federal dictionary concisely
 vic_fed_divs = overlap_weights['Federal_Div'].unique()
 
-df_list = [
-    df.loc[:, ~df.columns.duplicated()]
-      .assign(Federal_Div=fed)
-      .rename_axis('TCP_Regime')
-      .reset_index()
-    for fed, df in TCP_transferred_to_first.items() if fed in vic_fed_divs
-]
+df_list = [df.loc[:, ~df.columns.duplicated()].assign(Federal_Div=fed).rename_axis('TCP_Regime').reset_index()for fed, df in TCP_transferred_to_first.items() if fed in vic_fed_divs]
 fed_all = pd.concat(df_list, ignore_index=True)
 party_cols = fed_all.columns.difference(['TCP_Regime', 'Federal_Div']).tolist()
 
@@ -147,6 +153,7 @@ for state_dist, df in state_base_dict.items():
     left_cols = [col for col in current_cols if Ideology_map_federal.get(col, 'Centre') == 'Left']
     right_cols = [col for col in current_cols if Ideology_map_federal.get(col, 'Centre') == 'Right']
     centre_cols = [col for col in current_cols if Ideology_map_federal.get(col, 'Centre') == 'Centre']
+    COAL_cols = [col for col in current_cols if Ideology_map_federal.get(col, 'Centre') == 'COAL']
     
     # Helper to calculate row mean while ignoring 0.0 (so missing parties don't drag down the average)
     def get_ideo_mean(cols):
@@ -157,6 +164,7 @@ for state_dist, df in state_base_dict.items():
     df_imputed['Left_Avg'] = get_ideo_mean(left_cols)
     df_imputed['Right_Avg'] = get_ideo_mean(right_cols)
     df_imputed['Centre_Avg'] = get_ideo_mean(centre_cols)
+    df_imputed['COAL_Avg'] = get_ideo_mean(centre_cols)
         
     # If Centre_Avg is NaN (no Centre parties exist), use the average of all nonzero parties in that row
     all_nonzero_mean = df_imputed[current_cols].replace(0, np.nan).mean(axis=1)
@@ -187,7 +195,7 @@ for state_dist, df in state_base_dict.items():
 
 # Verify the final output
 print(TCP_state_dict['Albert Park'].head())
-
+import pdb; pdb.set_trace()
 if not os.path.exists(f"Victorian Election/VIC-{election_year}/TCP_state_dict_for_{election_year}.pkl"):
     with open(f"Victorian Election/VIC-{election_year}/TCP_state_dict_for_{election_year}.pkl", "wb") as f:
         pickle.dump(TCP_state_dict, f, protocol=pickle.HIGHEST_PROTOCOL)

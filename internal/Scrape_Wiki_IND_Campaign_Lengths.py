@@ -32,7 +32,7 @@ def format_name(name_str):
         return name_str.strip().title()
 
 # Councillor extraction for 2012
-def scrape_2012_councillors_direct():
+def scrape_2008_2012_councillors_direct(year):
     lga_prefixes = [
         'alpine', 'ararat', 'ballarat', 'banyule', 'basscoast', 'bawbaw', 'bayside',
         'benalla', 'boroondara', 'brimbank', 'buloke', 'campaspe', 'cardinia', 'casey',
@@ -50,14 +50,14 @@ def scrape_2012_councillors_direct():
     ]
 
     # THE FIX: Using the exact Azure Blob Storage URL from your screenshot
-    base_url = "https://itsitecoreblobvecprd01.blob.core.windows.net/public-files/historical-results/council2012"
+    base_url = f"https://itsitecoreblobvecprd01.blob.core.windows.net/public-files/historical-results/council{year}"
     headers = {"User-Agent": "VicElectionModel/1.0"}
     results = []
 
     for prefix in lga_prefixes:
         # 1. Strip 'greater' for the URL request to match VEC's backend (e.g., 'bendigoresult2012.html')
         url_prefix = prefix.replace('greater', '') if prefix.startswith('greater') else prefix
-        file_name = f"{url_prefix}result2012.html"
+        file_name = f"{url_prefix}result{year}.html"
         url = f"{base_url}/{file_name}"
         
         # 2. Format the display name cleanly for the CSV (e.g., "Greater Bendigo")
@@ -85,7 +85,7 @@ def scrape_2012_councillors_direct():
                 for name in clean_names:
                     if 0 < len(name) < 50:
                         results.append({
-                            "Year": 2012,
+                            "Year": year,
                             "Council_Name": display_name,
                             "Candidate": name
                         })
@@ -96,7 +96,7 @@ def scrape_2012_councillors_direct():
             print(f"[{display_name:<18}] Error: {e}")
 
         # Polite delay
-        time.sleep(0.5)
+        time.sleep(0.2)
     
     if not results:
         print("\nExtraction failed. Ensure the base URL matches the network tab.")
@@ -112,6 +112,9 @@ def scrape_2012_councillors_direct():
     print(f"Total Elected Councillors in 2012: {len(df)}")
     return df
 
+
+df_2008 = scrape_2008_2012_councillors_direct(2008)
+import pdb; pdb.set_trace()
 
 # get 2016, 2020, 2024 councillors from repository, add 2012 councillors from VEC scrape
 
@@ -132,9 +135,10 @@ if not os.path.exists("VEC_Councillors.csv"):
     elected_2020.insert(0, 'Year', 2020)
     elected_2016.insert(0, 'Year', 2016)
 
-    df_2012 = scrape_2012_councillors_direct()
+    df_2012 = scrape_2008_2012_councillors_direct(2012)
+    df_2008 = scrape_2008_2012_councillors_direct(2008)
 
-    councillors_df = pd.concat([df_2012,elected_2016,elected_2020, elected_2024], axis = 0)
+    councillors_df = pd.concat([df_2008, df_2012,elected_2016,elected_2020, elected_2024], axis = 0)
     import pdb; pdb.set_trace()
     councillors_df.to_csv("VEC_Councillors.csv", index=False)
 
