@@ -4,6 +4,18 @@ import os
 from pathlib import Path
 
 
+import sys
+import pdb
+import traceback
+
+def exception_handler(type, value, tb):
+    traceback.print_exception(type, value, tb) 
+    print("\n--- Entering post-mortem debugging ---\n")
+    pdb.pm()
+
+sys.excepthook = exception_handler
+
+
 
 data_year = 2006
 state = 'VIC'
@@ -76,13 +88,14 @@ def allocate_regional_votes_to_electorate(df):
     return standardise_2006_atl_rows(df)
 
 
-# TODO for 2006, combine polling place votes into Electorates-Votes...? 
+# For 2006, combine polling place votes into Electorates-Votes...? 
 
 if data_year == 2006:
     df = pd.read_excel(tally_room_dir / f'VIC-2006-LC-Votes-Pollingplace.xlsx')
     df = allocate_regional_votes_to_electorate(df).sort_values(by = ['district_id', 'group_code','ballot_order'])
-    df.to_excel(main_dir / 'VIC-2006-LC-Votes-Electorate.xlsx', index = False)
-    import pdb; pdb.set_trace()
+    if not (main_dir / 'VIC-2006-LC-Votes-Electorate.xlsx').exists():
+        df.to_excel(main_dir / 'VIC-2006-LC-Votes-Electorate.xlsx', index = False)
+    #import pdb; pdb.set_trace()
     
 
 if state == 'VIC':
@@ -98,7 +111,9 @@ if state == 'VIC':
         'LA_Candidates': tally_room_dir / f'VIC-{data_year}-LA-Candidates.xlsx',
         'LC_Candidates': tally_room_dir / f'VIC-{data_year}-LC-Candidates.xlsx',
         'LA_results': tally_room_dir / f'VIC-{data_year}-LA-Primary-Electorate.xlsx',
-        'LC_results': tally_room_dir / f'VIC-{data_year}-LC-Votes-Electorate.xlsx' if data_year != 2006 else main_dir / 'VIC-2006-LC-Votes-Electorate.xlsx'
+        'LC_results': tally_room_dir / f'VIC-{data_year}-LC-Votes-Electorate.xlsx' if data_year != 2006 else main_dir / 'VIC-2006-LC-Votes-Electorate.xlsx',
+        'LA_PP_results': tally_room_dir / f'VIC-{data_year}-LA-Primary-Pollingplace.xlsx',
+        'Polling_Places': tally_room_dir / f'VIC-{data_year}-Pollingplaces.xlsx'
     }
 
     for name, file_path in file_map.items():
@@ -109,24 +124,27 @@ if state == 'VIC':
           
 
             df = pd.read_excel(file_path)
-            
-            # Modify in place and map the standardized values
-            df.rename(columns={'district_name': 'div_nm', 'party_code': 'PartyAb'}, inplace=True)
-            df['PartyAb'] = df['PartyAb'].map(party_mapping)
 
-            # adjust PartyAb of IND to INDX based on ballot order
-            if 'LA' in name:
-                is_ind = df['PartyAb'] == 'IND'
-                df.loc[is_ind, 'PartyAb'] = ('IND' + (df[is_ind].groupby('div_nm').cumcount() + 1).astype(str))
-            import pdb; pdb.set_trace()
+            if name == 'Polling_Places':
+                df.rename(columns={'district_name': 'div_nm', 'latitude': 'Lat','longitude':'Long'}, inplace=True)
+            else:
+            
+                # Modify in place and map the standardized values
+                df.rename(columns={'district_name': 'div_nm', 'party_code': 'PartyAb'}, inplace=True)
+                df['PartyAb'] = df['PartyAb'].map(party_mapping)
+
+                # adjust PartyAb of IND to INDX based on ballot order
+                if 'LA' in name:
+                    is_ind = df['PartyAb'] == 'IND'
+                    df.loc[is_ind, 'PartyAb'] = ('IND' + (df[is_ind].groupby('div_nm').cumcount() + 1).astype(str)) if name != 'LA_PP_results' else ('IND' + (df[is_ind].groupby(['div_nm','pp_id']).cumcount() + 1).astype(str))
+            #import pdb; pdb.set_trace()
             df.to_csv(new_file_path, index=False)
             print(f"Created: {new_file_path.name}")
 
         else:
             print(f"Already exists, skipping: {new_file_path.name}")
         
-        # Save to csv
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         
 
     

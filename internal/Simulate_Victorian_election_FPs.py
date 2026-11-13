@@ -31,7 +31,7 @@ def exception_handler(type, value, tb):
 
 sys.excepthook = exception_handler
 
-data_year = 2018
+data_year = 2022
 election_year = data_year + 4
 
 
@@ -39,6 +39,12 @@ election_year = data_year + 4
 #os.chdir(base_dir)
 os.chdir(Path.home() / 'Australian Election/Victorian Election')
 
+is_redistribution = (data_year in [2010,2018])
+if is_redistribution:
+    with open(f'rediv_votes_by_pp_id_for_{election_year}.pkl', 'rb') as f:
+        rediv_votes_by_pp_id = pickle.load(f)
+    with open(f'rediv_transfer_props_dict_for_{election_year}.pkl', 'rb') as f:
+        rediv_transfer_props_dict = pickle.load(f)
 
 LC_results = pd.read_csv(f'VIC-{data_year}/VIC-{data_year}-LC-Votes-Electorate-Formatted.csv')
 LA_results = pd.read_csv(f'VIC-{data_year}/VIC-{data_year}-LA-Primary-Electorate-Formatted.csv')
@@ -212,7 +218,7 @@ class AggregateLatentLogit:
 # Load minor flow model and bootstrapped realisations
 final_model = AggregateLatentLogit()
 
-MINOR_MODEL_FILE = f'VIC-{data_year}/2018_LC_flow_model_theta.npy'
+MINOR_MODEL_FILE = f'VIC-{data_year}/{data_year}_LC_flow_model_theta.npy'
 
 if os.path.exists(MINOR_MODEL_FILE):
     print(f"Loading exact fully-estimated baseline parameters from {MINOR_MODEL_FILE}...")
@@ -223,7 +229,7 @@ else:
 
 
 
-import pdb; pdb.set_trace()
+#import pdb; pdb.set_trace()
 file_path = Path.home() / f"Australian Election/Victorian Election/VIC-{election_year}/TCP_state_dict_for_{election_year}.pkl"
 with open(file_path, "rb") as f:
     TCP_state_dict = pickle.load(f)
@@ -241,7 +247,7 @@ def get_party_bloc(party: str, party_df: pd.DataFrame) -> str:
 ALR_COLS = ['ALP', 'GRN', 'ON', 'OTH'] # for errors
 
 
-# build the next_contesting_parties Dictionary; rename independents from INDX to IND_First_Last for easier tracking 
+# build the electorate_pairs and next_contesting_parties dictionaries; rename independents from INDX to IND_First_Last for easier tracking 
 
 def format_specific_party(row):
     """
@@ -256,10 +262,26 @@ def format_specific_party(row):
         return f"IND_{first}_{last}"
     return ab
 
+# old contesting parties for calibration for kappas
+LA_Candidates_prev = LA_Candidates.copy()
+LA_Candidates_prev['PartyAb_Specific'] = LA_Candidates_prev.apply(format_specific_party, axis=1)
+old_contesting_parties = LA_Candidates_prev.groupby('div_nm')['PartyAb_Specific'].agg(list).to_dict()
+old_contesting_parties = {(div, div): old_contesting_parties[div] for div in old_contesting_parties.keys()} # for the calibration data
+
+
 if election_year != 2026:
     LA_Candidates_next = pd.read_csv(f'VIC-{election_year}/VIC-{election_year}-LA-Candidates-Formatted.csv')
     LA_Candidates_next['PartyAb_Specific'] = LA_Candidates_next.apply(format_specific_party, axis=1)
     next_contesting_parties = LA_Candidates_next.groupby('div_nm')['PartyAb_Specific'].agg(list).to_dict()
+
+    if not is_redistribution:
+        electorate_pairs = [(div, div) for div in LA_Candidates_next['div_nm'].unique().tolist()]
+        next_contesting_parties = {(div, div): next_contesting_parties[div] for div in next_contesting_parties.keys()}
+    else:
+        electorate_pairs = [pair for pair in rediv_transfer_props_dict.keys()]
+        next_contesting_parties = {pair: next_contesting_parties[pair[1]] for pair in electorate_pairs}
+
+
 
 
 else:
@@ -302,6 +324,11 @@ else:
             next_contesting_parties[div] += ['LP']
         if div in ['Bass']:
             next_contesting_parties[div] += ['NP']
+
+    electorate_pairs = [(div, div) for div in next_contesting_parties.keys()]
+    next_contesting_parties = {(div, div): next_contesting_parties[div] for div in next_contesting_parties.keys()}
+
+    
     
     # INDs only: 
     # LA_Candidates_next = pd.read_csv(f'VIC-{data_year}/VIC-{data_year}-LA-Candidates-Formatted.csv')
@@ -551,7 +578,10 @@ def execute_strip_incumbency(dop_table_dict: dict, csv_path: str = f"VIC-{data_y
             row = ia_df.loc[div]
             inc_cand = row['inc_cand']
             target_ia = float(row['ia_alpha'])
-            assert target_ia > 0
+
+            if target_ia <= 0:
+                print(f'incumbent for {div} has negative modelled advantage. reducing to 0 from', target_ia)
+                target_ia = 0
 
             # The DOPTable method does the sqrt math AND the round propagation
             table = table.strip_incumbency_forward(target_ia=target_ia, incumbent_party=inc_cand)
@@ -579,11 +609,10 @@ stripped_tables, static_high_ind_districts, ia_tracker_dict = execute_strip_incu
     dop_table_dict=DOP_table_dict,
     csv_path=f"VIC-{data_year}/VIC-{data_year}-IA-adjustments.csv"
 )
+# introduce paired keys for this stage
+stripped_tables = {(div, div): stripped_tables[div] for div in stripped_tables.keys()}
 
 #import pdb; pdb.set_trace()
-
-
-
 #################################################### Step 2: Remove non-contesting parties and INDs (Simulated) #########################################################################################
 
 def remove_uneliminated_minors_via_model(
@@ -741,9 +770,9 @@ def remove_uneliminated_inds(table, unelim_inds, div, region, dop_lookup, party_
 
 
 def execute_party_removal(
-    stripped_tables: Dict[str, Any],
+    stripped_tables: Dict[tuple, Any],
     static_high_ind_districts: Set[str],
-    next_contesting_parties: Dict[str, List[str]],
+    next_contesting_parties: Dict[tuple, List[str]],
     LC_FPs_df: pd.DataFrame,
     party_df: pd.DataFrame,             
     dop_lookup: dict,                   
@@ -762,9 +791,10 @@ def execute_party_removal(
 
     latent_tables = {}
     
-    for div, orig_table in stripped_tables.items():
+    for key, orig_table in stripped_tables.items():
+        div = key[0]
         table = copy.deepcopy(orig_table)
-        contesting_next = next_contesting_parties.get(div, [])
+        contesting_next = next_contesting_parties.get(key, [])
         is_high_ind = div in static_high_ind_districts
 
         cands_to_remove = []
@@ -785,7 +815,7 @@ def execute_party_removal(
                 print(f"[ALERT] Major party {c} missing in {div}!")
                 import pdb; pdb.set_trace()
         if not cands_to_remove:
-            latent_tables[div] = table
+            latent_tables[key] = table
             continue
 
         # Partition by DOP-assisted removal vs empirical removal
@@ -814,14 +844,14 @@ def execute_party_removal(
         if unelim_minors:
             table = remove_uneliminated_minors_via_model(table, unelim_minors, div, LC_FPs_df, party_df, model, simulate=simulate, rng=rng)
 
-        latent_tables[div] = table
+        latent_tables[key] = table
         
     return latent_tables
 
 latent_tables = execute_party_removal(
     stripped_tables=stripped_tables,
     static_high_ind_districts=static_high_ind_districts,
-    next_contesting_parties=next_contesting_parties,
+    next_contesting_parties=old_contesting_parties,
     LC_FPs_df=LC_FPs_df,
     party_df=party_df,             
     dop_lookup=dop_lookup,                  
@@ -831,14 +861,6 @@ latent_tables = execute_party_removal(
 )
 
 print(f"Step 2 Complete: {len(latent_tables)} latent tables generated.")
-
-# Quick Diagnostic check
-print("\nBefore Cleansing (Bentleigh):")
-print(stripped_tables['Bentleigh'].count_0)
-print("\nAfter Cleansing (Bentleigh):")
-print(latent_tables['Bentleigh'].count_0)
-
-#import pdb; pdb.set_trace()
 
 
 
@@ -865,10 +887,11 @@ def diagnose_and_recalibrate_party(
     results = []
 
     for div in contested_divs:
-        if div not in latent_tables or div not in lc_df.columns:
+        if not any(k[0] == div for k in latent_tables) or div not in lc_df.columns:
+            import pdb; pdb.set_trace()
             continue
 
-        table = latent_tables[div]
+        table = latent_tables[(div, div)] # always (div, div) key for recalibration
         actual_c0 = table.count_0.get(party_abbr, 0.0)
         if actual_c0 <= 1e-9:
             continue
@@ -951,7 +974,7 @@ def diagnose_and_recalibrate_party(
 def calibrate_new_party_kappa(
     party_abbr: str,
     prior_vote_share: float,
-    full_latent_tables: dict,
+    latent_tables: dict,
     lc_df: pd.DataFrame,
     party_df: pd.DataFrame,
     model: 'AggregateLatentLogit'
@@ -962,7 +985,8 @@ def calibrate_new_party_kappa(
     s_hat_1_list = []
     alpha, beta, gamma = model.unpack_params(model.theta)
     
-    for div, table in full_latent_tables.items():
+    for key, table in latent_tables.items():
+        div = key[0]
         if div not in lc_df.columns: 
             continue
         
@@ -998,7 +1022,7 @@ def calibrate_new_party_kappa(
 
 def pre_calibrate_all_kappas(
     parties_to_add: List[str],
-    full_latent_tables: Dict[str, Any],
+    latent_tables: Dict[tuple, Any],
     lc_df: pd.DataFrame,
     party_df: pd.DataFrame,
     model: Any,
@@ -1019,7 +1043,7 @@ def pre_calibrate_all_kappas(
             k = calibrate_new_party_kappa(
                 party_abbr=party, 
                 prior_vote_share=prior,
-                full_latent_tables=full_latent_tables, 
+                latent_tables=latent_tables, 
                 lc_df=lc_df,
                 party_df=party_df, 
                 model=model
@@ -1031,7 +1055,7 @@ def pre_calibrate_all_kappas(
             }
         else:
             # Route B: Historical Party
-            contested_divs = [d for d, t in full_latent_tables.items() if t.count_0.get(party, 0.0) > 1e-9]
+            contested_divs = [d[0] for d, t in latent_tables.items() if t.count_0.get(party, 0.0) > 1e-9]
             
             if not contested_divs:
                 print(f"[Warning] {party} is historical but contested 0 LA seats. Defaulting kappa=1.0")
@@ -1041,7 +1065,7 @@ def pre_calibrate_all_kappas(
                 _, k = diagnose_and_recalibrate_party(
                     party_abbr=party, 
                     contested_divs=contested_divs,
-                    latent_tables=full_latent_tables, 
+                    latent_tables=latent_tables, 
                     lc_df=lc_df,
                     party_df=party_df, 
                     model=model
@@ -1221,6 +1245,9 @@ def inject_unified_parties_to_dop(
     """
     Unified structural injection for both historical AND new parties simultaneously.
     """
+
+    import pdb; pdb.set_trace()
+    st = time.time()
     if calibration_scalars is None:
         calibration_scalars = {c: 1.0 for c in cands_to_add}
 
@@ -1235,6 +1262,9 @@ def inject_unified_parties_to_dop(
     else:
         mod_lc = lc_series.copy()
 
+    print(time.time() - st)
+    st = time.time()
+
     # 2. Define competing Menus
     menu_A = [c for c, v in current_c0.items() if v > 1e-9 and c not in cands_to_add and not str(c).startswith('IND')] # ensures that INDs are not added in for static_high_ind_districts
     menu_B = menu_A + cands_to_add 
@@ -1248,7 +1278,8 @@ def inject_unified_parties_to_dop(
     # State B (Simultaneous structure WITH ALL entrants)
     ms_B, cap_B, ctb_B, cd_B, lc_mass_B = _build_state_vars(menu_B, mod_lc, current_c0, party_df)
     s_hat_B = model.evaluate_state_allocation(lc_mass_B, menu_B, cap_B, ms_B, ctb_B, cd_B, alpha, beta, gamma)
-
+    print(time.time() - st)
+    st = time.time()
     # ---------------------------------------------------------
     # STEP 3: Inter-Bloc MRR (Macro Shift)
     # ---------------------------------------------------------
@@ -1266,7 +1297,7 @@ def inject_unified_parties_to_dop(
         s_hat_B_bloc_ent[b] += s_hat_B.get(e, 0.0) * kappa
 
     s_hat_B_bloc_total = {b: s_hat_B_bloc_inc[b] + s_hat_B_bloc_ent[b] for b in BLOCS}
-
+    
     unnorm_bloc_vol = {}
     for b in BLOCS:
         if emp_bloc_mass[b] > 1e-9 and s_hat_A_bloc[b] > 1e-9:
@@ -1277,7 +1308,8 @@ def inject_unified_parties_to_dop(
 
     z_bloc = sum(unnorm_bloc_vol.values())
     norm_bloc_vol = {b: v / z_bloc for b, v in unnorm_bloc_vol.items()}
-
+    print(time.time() - st)
+    st = time.time()
     # ---------------------------------------------------------
     # STEP 4: Entrant Extraction & Empirical Residual Allocation
     # ---------------------------------------------------------
@@ -1312,12 +1344,160 @@ def inject_unified_parties_to_dop(
     z_final = sum(new_c0.values())
     new_c0 = {c: v / z_final for c, v in new_c0.items()}
     shift_vector = {c: new_c0.get(c, 0.0) - current_c0.get(c, 0.0) for c in menu_B}
-
+    print(time.time() - st)
+    st = time.time()
+    import pdb; pdb.set_trace()
     return new_c0, shift_vector, s_hat_A, s_hat_B
 
+def precompute_step3_cache(
+    det_latent_tables: Dict[tuple, Any],
+    next_contesting_parties: Dict[tuple, List[str]],
+    lc_df: pd.DataFrame,
+    party_df: pd.DataFrame,
+    model: Any
+) -> Dict[tuple, Dict[str, Any]]:
+    """
+    Runs ONCE before the Monte Carlo loop. 
+    Precomputes deterministic State A and State B structural allocations.
+    """
+    alpha, beta, gamma = model.unpack_params(model.theta)
+    step3_cache = {}
+
+    for key, table in det_latent_tables.items():
+        div = key[0]
+        det_c0_party = {k: v for k, v in table.count_0.items() if not str(k).startswith('IND')}
+
+        target_cands = next_contesting_parties.get(key, [])
+        missing_cands = [
+            c for c in target_cands
+            if c not in det_c0_party
+            and c not in ['ALP', 'LP', 'NP', 'LNP', 'GRN']
+            and not str(c).startswith('IND')
+        ]
+
+        lc_series = lc_df[div].dropna().copy()
+        if lc_series.sum() > 1.5:
+            lc_series = lc_series / 100.0
+
+        zero_lc_entrants = [c for c in missing_cands if lc_series.get(c, 0.0) <= 1e-9]
+        if zero_lc_entrants:
+            mod_lc = apply_LC_orphan_capture(zero_lc_entrants, det_c0_party, lc_series, party_df)
+        else:
+            mod_lc = lc_series.copy()
+
+        menu_A = [c for c, v in det_c0_party.items() if v > 1e-9 and c not in missing_cands and not str(c).startswith('IND')]
+        menu_B = menu_A + missing_cands
+
+        # Evaluate State A and State B once
+        ms_A, cap_A, ctb_A, cd_A, lc_mass_A = _build_state_vars(menu_A, lc_series, det_c0_party, party_df)
+        s_hat_A = model.evaluate_state_allocation(lc_mass_A, menu_A, cap_A, ms_A, ctb_A, cd_A, alpha, beta, gamma)
+
+        ms_B, cap_B, ctb_B, cd_B, lc_mass_B = _build_state_vars(menu_B, mod_lc, det_c0_party, party_df)
+        s_hat_B = model.evaluate_state_allocation(lc_mass_B, menu_B, cap_B, ms_B, ctb_B, cd_B, alpha, beta, gamma)
+
+        # Pre-map candidate blocs
+        cand_bloc = {c: get_party_bloc(c, party_df) for c in menu_B}
+        s_hat_A_bloc = {b: 0.0 for b in BLOCS}
+        s_hat_B_bloc_inc = {b: 0.0 for b in BLOCS}
+        for c in menu_A:
+            b = cand_bloc[c]
+            s_hat_A_bloc[b] += s_hat_A.get(c, 0.0)
+            s_hat_B_bloc_inc[b] += s_hat_B.get(c, 0.0)
+
+        b_cands_inc = {b: [c for c in menu_A if cand_bloc[c] == b] for b in BLOCS}
+        b_cands_ent = {b: [c for c in missing_cands if cand_bloc[c] == b] for b in BLOCS}
+
+        step3_cache[key] = {
+            'div': div,
+            'menu_A': menu_A,
+            'missing_cands': missing_cands,
+            's_hat_A': s_hat_A,
+            's_hat_B': s_hat_B,
+            's_hat_A_bloc': s_hat_A_bloc,
+            's_hat_B_bloc_inc': s_hat_B_bloc_inc,
+            'cand_bloc': cand_bloc,
+            'b_cands_inc': b_cands_inc,
+            'b_cands_ent': b_cands_ent,
+        }
+
+    return step3_cache
+
+def anchor_cached_parties_to_dop(
+    cache_entry: Dict[str, Any],
+    current_c0: Dict[str, float],
+    calibration_scalars: Dict[str, float] = None
+) -> Dict[str, float]:
+    """
+    Fast in-loop execution. Anchors precomputed s_hat_A and s_hat_B 
+    to the simulation's live empirical current_c0.
+    """
+    menu_A = cache_entry['menu_A']
+    cands_to_add = cache_entry['missing_cands']
+    if not cands_to_add:
+        return current_c0.copy()
+
+    s_hat_B = cache_entry['s_hat_B']
+    s_hat_A_bloc = cache_entry['s_hat_A_bloc']
+    s_hat_B_bloc_inc = cache_entry['s_hat_B_bloc_inc']
+    cand_bloc = cache_entry['cand_bloc']
+
+    if calibration_scalars is None:
+        calibration_scalars = {c: 1.0 for c in cands_to_add}
+
+    # STEP 3: Inter-Bloc MRR (Macro Shift)
+    emp_bloc_mass = {b: 0.0 for b in BLOCS}
+    s_hat_B_bloc_ent = {b: 0.0 for b in BLOCS}
+
+    for c in menu_A:
+        emp_bloc_mass[cand_bloc[c]] += current_c0.get(c, 0.0)
+
+    for e in cands_to_add:
+        s_hat_B_bloc_ent[cand_bloc[e]] += s_hat_B.get(e, 0.0) * calibration_scalars.get(e, 1.0)
+
+    s_hat_B_bloc_total = {b: s_hat_B_bloc_inc[b] + s_hat_B_bloc_ent[b] for b in BLOCS}
+
+    unnorm_bloc_vol = {}
+    for b in BLOCS:
+        if emp_bloc_mass[b] > 1e-9 and s_hat_A_bloc[b] > 1e-9:
+            unnorm_bloc_vol[b] = emp_bloc_mass[b] * (s_hat_B_bloc_total[b] / s_hat_A_bloc[b])
+        else:
+            unnorm_bloc_vol[b] = s_hat_B_bloc_ent[b]
+
+    z_bloc = sum(unnorm_bloc_vol.values())
+    norm_bloc_vol = {b: v / z_bloc for b, v in unnorm_bloc_vol.items()}
+
+    # STEP 4: Entrant Extraction & Empirical Residual Allocation
+    new_c0 = {}
+    for b in BLOCS:
+        b_cands_inc = cache_entry['b_cands_inc'][b]
+        b_cands_ent = cache_entry['b_cands_ent'][b]
+        v_star = norm_bloc_vol[b]
+        b_total_B = s_hat_B_bloc_total[b]
+
+        extracted_entrant_vol = 0.0
+        for e in b_cands_ent:
+            calibrated_s_b = s_hat_B.get(e, 0.0) * calibration_scalars.get(e, 1.0)
+            entrant_share = v_star * (calibrated_s_b / b_total_B) if b_total_B > 1e-9 else 0.0
+            new_c0[e] = entrant_share
+            extracted_entrant_vol += entrant_share
+
+        v_residual = max(0.0, v_star - extracted_entrant_vol)
+        emp_inc_total = emp_bloc_mass[b]
+
+        for c in b_cands_inc:
+            cand_intra_share = current_c0[c] / emp_inc_total if emp_inc_total > 1e-9 else (1.0 / len(b_cands_inc) if b_cands_inc else 0.0)
+            new_c0[c] = v_residual * cand_intra_share
+
+    for c in menu_A:
+        if new_c0[c] > current_c0[c]:
+            new_c0[c] = current_c0[c]
+
+    z_final = sum(new_c0.values())
+    return {c: v / z_final for c, v in new_c0.items()}
+
 def execute_new_minor_injection(
-    latent_tables: Dict[str, Any],
-    next_contesting_parties: Dict[str, List[str]],
+    latent_tables: Dict[tuple, Any],
+    next_contesting_parties: Dict[tuple, List[str]],
     lc_df: pd.DataFrame,
     party_df: pd.DataFrame,
     model: Any,
@@ -1326,7 +1506,7 @@ def execute_new_minor_injection(
     rng: np.random.Generator,
     anomalous_districts: Set[str] = None,
     simulate: bool = True
-) -> Dict[str, Dict[str, float]]:
+) -> Tuple[Dict[tuple, Dict[str, float]], Dict[tuple, Dict[str, float]]]:
     """
     Executes Step 3: Simultaneously injects all missing parties into the structural logit. Returns the newly generated counterfactual Count 0 dictionary per electorate. 
     For static_high_ind_districts/anomalous_districts, it uses the model directly for the counterfactual, injecting extra uncertainty
@@ -1334,13 +1514,14 @@ def execute_new_minor_injection(
     cf_c0_dict = {}
     s_hat_a_dict = {}  # Store for Step 4
     
-    for div, table in latent_tables.items():
+    for key, table in latent_tables.items():
+        div = key[0]
         emp_c0_full = table.count_0
 
         # Isolate Party Sub-Space (Strip INDs so model evaluates pure LC party reality)
         emp_c0_party = {k: v for k, v in emp_c0_full.items() if not str(k).startswith('IND')}
         
-        target_cands = next_contesting_parties.get(div, [])
+        target_cands = next_contesting_parties.get(key, [])
         missing_cands = [
             c for c in target_cands 
             if c not in emp_c0_party 
@@ -1348,8 +1529,9 @@ def execute_new_minor_injection(
             and not str(c).startswith('IND')
         ] #         Identify who is missing (exclude Majors/Greens and INDs, as they are handled elsewhere)
 
+
         new_c0, shift_vec, s_hat_a, s_hat_b = inject_unified_parties_to_dop(district=div, cands_to_add=missing_cands, current_c0=emp_c0_party, lc_df=lc_df, party_df=party_df, model=model, calibration_scalars=sim_kappas)
-        s_hat_a_dict[div] = s_hat_a  # IND-free structural baseline for Step 4
+        s_hat_a_dict[key] = s_hat_a  # IND-free structural baseline for Step 4
 
 
 
@@ -1368,11 +1550,11 @@ def execute_new_minor_injection(
                 
             # renormalise (not particularly neat, but simple)
             z = sum(override_c0.values())
-            cf_c0_dict[div] = {k: v / z for k, v in override_c0.items()}
+            cf_c0_dict[key] = {k: v / z for k, v in override_c0.items()}
             
         else:
             # Standard MRR (Delta) Regime; produces replica of emp_c0_party if not missing_cands
-            cf_c0_dict[div] = new_c0
+            cf_c0_dict[key] = new_c0
         
         
     return cf_c0_dict, s_hat_a_dict
@@ -1392,7 +1574,15 @@ NEW_PARTY_PRIORS = {
 }
 
 # full set of parties that require a kappa i.e. need to be added to at least one electorate
-parties_to_add = sorted(list({p for d,t in latent_tables.items() if d in next_contesting_parties for p in next_contesting_parties[d] if p not in t.count_0 and p not in ['ALP','LP','NP','LNP','GRN'] and not str(p).startswith('IND')}))
+parties_to_add = sorted(list({
+    p
+    for (old_div, new_div), cands in next_contesting_parties.items()
+    if (old_div, old_div) in latent_tables
+    for p in cands
+    if p not in latent_tables[(old_div, old_div)].count_0 
+    and p not in ['ALP', 'LP', 'NP', 'LNP', 'GRN'] and not str(p).startswith('IND') and not str(p)=='TWP'
+}))
+# OLD: parties_to_add = sorted(list({p for (exist_d, new_d),t in latent_tables.items() if (exist_d, new_d) in next_contesting_parties for p in next_contesting_parties[d] if p not in t.count_0 and p not in ['ALP','LP','NP','LNP','GRN'] and not str(p).startswith('IND')}))
 print(f"Parties identified for unified injection: {parties_to_add}")
 
 
@@ -1400,7 +1590,7 @@ print(f"Parties identified for unified injection: {parties_to_add}")
 print("Pre-calibrating structural realization scalars (Kappas)...")
 calibration_data = pre_calibrate_all_kappas(
     parties_to_add=parties_to_add,
-    full_latent_tables=latent_tables, 
+    latent_tables=latent_tables, 
     lc_df=LC_FPs_df, 
     party_df=party_df, 
     model=final_model, 
@@ -1416,9 +1606,7 @@ print("Step 3 Complete. Counterfactual baselines generated.")
 
 def create_augmented_c0_for_defection(stripped_c0: dict, target_cands: list) -> dict:
     """
-    Takes the 2022 stripped Count 0 and removes ONLY non-contesting parties 
-    (excluding INDs, which are rigidly preserved).
-    Reallocates retiring parties proportionally to isolate IND gravity.
+    Takes the 2022 stripped Count 0 and removes ONLY non-contesting parties (excluding INDs, which are rigidly preserved).Reallocates retiring parties proportionally to isolate IND gravity.
     """
     c0 = stripped_c0.copy()
     
@@ -1563,12 +1751,12 @@ def compute_independent_defection_rates(
     return lambdas, tot_ind_emp
 
 def execute_IND_restoration_via_defections(
-    district: str,
+    district_pair: str,
     latent_c0: Dict[str, float],      # Contains ALL INDs for High-IND seats
     cf_c0_party: Dict[str, float],    # Step 3 Party Counterfactual
     s_hat_a: Dict[str, float],        # Step 3 Pure Party Baseline
     cands_added_in_step_3: List[str], 
-    next_contesting_parties: Dict[str, List[str]], # Needed for Divergent Futures
+    next_contesting_parties: Dict[tuple, List[str]], # Needed for Divergent Futures
     lc_series: pd.Series,
     party_df: pd.DataFrame,
     model: Any,
@@ -1579,6 +1767,7 @@ def execute_IND_restoration_via_defections(
     Handles divergent futures (e.g., a massive IND retires but a small IND stays)
     by scaling the defection rates proportionally to the surviving IND mass.
     """
+    district = district_pair[0]
     # 1. Identify ALL historical INDs residing in the latent baseline
     historical_inds = [c for c in latent_c0 if str(c).startswith('IND') and latent_c0[c] > 1e-9]
     extracted_historical_lambdas = {}
@@ -1586,7 +1775,7 @@ def execute_IND_restoration_via_defections(
         return copy.deepcopy(cf_c0_party), extracted_historical_lambdas
 
     # 2. Check Divergent Futures: Who is actually running in 2026?
-    target_cands = next_contesting_parties.get(district, [])
+    target_cands = next_contesting_parties.get(district_pair, [])
     recontesting_inds = [c for c in historical_inds if c in target_cands]
 
     # 3. Compute Historical Defection (using the FULL historical IND mass)
@@ -1833,11 +2022,11 @@ def extract_archetype_profile(district_list, target_ind_list, global_party_dict,
     records = []
 
     for div, target_names in zip(district_list, target_ind_list):
-        if div not in augmented_c0_dict or div not in s_hat_a_dict:
+        if (div, div) not in augmented_c0_dict or (div, div) not in s_hat_a_dict:
             continue
 
-        emp_c0 = augmented_c0_dict[div]
-        s_hat = s_hat_a_dict[div]
+        emp_c0 = augmented_c0_dict[(div, div)]
+        s_hat = s_hat_a_dict[(div, div)]
 
         # 1. Target candidate vote volume
         target_ind_vol = sum(emp_c0.get(cand, 0.0) for cand in target_names)
@@ -1896,7 +2085,7 @@ def extract_archetype_profile(district_list, target_ind_list, global_party_dict,
     # Return exactly 4 items to match: teal_profile, teal_records, teal_mean_vote, teal_std_vote
     return lambda_profile, pd.DataFrame(records), mean_vote, std_vote
 
-def model_teals_west(DOP_table_dict, final_model, baseline_theta, ia_csv_path, next_contesting_parties, calibration_data, LC_FPs_df, party_df):
+def model_teals_west(DOP_table_dict, final_model, baseline_theta, ia_csv_path, old_contesting_parties, calibration_data, LC_FPs_df, party_df):
 
     teal_divs = ['Brighton', 'Caulfield', 'Mornington', 'Kew', 'Hawthorn', 'Sandringham', 'Bellarine', 'Benambra']
     teal_inds = [['IND_Felicity_Frederico'], ['IND_Nomi_Kaltmann'], ['IND_Kate_Lardner'], ['IND_Sophie_Torney'], ['IND_Melissa_Lowe'], ['IND_Clarke_Martin'], ['IND_Sarah_Fenton'], ['IND_Jacqui_Hawkins']]
@@ -1915,20 +2104,23 @@ def model_teals_west(DOP_table_dict, final_model, baseline_theta, ia_csv_path, n
     # -----------------------------------------------------------------
     stripped_tables, static_high_inds, _ = execute_strip_incumbency(archetype_dop, ia_csv_path)
 
+    stripped_tables = {(div, div): stripped_tables[div] for div in stripped_tables.keys()}
+
     latent_tables = execute_party_removal(
-        stripped_tables, static_high_inds, next_contesting_parties, LC_FPs_df=LC_FPs_df, party_df=party_df, 
+        stripped_tables, static_high_inds, old_contesting_parties, LC_FPs_df=LC_FPs_df, party_df=party_df, # CHECK - amended to old_contesting_parties
         dop_lookup=dop_lookup, electorate_to_region=electorate_to_region, model = final_model, simulate=False, rng=rng_det
     )
 
     augmented_c0_dict = {
-        div: create_augmented_c0_for_defection(stripped_tables[div].count_0, next_contesting_parties.get(div, []))
-        for div in archetype_divs if div in stripped_tables
+        (div, div): create_augmented_c0_for_defection(stripped_tables[(div, div)].count_0, old_contesting_parties.get((div, div), []))
+        for div in archetype_divs if (div, div) in stripped_tables
     }
+    #import pdb; pdb.set_trace() # CHECK correct
     mean_kappas = draw_stochastic_kappas(calibration_data, simulate=False)
 
     _, s_hat_a_dict = execute_new_minor_injection(
         latent_tables=latent_tables,
-        next_contesting_parties=next_contesting_parties,
+        next_contesting_parties=old_contesting_parties,
         lc_df=LC_FPs_df,
         party_df=party_df,
         model=final_model,
@@ -1944,8 +2136,8 @@ def model_teals_west(DOP_table_dict, final_model, baseline_theta, ia_csv_path, n
     teal_profile ,teal_records, teal_mean_vote, teal_std_vote = extract_archetype_profile(teal_divs, teal_inds, global_party_dict, augmented_c0_dict, s_hat_a_dict)
     west_profile, west_records, west_mean_vote, west_std_vote = extract_archetype_profile(west_divs, west_inds, global_party_dict, augmented_c0_dict, s_hat_a_dict)
 
-    print(pd.DataFrame(teal_records))
-    print(pd.DataFrame(west_records))
+    #print(pd.DataFrame(teal_records))
+    #print(pd.DataFrame(west_records))
 
     df_teals = pd.DataFrame(teal_records).set_index('district_name')
     extra_teal_vols = np.array([16.14, 5.46, 7.23, 19.16, 10.91, 10.28]) / 100.0
@@ -2073,32 +2265,34 @@ def execute_targeted_archetype_injection(
 
     return updated_c0
 
-teal_params, west_params = model_teals_west(DOP_table_dict, final_model, baseline_theta, ia_csv_path, next_contesting_parties, calibration_data, LC_FPs_df, party_df)
+teal_params, west_params = model_teals_west(DOP_table_dict, final_model, baseline_theta, ia_csv_path, old_contesting_parties, calibration_data, LC_FPs_df, party_df)
 
 # Get master independent composition dictionaries
 master_minor_IND_removal_profiles = {} # Compositions for eliminating minor IND (Un-defecting)
 
 
-for div in next_contesting_parties.keys():
+for (old_div, new_div), target_cands in next_contesting_parties.items():
     # We want to capture 'IND' and 'TWP' (Teal/West) candidates
-    has_ind = any(c.startswith('IND') for c in next_contesting_parties[div])
-    has_twp = any(c == 'TWP' for c in next_contesting_parties[div]) # treated as IND structurally
+    has_ind = any(c.startswith('IND') for c in target_cands)
+    has_twp = any(c == 'TWP' for c in target_cands) # treated as IND structurally
     
     if not has_ind and not has_twp:
         continue
 
-    region = electorate_to_region.get(div, 'Unknown_Region')
+    region = electorate_to_region.get(old_div, 'Unknown_Region')
     assert region != 'Unknown_Region'
 
     # Get compositions for all the INDs and TWPs
-    target_inds = [c for c in next_contesting_parties[div] if c.startswith('IND') or c == 'TWP']
+    target_inds = [c for c in target_cands if c.startswith('IND') or c == 'TWP']
     
     for ind_name in target_inds:
         # Even generic INDs will get a locally-tuned composition array if the seat has history.
-        comp_array = synthesize_dop_composition(div, region, dop_lookup)
+        comp_array = synthesize_dop_composition(old_div, region, dop_lookup)
         
         # We key it by a tuple of (district, ind_name) to ensure complete safety in case a generic 'IND_John_Smith' runs in multiple seats across simulations.
-        master_minor_IND_removal_profiles[(div, ind_name)] = comp_array
+
+        if not (new_div, ind_name) in master_minor_IND_removal_profiles: # avoid duplications in redistirbution years
+            master_minor_IND_removal_profiles[(new_div, ind_name)] = comp_array
 
 
 DIRICHLET_NU = 20
@@ -2108,8 +2302,7 @@ DIRICHLET_NU = 20
 
 def load_step5_simulation_inputs(new_inds: pd.DataFrame, pool: pd.DataFrame, target_year: int = 2026) -> Dict[str, Any]:
     """
-    Fuses the candidate-level data and electorate-level data into 
-    the dictionary format required by Step 5.
+    Fuses the candidate-level data and electorate-level data into the dictionary format required by Step 5.
     """
     year_pool = pool[pool['Year'] == target_year].set_index('Electorate')
     year_cands = new_inds[new_inds['Year'] == target_year]
@@ -2203,8 +2396,7 @@ def execute_new_IND_injection(
     simulate = False
 ) -> Dict[str, float]:
     """
-    Step 5: Generates a brand new Independent insurgency pool using the Gamma model, 
-    splits it using OLS (if > 1), and carves the mass out of the Step 4 simplex.
+    Step 5: Generates a brand new Independent insurgency pool using the Gamma model, splits it using OLS (if > 1), and carves the mass out of the Step 4 simplex.
     """
     if rng is None: 
         rng = np.random.default_rng()
@@ -2291,7 +2483,7 @@ def execute_new_IND_injection(
     # -------------------------------------------------------------
     # 4. DIRICHLET PRIORS & STOCHASTIC IND->IND DRAW
     # -------------------------------------------------------------
-    if district in dop_lookup['electorates']:
+    if district in dop_lookup['electorates']: # CHECK - may fail forredistribtuion years as district = new_div
         mu_base = dop_lookup['electorates'][district].copy()
         S = dop_lookup['S_local']
     else:
@@ -2454,7 +2646,7 @@ for div, df_div in inc_next_df.groupby('div_nm'):
         inc_next_lookup[div] = {'is_open': True}
 
 
-########################## Step Polling ###################
+########################## Step 6 Polling ###################
 
 def get_poll_bucket(cand_name: str) -> str:
     party = cand_name.split('_')[0] if '_' in cand_name else cand_name
@@ -2647,11 +2839,182 @@ def append_polling_alr_step(
     # Return traces AND the final shares dict so you can access it programmatically
     return deterministic_traces, post_shares
 
+
+########################## Redistribution step #######################################33
+
+def apply_elimination_flows(df_start: pd.DataFrame, start_c0: dict, reduced_c0: dict) -> pd.DataFrame:
+    """
+    STAGE 1: start_c0 -> reduced_c0
+    Eliminated parties are stripped out, and their voters return to the surviving parties 
+    proportional to how those survivors grew in the logit model.
+    """
+    eliminated = [p for p in start_c0 if p not in reduced_c0]
+    survivors = list(reduced_c0.keys())
+    
+    # 1. Macro Logic: How much of the total eliminated pool did each survivor absorb?
+    v_elim_macro = sum(start_c0[p] for p in eliminated)
+    
+    flow_props = {}
+    if v_elim_macro > 0:
+        for p in survivors:
+            # Survivor's gain = Their reduced share minus their starting share
+            gain = max(0, reduced_c0[p] - start_c0.get(p, 0))
+            flow_props[p] = gain / v_elim_macro
+    else:
+        # If no parties were eliminated, survivors just keep their original votes
+        flow_props = {p: 0.0 for p in survivors}
+    
+    # 2. Micro Application (Vectorized)
+    # Start the new dataframe with the survivors' raw votes
+    df_reduced = df_start[survivors].copy()
+    
+    if eliminated:
+        # Sum the eliminated columns to create the Local Elimination Pool for every booth instantly
+        local_elim_pool = df_start[eliminated].sum(axis=1)
+        
+        # Distribute the local pool to the survivors using the macro proportions
+        for p in survivors:
+            df_reduced[p] += local_elim_pool * flow_props[p]
+            
+    return df_reduced
+
+def apply_entrant_flows(df_reduced: pd.DataFrame, reduced_c0: dict, final_c0: dict) -> pd.DataFrame:
+    """
+    STAGE 2: reduced_c0 -> final_c0
+    Surviving parties shed a fraction of their votes based on their retention rates.
+    Those shed votes are pooled and given to the new 2026 insurgents.
+    """
+    survivors = list(reduced_c0.keys())
+    new_entrants = [p for p in final_c0 if p not in reduced_c0]
+    
+    # 1. Macro Logic: Retention Rates & Insurgent Shares
+    # What percentage of their base did each survivor manage to keep?
+    retention = {
+        p: (final_c0.get(p, 0) / reduced_c0[p]) if reduced_c0[p] > 0 else 0.0 
+        for p in survivors
+    }
+    
+    # Of the total votes stolen by new entrants, what was each entrant's share?
+    v_added_macro = sum(final_c0[p] for p in new_entrants)
+    entrant_shares = {
+        p: (final_c0[p] / v_added_macro) if v_added_macro > 0 else 0.0
+        for p in new_entrants
+    }
+    
+    # 2. Micro Application (Vectorized)
+    df_final = pd.DataFrame(index=df_reduced.index)
+    
+    # Initialize an empty column to hold the Local Defection Pool for every booth
+    local_shed_pool = pd.Series(0.0, index=df_reduced.index)
+    
+    # Process the survivors: they keep a fraction, and shed the rest into the pool
+    for p in survivors:
+        df_final[p] = df_reduced[p] * retention[p]
+        local_shed_pool += df_reduced[p] * (1.0 - retention[p])
+        
+    # Process the insurgents: they draw from the pool based on their shares
+    for p in new_entrants:
+        df_final[p] = local_shed_pool * entrant_shares[p]
+        
+    return df_final
+
+def execute_final_redistribution(
+    rediv_votes_by_pp_id: dict, 
+    raw_c0_dict: dict, 
+    latent_tables: dict, 
+    cf_c0_step5_dict: dict, 
+    rediv_transfer_props_dict: dict
+) -> dict:
+    """
+    Transforms and aggregates raw polling booth votes into final 2026 district totals.
+    """
+    # Use defaultdict to automatically accumulate vote counts across multiple segments feeding into the same new_div
+    redistributed_votes = defaultdict(lambda: pd.Series(dtype=float))
+    
+    for (old_div, new_div) in cf_c0_step5_dict:
+
+        df_raw = rediv_votes_by_pp_id[(old_div, new_div)]
+        
+        # 1. Fetch the 3 perfectly normalized Macro Dictionaries
+        start_c0 = raw_c0_dict[old_div]
+        reduced_c0 = latent_tables[(old_div, new_div)].count_0
+        final_c0 = cf_c0_step5_dict[(old_div, new_div)]
+        
+        # Ensure df_raw only has columns that exist in the starting state
+        # (Fills missing parties with 0 to prevent KeyError in flow functions)
+        for p in start_c0.keys():
+            if p not in df_raw.columns:
+                import pdb; pdb.set_trace()
+                df_raw[p] = 0.0
+        
+        # 2. Apply the 2-Stage Vectorized Flow Math
+        df_reduced = apply_elimination_flows(df_raw, start_c0, reduced_c0)
+        df_final = apply_entrant_flows(df_reduced, reduced_c0, final_c0)
+        
+        # 3. Aggregate Physical Booths (Index != 0)
+        # We sum all physical booths and add them directly to the new_div's running total
+        physical_booths = df_final.loc[df_final.index != 0]
+        if not physical_booths.empty:
+            redistributed_votes[new_div] = redistributed_votes[new_div].add(physical_booths.sum(axis=0), fill_value=0)
+            
+        # 4. Proportional Allocation of 'Other' Votes (Index == 0)
+        if 0 in df_final.index:
+            other_votes_row = df_final.loc[0]
+            
+            # Look up the EBC scalar (e.g., 0.65 means 65% of the old division's postal votes go to this new division)
+            donation_prop = rediv_transfer_props_dict.get((old_div, new_div), 0.0)
+            
+            # Scale the row and add it to the new_div's running total
+            scaled_others = other_votes_row * donation_prop
+            redistributed_votes[new_div] = redistributed_votes[new_div].add(scaled_others, fill_value=0)
+
+    # 5. Clean up into a standard Python dictionary of raw votes
+    redistributed_c0_dict = {}
+    
+    for new_div, total_series in redistributed_votes.items():
+        # Drop zeroes/floating point artifacts
+        clean_series = total_series[total_series > 1e-5] 
+        
+        # Calculate the total formal votes for the new district
+        total_votes = clean_series.sum()
+        
+        if total_votes > 0:
+            # Divide each party's votes by the total to get fractions (0.0 to 1.0)
+            percentage_series = clean_series / total_votes
+            redistributed_c0_dict[new_div] = percentage_series.to_dict()
+        else:
+            import pdb; pdb.set_trace()
+            # Fallback in case of an empty district
+            redistributed_c0_dict[new_div] = {}
+
+    return redistributed_c0_dict
+
+# prepare raw c0 for redistribution:
+
+raw_c0_dict = {}
+meta_cols = {'div_nm', 'CandRemaining', 'TOTAL', 'CountType'}
+
+for old_div, raw_df in DOP_table_dict.items():
+    
+    # extract the primary vote row (Count 0)
+    c0_row = raw_df.iloc[0] 
+    # extract valid party/candidate votes
+    raw_c0 = {
+        c: float(c0_row[c]) 
+        for c in raw_df.columns 
+        if c not in meta_cols and pd.notna(c0_row[c]) and float(c0_row[c]) > 0
+    }
+    # normalisation
+    tot = sum(raw_c0.values())
+    raw_c0_dict[old_div] = {k: v / tot for k, v in raw_c0.items()}
+
+
 ############################################# Full simulation loop #######################################################################################
 
 def generate_deterministic_trace_run(
     target_districts: List[str],
     DOP_table_dict: Dict[str, Any],
+    raw_c0_dict: Dict[str, Any],
     inc_next_lookup: Dict[str, Any],
     ia_params_dict: dict,              # <--- Changed from ia_model
     ia_csv_path: str,                  # <--- New path argument for Step 1
@@ -2659,7 +3022,7 @@ def generate_deterministic_trace_run(
     final_model: Any,
     base_theta: np.ndarray,            
     mean_kappas: Dict[str, float],     
-    next_contesting_parties: Dict[str, List[str]],
+    next_contesting_parties: Dict[tuple, List[str]],
     LC_FPs_df: pd.DataFrame,
     party_df: pd.DataFrame,
     new_ind_features: Dict[str, Any],
@@ -2668,7 +3031,8 @@ def generate_deterministic_trace_run(
     dop_lookup: Dict[str, Any],
     mu_ind_to_ind_array: np.ndarray,
     global_party_dict: Dict[str, str],
-    kalman_poll: Dict[str, float] 
+    kalman_poll: Dict[str, float],
+    data_year: int 
 ) -> Dict[str, pd.DataFrame]:
     
     debug_traces = {}
@@ -2684,6 +3048,8 @@ def generate_deterministic_trace_run(
         dop_table_dict=DOP_table_dict,
         csv_path=ia_csv_path
     )
+    #stripped_tables = {(div, div): stripped_tables[div] for div in stripped_tables.keys()}
+    stripped_tables = {(old_div, new_div): stripped_tables[old_div] for old_div, new_div in next_contesting_parties.keys() if old_div in stripped_tables}
 
     # -------------------------------------------------------------
     # STEP 2: Deterministic Party Removal
@@ -2701,28 +3067,33 @@ def generate_deterministic_trace_run(
         rng=rng_det
     )
 
+    target_districts = list(latent_tables.keys())
     # Create perfectly isolated IND baseline
 
-    augmented_c0_dict = {}
-    for div in target_districts:
-        if div in stripped_tables:
-            augmented_c0_dict[div] = create_augmented_c0_for_defection(
-                stripped_c0=stripped_tables[div].count_0,
-                target_cands=next_contesting_parties.get(div, [])
-            )
+    #augmented_c0_dict = {}
+    #for div in target_districts:
+    #    if div in stripped_tables:
+    #        augmented_c0_dict[div] = create_augmented_c0_for_defection(
+    #            stripped_c0=stripped_tables[div].count_0,
+    #            target_cands=next_contesting_parties.get(div, [])
+    #        )
 
-    if 'Narracan' not in latent_tables:
-            import copy
-            sample_key = next(iter(latent_tables.keys()))
-            narracan_dummy = copy.deepcopy(latent_tables[sample_key])
-            
-            # Blank out count_0 since there is no 2022 LH general baseline
-            if hasattr(narracan_dummy, 'count_0'):
-                if isinstance(narracan_dummy.count_0, pd.Series):
-                    narracan_dummy.count_0 = pd.Series(dtype=float)
-                else:
-                    narracan_dummy.count_0 = {}
-            latent_tables['Narracan'] = narracan_dummy
+    augmented_c0_dict = {
+        (old_div, new_div): create_augmented_c0_for_defection(
+            stripped_c0=table.count_0,
+            target_cands=next_contesting_parties.get((old_div, new_div), [])
+        ) for (old_div, new_div), table in stripped_tables.items() if (old_div, new_div) in target_districts # CHECK 'if old_div in target_districts'
+    }
+
+    if (data_year == 2022):
+        for old_div, new_div in next_contesting_parties.keys():
+            if old_div == 'Narracan' and (old_div, new_div) not in latent_tables:
+                sample_key = next(iter(latent_tables.keys()))
+                narracan_dummy = copy.deepcopy(latent_tables[sample_key])
+                # Blank out count_0 since there is no 2022 LH general baseline
+                if hasattr(narracan_dummy, 'count_0'):
+                    narracan_dummy.count_0 = pd.Series(dtype=float) if isinstance(narracan_dummy.count_0, pd.Series) else {}
+                latent_tables[(old_div, new_div)] = narracan_dummy
 
     # -------------------------------------------------------------
     # STEP 3: Minor Party Injection
@@ -2740,14 +3111,16 @@ def generate_deterministic_trace_run(
         rng=rng_det
     )
 
-    for div in target_districts + ['Narracan']: # FIX: only 2026
-        lc_series = LC_FPs_df[div].dropna()
+    cf_c0_step5_dict = {}
+
+    for (old_div, new_div) in (target_districts + [('Narracan', 'Narracan')] if data_year == 2022 else target_districts): # CHECK: only 2026 needed? - abusing the fact that there's no redistribution
+        lc_series = LC_FPs_df[old_div].dropna()
         lc_series = lc_series / 100.0 if lc_series.sum() > 1.5 else lc_series
 
 
-        if (div == 'Narracan') and (data_year == 2022):
+        if (old_div == 'Narracan') and (data_year == 2022):
             # 1. Evaluate entire 2026 Count 0 directly using the model and LC series
-            narracan_cands = [c for c in next_contesting_parties['Narracan'] if not str(c).startswith('IND')]
+            narracan_cands = [c for c in next_contesting_parties[('Narracan', 'Narracan')] if not str(c).startswith('IND')]
             narracan_c0 = build_and_evaluate_model_allocation(
                 district='Narracan',
                 menu=narracan_cands,
@@ -2756,25 +3129,21 @@ def generate_deterministic_trace_run(
                 model=final_model,
                 fallback_c0=None
             )
-            
             # Normalize to guarantee exact 1.0 sum
             tot = sum(narracan_c0.values())
             cf_c0_step4 = {k: v / tot for k, v in narracan_c0.items()}
 
-
         # ---------------------------------------------------------
         # STEP 4: Restore Re-contesting Independents
         # ---------------------------------------------------------
-
- 
         else:
-            cands_added = [c for c in cf_c0_party_dict[div] if c not in s_hat_a_dict[div]]
+            cands_added = [c for c in cf_c0_party_dict[(old_div, new_div)] if c not in s_hat_a_dict[(old_div, new_div)]]
 
             cf_c0_step4, hist_lambdas_for_div = execute_IND_restoration_via_defections(
-                district=div,
-                latent_c0=augmented_c0_dict[div],
-                cf_c0_party=cf_c0_party_dict[div],
-                s_hat_a=s_hat_a_dict[div],
+                district_pair=(old_div, new_div),
+                latent_c0=augmented_c0_dict[(old_div, new_div)],
+                cf_c0_party=cf_c0_party_dict[(old_div, new_div)],
+                s_hat_a=s_hat_a_dict[(old_div, new_div)],
                 cands_added_in_step_3=cands_added,
                 next_contesting_parties=next_contesting_parties,
                 lc_series=lc_series,
@@ -2791,9 +3160,9 @@ def generate_deterministic_trace_run(
         # STEP 5: Inject New Independent Insurgency
         # ---------------------------------------------------------
         cf_c0_step5 = execute_new_IND_injection(
-            district=div,
+            district=new_div,
             cf_c0_step4=cf_c0_step4,
-            new_ind_features=new_ind_features.get(div, None),
+            new_ind_features=new_ind_features.get(new_div, None),
             pool_model=pool_model,
             split_model=split_model,
             dop_lookup=dop_lookup,
@@ -2806,7 +3175,7 @@ def generate_deterministic_trace_run(
         # Step 5b: Deterministic Archetype Injection
         cf_c0_step5 = execute_targeted_archetype_injection(
             cf_c0=cf_c0_step5,
-            div=div,
+            div=new_div,
             TARGET_2026_TEALS=TARGET_2026_TEALS,
             TARGET_2026_WEST=TARGET_2026_WEST,
             teal_params=teal_params,
@@ -2816,12 +3185,16 @@ def generate_deterministic_trace_run(
             rng=None
         )
 
+        cf_c0_step5_dict[(old_div, new_div)] = cf_c0_step5
+
+        #import pdb; pdb.set_trace()
+
         # =========================================================
         # TRACE CAPTURE (Ends at Step 5)
         # =========================================================
         raw_c0 = {}
-        if div in DOP_table_dict:
-            raw_df = DOP_table_dict[div]
+        if old_div in DOP_table_dict:
+            raw_df = DOP_table_dict[old_div]
             c0_row = raw_df.iloc[0] 
             meta_cols = {'div_nm', 'CandRemaining', 'TOTAL', 'CountType'}
             
@@ -2835,7 +3208,7 @@ def generate_deterministic_trace_run(
             if tot > 1.5:
                 raw_c0 = {k: v / tot for k, v in raw_c0.items()}
 
-        if (div == 'Narracan') and (data_year == 2022):
+        if (old_div == 'Narracan') and (data_year == 2022):
             trace_data = {
                 '0_Baseline (2022)': {},
                 '1_Step1 (Strip IA)': {},
@@ -2847,19 +3220,50 @@ def generate_deterministic_trace_run(
         else:
             trace_data = {
                 '0_Baseline (2022)': raw_c0,
-                '1_Step1 (Strip IA)': getattr(stripped_tables.get(div, None), 'count_0', {}),
-                '2_Step2 (Remove Parties)': latent_tables[div].count_0,
-                '3_Step3 (Inject Minors)': cf_c0_party_dict[div],
+                '1_Step1 (Strip IA)': getattr(stripped_tables.get((old_div, new_div), None), 'count_0', {}),
+                '2_Step2 (Remove Parties)': latent_tables[(old_div, new_div)].count_0,
+                '3_Step3 (Inject Minors)': cf_c0_party_dict[(old_div, new_div)],
                 '4_Step4 (Restore INDs)': cf_c0_step4,
                 '5_Step5 (New INDs)': cf_c0_step5
             }
         
         df_trace = pd.DataFrame.from_dict(trace_data, orient='index').fillna(0.0)
         df_trace = df_trace.sort_index()
-        debug_traces[div] = df_trace.reindex(sorted(df_trace.columns), axis=1)
+        debug_traces[(old_div, new_div)] = df_trace.reindex(sorted(df_trace.columns), axis=1)
+
+
+    # APPLY REDISTRIBUTION QUANTITIES, reduce dict keys to single electorate 
+
+    target_districts = [key[1] for key in target_districts]
+    if not is_redistribution:
+        debug_traces = {key[1]: debug_traces[key] for key in debug_traces.keys()} # old_div = new_div should persist!  
+    else:
+        cf_c0_step5_dict = execute_final_redistribution(
+            rediv_votes_by_pp_id = rediv_votes_by_pp_id, 
+            raw_c0_dict = raw_c0_dict, 
+            latent_tables = latent_tables, 
+            cf_c0_step5_dict = cf_c0_step5_dict, 
+            rediv_transfer_props_dict = rediv_transfer_props_dict
+        )
+        assert len(cf_c0_step5_dict) == 88 # Victoria - ensure abolished divs don't hang around
+
+        debug_traces_rediv = {}
+        # keep debug_traces for the (old_div, old_div) one where possible. If fully new electorate, then clear out the starts
+        for div in cf_c0_step5_dict.keys():
+            if (div, div) in debug_traces:
+                debug_traces_rediv[div] = debug_traces[(div, div)]
+
+            else:
+                # Brand new division - create empty trace with standard index
+                steps = ['0_Baseline (2022)', '1_Step1 (Strip IA)', '2_Step2 (Remove Parties)', 
+                         '3_Step3 (Inject Minors)', '4_Step4 (Restore INDs)', '5_Step5 (New INDs)']
+                debug_traces_rediv[div] = pd.DataFrame(index=steps)
+            # add redistribution result to trace
+            debug_traces_rediv[div].loc['R_StepR (Redistribution)'] = cf_c0_step5_dict[div]
+            debug_traces_rediv[div] = debug_traces_rediv[div].fillna(0.0)
 
     # =========================================================
-    # MIDDLE: APPLY ALR POLLING SHIFT (STEP 6)
+    # APPLY ALR POLLING SHIFT (STEP 6)
     # =========================================================
 
     
@@ -2893,7 +3297,7 @@ def generate_deterministic_trace_run(
             simulate=False,                                   
             rng=rng_det
         )
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
 
         # Append Step 7 to the trace
         debug_traces[div].loc['7_Step7 (Add 2026 IA)'] = pd.Series(cf_c0_step7)
@@ -2915,6 +3319,7 @@ print("Running deterministic structural trace...")
 deterministic_traces, master_4cp_defection_rates = generate_deterministic_trace_run(
     target_districts=target_districts,
     DOP_table_dict=DOP_table_dict,
+    raw_c0_dict = raw_c0_dict,
     inc_next_lookup=inc_next_lookup,
     
     # --- Decoupled IA & Demographic Arguments ---
@@ -2937,7 +3342,8 @@ deterministic_traces, master_4cp_defection_rates = generate_deterministic_trace_
     dop_lookup=dop_lookup,
     mu_ind_to_ind_array=mu_ind_to_ind_array,
     global_party_dict=global_party_dict,
-    kalman_poll=kalman_poll
+    kalman_poll=kalman_poll,
+    data_year = data_year
 )
 
 print(f"Trace completed for {len(deterministic_traces)} districts.")
@@ -3105,6 +3511,17 @@ final_model.set_params(baseline_theta)
 mc_results_c0 = []
 s_hat_a_dicts = []
 
+stripped_tables = {(old_div, new_div): stripped_tables[(old_div, old_div)] for old_div, new_div in next_contesting_parties.keys() if (old_div, old_div) in stripped_tables}
+
+# Build the 88-district dictionary cache once
+global_step3_cache = precompute_step3_cache(
+    det_latent_tables=latent_tables, # uses baseline tables - this should have very minor effect on modelled states - CHECK
+    next_contesting_parties=next_contesting_parties,
+    lc_df=LC_FPs_df,
+    party_df=party_df,
+    model=final_model
+)
+
 # =========================================================================
 # MONTE CARLO SIMULATION LOOP
 # =========================================================================
@@ -3112,6 +3529,8 @@ for sim_idx in range(num_simulations):
 
     if sim_idx % 50 == 1:
         print("Completed", sim_idx - 1)
+
+    next_time = time.time()
 
     # -------------------------------------------------------------
     # STEP 2: Stochastic Party Removal
@@ -3129,21 +3548,46 @@ for sim_idx in range(num_simulations):
         rng=rng 
     )
 
-    if 'Narracan' not in latent_tables:
-        import copy
-        sample_key = next(iter(latent_tables.keys()))
-        narracan_dummy = copy.deepcopy(latent_tables[sample_key])
-        narracan_dummy.count_0 = {} if not isinstance(getattr(narracan_dummy, 'count_0', {}), pd.Series) else pd.Series(dtype=float)
-        latent_tables['Narracan'] = narracan_dummy
+    target_districts = list(latent_tables.keys())
+
+    print(time.time() - next_time, 'Step 2 done')
+    next_time = time.time()
+
+    #if (data_year == 2022) and ('Narracan' not in latent_tables):
+    #    sample_key = next(iter(latent_tables.keys()))
+    #    narracan_dummy = copy.deepcopy(latent_tables[sample_key])
+    #    narracan_dummy.count_0 = {} if not isinstance(getattr(narracan_dummy, 'count_0', {}), pd.Series) else pd.Series(dtype=float)
+    #    latent_tables['Narracan'] = narracan_dummy
+    if (data_year == 2022):
+        for old_div, new_div in next_contesting_parties.keys():
+            if old_div == 'Narracan' and (old_div, new_div) not in latent_tables:
+                sample_key = next(iter(latent_tables.keys()))
+                narracan_dummy = copy.deepcopy(latent_tables[sample_key])
+                # Blank out count_0 since there is no 2022 LH general baseline
+                if hasattr(narracan_dummy, 'count_0'):
+                    narracan_dummy.count_0 = pd.Series(dtype=float) if isinstance(narracan_dummy.count_0, pd.Series) else {}
+                latent_tables[(old_div, new_div)] = narracan_dummy
+
+    print(time.time() - next_time, 'Step 3a')
+    next_time = time.time()
 
     # Re-build isolated IND baseline for defections
-    augmented_c0_dict = {}
-    for div in target_districts:
-        if div in stripped_tables:
-            augmented_c0_dict[div] = create_augmented_c0_for_defection(
-                stripped_c0=stripped_tables[div].count_0,
-                target_cands=next_contesting_parties.get(div, [])
-            )
+    #augmented_c0_dict = {}
+    #for div in target_districts:
+    #    if div in stripped_tables:
+    #        augmented_c0_dict[div] = create_augmented_c0_for_defection(
+    #            stripped_c0=stripped_tables[div].count_0,
+    #            target_cands=next_contesting_parties.get(div, [])
+    #        )
+    augmented_c0_dict = {
+        (old_div, new_div): create_augmented_c0_for_defection(
+            stripped_c0=table.count_0,
+            target_cands=next_contesting_parties.get((old_div, new_div), [])
+        ) for (old_div, new_div), table in stripped_tables.items() if (old_div, new_div) in target_districts # CHECK 'if old_div in target_districts'
+    }
+    #import pdb; pdb.set_trace()
+    print(time.time() - next_time, 'Step 3b')
+    next_time = time.time()
 
     # -------------------------------------------------------------
     # STEP 3: Minor Party Injection + Dirichlet Precision Resampling
@@ -3161,33 +3605,38 @@ for sim_idx in range(num_simulations):
         rng=rng,
         anomalous_districts=anomalous_districts
     )
+    print(time.time() - next_time, 'Step 3c')
+    next_time = time.time()
 
     # --- APPLY DIRICHLET VARIANCE TO STEP 3 PRIMARY SHARES ---
-    for div, c0_dict in cf_c0_party_dict.items():
+    for key, c0_dict in cf_c0_party_dict.items():
         cands = list(c0_dict.keys())
         expected_shares = [c0_dict[c] for c in cands]
         
         # Scale expected probabilities by calibrated precision
-        alphas = [max(1e-3, p * NU_MINOR_PRECISION) for p in expected_shares]
+        alphas = [max(1e-3, p * NU_MINOR_PRECISION[data_year]) for p in expected_shares]
         
         # Draw the true election-day distribution on the simplex
         simulated_shares = rng.dirichlet(alphas)
-        cf_c0_party_dict[div] = dict(zip(cands, simulated_shares))
+        cf_c0_party_dict[key] = dict(zip(cands, simulated_shares))
 
     s_hat_a_dicts.append(s_hat_a_dict)
+
+    print(time.time() - next_time, 'Step 3 done')
+    next_time = time.time()
 
     # -------------------------------------------------------------
     # PASS 1: Build Baselines through Step 5 Across All Districts
     # -------------------------------------------------------------
     cf_c0_step5_dict = {}
 
-    for div in target_districts + ['Narracan']:
-        lc_series = LC_FPs_df[div].dropna()
+    for (old_div, new_div) in (target_districts + [('Narracan', 'Narracan')] if data_year == 2022 else target_districts): # CHECK: only 2026 needed? - abusing the fact that there's no redistribution
+        lc_series = LC_FPs_df[old_div].dropna()
         lc_series = lc_series / 100.0 if lc_series.sum() > 1.5 else lc_series
 
         # --- Narracan Dedicated Clause ---
-        if (div == 'Narracan') and (data_year == 2022):
-            narracan_cands = [c for c in next_contesting_parties['Narracan'] if not str(c).startswith('IND')]
+        if (old_div == 'Narracan') and (data_year == 2022):
+            narracan_cands = [c for c in next_contesting_parties[('Narracan', 'Narracan')] if not str(c).startswith('IND')]
             narracan_c0 = build_and_evaluate_model_allocation(
                 district='Narracan',
                 menu=narracan_cands,
@@ -3200,18 +3649,18 @@ for sim_idx in range(num_simulations):
             norm_narracan = [v / tot_n for v in narracan_c0.values()]
             
             # Apply Dirichlet to Narracan's raw LC allocation
-            alphas_nar = [max(1e-3, p * NU_MINOR_PRECISION) for p in norm_narracan]
+            alphas_nar = [max(1e-3, p * NU_MINOR_PRECISION[data_year]) for p in norm_narracan]
             sim_nar = rng.dirichlet(alphas_nar)
             cf_c0_step4 = dict(zip(narracan_c0.keys(), sim_nar))
 
-        # --- Standard Step 4 (Restore INDs) ---
+          # --- Standard Step 4 (Restore INDs) ---
         else:
-            cands_added_in_step_3 = [c for c in cf_c0_party_dict[div] if c not in s_hat_a_dict[div]]
+            cands_added_in_step_3 =  [c for c in cf_c0_party_dict[(old_div, new_div)] if c not in s_hat_a_dict[(old_div, new_div)]] # [c for c in cf_c0_party_dict[div] if c not in s_hat_a_dict[div]]
             cf_c0_step4, _ = execute_IND_restoration_via_defections(
-                district=div,
-                latent_c0=augmented_c0_dict[div],
-                cf_c0_party=cf_c0_party_dict[div],
-                s_hat_a=s_hat_a_dict[div],
+                district_pair=(old_div, new_div),
+                latent_c0=augmented_c0_dict[(old_div, new_div)],
+                cf_c0_party=cf_c0_party_dict[(old_div, new_div)],
+                s_hat_a=s_hat_a_dict[(old_div, new_div)],
                 cands_added_in_step_3=cands_added_in_step_3,
                 next_contesting_parties=next_contesting_parties,
                 lc_series=lc_series,
@@ -3223,9 +3672,9 @@ for sim_idx in range(num_simulations):
         # STEP 5: Inject New Independent Insurgency
         # ---------------------------------------------------------
         cf_c0_step5 = execute_new_IND_injection(
-            district=div,
+            district=new_div,
             cf_c0_step4=cf_c0_step4,
-            new_ind_features=new_ind_features.get(div, None),
+            new_ind_features=new_ind_features.get(new_div, None),
             pool_model=pool_model,
             split_model=split_model,
             dop_lookup=dop_lookup,
@@ -3238,7 +3687,7 @@ for sim_idx in range(num_simulations):
         # Step 5b: Stochastic Archetype Injection
         cf_c0_step5 = execute_targeted_archetype_injection(
             cf_c0=cf_c0_step5,
-            div=div,
+            div=new_div,
             TARGET_2026_TEALS=TARGET_2026_TEALS,
             TARGET_2026_WEST=TARGET_2026_WEST,
             teal_params=teal_params,
@@ -3248,10 +3697,30 @@ for sim_idx in range(num_simulations):
             rng=rng 
         )
 
-        cf_c0_step5_dict[div] = cf_c0_step5
+        cf_c0_step5_dict[(old_div, new_div)] = cf_c0_step5
+
+    print(time.time() - next_time, 'Step 5 done')
+    next_time = time.time()
+
+    # APPLY REDISTRIBUTION QUANTITIES
+
+    # reduce dict keys to single electorate 
+    if not is_redistribution:
+        cf_c0_step5_dict = {key[1]: cf_c0_step5_dict[key] for key in cf_c0_step5_dict.keys()} # old_div = new_div should persist!
+        #import pdb; pdb.set_trace()
+    else:
+
+        cf_c0_step5_dict = execute_final_redistribution(
+            rediv_votes_by_pp_id = rediv_votes_by_pp_id, 
+            raw_c0_dict = raw_c0_dict, 
+            latent_tables = latent_tables, 
+            cf_c0_step5_dict = cf_c0_step5_dict, 
+            rediv_transfer_props_dict = rediv_transfer_props_dict
+        )
+    target_districts = [key[1] for key in target_districts]
 
     # -------------------------------------------------------------
-    # MIDDLE: Compute Statewide ALR Shifts (Step 6)
+    # Compute Statewide ALR Shifts (Step 6)
     # -------------------------------------------------------------
     # Uses your existing compute_statewide_alr_shifts helper
     alr_shifts = compute_statewide_alr_shifts(
@@ -3266,7 +3735,7 @@ for sim_idx in range(num_simulations):
     # -------------------------------------------------------------
     cf_c0_step7_dict = {}
 
-    for d_idx, div in enumerate(target_districts + ['Narracan']):
+    for d_idx, div in enumerate(target_districts + ['Narracan'] if data_year == 2022 else target_districts):
         # 1. Total ALR Shift = Deterministic Base + Statewide Error + Electorate Shock
         div_shifts = {
             b: alr_shifts[b] + sim_poll_errors[sim_idx, k] + sim_elec_errors[sim_idx, d_idx, k]
@@ -3296,6 +3765,10 @@ for sim_idx in range(num_simulations):
 
     # Store the complete Step 7 realization for this Monte Carlo draw
     mc_results_c0.append(cf_c0_step7_dict)
+
+    print(time.time() - next_time, 'Step 7 done')
+    next_time = time.time()
+
 print(time.time() - start)
 # pd.DataFrame([result['Bentleigh'] for result in mc_results_c0])
 
@@ -3903,7 +4376,7 @@ def process_preference_distribution(
                 thetas = execute_theta_steal(ind_cand, top_cands_non_ind, base_thetas, def_profile, party_df)
                 
                 for c in top_cands:
-                    totals[c] += thetas[c]
+                    totals[c] += elim_minor_pool * thetas[c]
                     
             elif num_inds >= 2 and (len(top_cands) - num_inds) == 2:
                 # PROCEDURE C: 2+ INDs, exactly 2 Non-INDs (Historical TCP Steal)
@@ -3948,9 +4421,7 @@ def process_preference_distribution(
         survivors = [c for c in top_cands if c != weakest_cand]
         
         next_top_cands.append(survivors)
-
-
-
+    
     # Convert output back into a DataFrame (1000 x (N-1))
     col_names = [f'Rank_{i+1}' for i in range(len(next_top_cands[0]))]
     next_top_df = pd.DataFrame(next_top_cands, columns=col_names, index=updated_fp_df.index)
@@ -4110,7 +4581,7 @@ def run_statewide_preference_simulation(
         per_electorate_winners[div] = winners
         per_electorate_runners_up[div] = runners
         per_electorate_winning_tcp[div] = win_tcps
-        
+
         for sim_idx in range(n_sims):
             w, r = winners[sim_idx], runners[sim_idx]
             

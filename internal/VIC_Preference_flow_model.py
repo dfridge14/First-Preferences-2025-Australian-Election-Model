@@ -26,7 +26,7 @@ def exception_handler(type, value, tb):
 
 sys.excepthook = exception_handler
 
-data_year = 2018
+data_year = 2022
 
 base_dir = Path.home() / f"Australian Election/Victorian Election/VIC-{data_year}"
 os.chdir(base_dir)
