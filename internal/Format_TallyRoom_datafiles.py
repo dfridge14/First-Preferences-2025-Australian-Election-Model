@@ -17,12 +17,6 @@ sys.excepthook = exception_handler
 
 
 
-data_year = 2006
-state = 'VIC'
-
-tally_room_dir = Path.home() / f"Australian Election/Victorian Election/Tally Room/{state}-{data_year}"
-main_dir =  Path.home() / f"Australian Election/Victorian Election/{state}-{data_year}"
-
 
 def allocate_regional_votes_to_electorate(df):
     # 1. Define the metadata columns that describe the candidate/electorate
@@ -87,69 +81,90 @@ def allocate_regional_votes_to_electorate(df):
     
     return standardise_2006_atl_rows(df)
 
-
-# For 2006, combine polling place votes into Electorates-Votes...? 
-
-if data_year == 2006:
-    df = pd.read_excel(tally_room_dir / f'VIC-2006-LC-Votes-Pollingplace.xlsx')
-    df = allocate_regional_votes_to_electorate(df).sort_values(by = ['district_id', 'group_code','ballot_order'])
-    if not (main_dir / 'VIC-2006-LC-Votes-Electorate.xlsx').exists():
-        df.to_excel(main_dir / 'VIC-2006-LC-Votes-Electorate.xlsx', index = False)
-    #import pdb; pdb.set_trace()
-    
-
-if state == 'VIC':
-
-
+def format_specific_party(row):
+    """
+    Helper function to convert 'IND' into 'IND_First_Last'.
+    Leaves standard parties (e.g., 'ALP', 'ON') untouched.
+    """
+    ab = str(row['PartyAb']).strip()
+    if ab.startswith('IND'):
+        # Title case and replace spaces with underscores (e.g. "Ali Cupper" -> "Ali_Cupper")
+        first = str(row['first_name']).strip().title().replace(' ', '_')
+        last = str(row['surname']).strip().title().replace(' ', '_')
+        return f"IND_{first}_{last}"
+    return ab
 
 
-    # rename district_name -> div_nm, party_code -> PartyAb
-    party_df = pd.read_csv(main_dir / f'VIC-{data_year}-Parties.csv')
-    party_mapping = party_df.set_index('party_code')['PartyAb']
+for data_year in [2006,2010,2014,2018,2022]:
+    state = 'VIC'
 
-    file_map = {        
-        'LA_Candidates': tally_room_dir / f'VIC-{data_year}-LA-Candidates.xlsx',
-        'LC_Candidates': tally_room_dir / f'VIC-{data_year}-LC-Candidates.xlsx',
-        'LA_results': tally_room_dir / f'VIC-{data_year}-LA-Primary-Electorate.xlsx',
-        'LC_results': tally_room_dir / f'VIC-{data_year}-LC-Votes-Electorate.xlsx' if data_year != 2006 else main_dir / 'VIC-2006-LC-Votes-Electorate.xlsx',
-        'LA_PP_results': tally_room_dir / f'VIC-{data_year}-LA-Primary-Pollingplace.xlsx',
-        'Polling_Places': tally_room_dir / f'VIC-{data_year}-Pollingplaces.xlsx'
-    }
+    tally_room_dir = Path.home() / f"Australian Election/Victorian Election/Tally Room/{state}-{data_year}"
+    main_dir =  Path.home() / f"Australian Election/Victorian Election/{state}-{data_year}"
 
-    for name, file_path in file_map.items():
-        new_file_path =  main_dir / f"{file_path.stem}-Formatted.csv"
+    # For 2006, combine polling place votes into Electorates-Votes...? 
 
-        if not new_file_path.exists():
-
-          
-
-            df = pd.read_excel(file_path)
-
-            if name == 'Polling_Places':
-                df.rename(columns={'district_name': 'div_nm', 'latitude': 'Lat','longitude':'Long'}, inplace=True)
-            else:
-            
-                # Modify in place and map the standardized values
-                df.rename(columns={'district_name': 'div_nm', 'party_code': 'PartyAb'}, inplace=True)
-                df['PartyAb'] = df['PartyAb'].map(party_mapping)
-
-                # adjust PartyAb of IND to INDX based on ballot order
-                if 'LA' in name:
-                    is_ind = df['PartyAb'] == 'IND'
-                    df.loc[is_ind, 'PartyAb'] = ('IND' + (df[is_ind].groupby('div_nm').cumcount() + 1).astype(str)) if name != 'LA_PP_results' else ('IND' + (df[is_ind].groupby(['div_nm','pp_id']).cumcount() + 1).astype(str))
-            #import pdb; pdb.set_trace()
-            df.to_csv(new_file_path, index=False)
-            print(f"Created: {new_file_path.name}")
-
-        else:
-            print(f"Already exists, skipping: {new_file_path.name}")
-        
+    if data_year == 2006:
+        df = pd.read_excel(tally_room_dir / f'VIC-2006-LC-Votes-Pollingplace.xlsx')
+        df = allocate_regional_votes_to_electorate(df).sort_values(by = ['district_id', 'group_code','ballot_order'])
+        if not (main_dir / 'VIC-2006-LC-Votes-Electorate.xlsx').exists():
+            df.to_excel(main_dir / 'VIC-2006-LC-Votes-Electorate.xlsx', index = False)
         #import pdb; pdb.set_trace()
         
 
-    
+    if state == 'VIC':
+
+        # rename district_name -> div_nm, party_code -> PartyAb
+        party_df = pd.read_csv(main_dir / f'VIC-{data_year}-Parties.csv')
+        party_mapping = party_df.set_index('party_code')['PartyAb']
+
+        file_map = {        
+            'LA_Candidates': tally_room_dir / f'VIC-{data_year}-LA-Candidates.xlsx',
+            'LC_Candidates': tally_room_dir / f'VIC-{data_year}-LC-Candidates.xlsx',
+            'LA_results': tally_room_dir / f'VIC-{data_year}-LA-Primary-Electorate.xlsx',
+            'LC_results': tally_room_dir / f'VIC-{data_year}-LC-Votes-Electorate.xlsx' if data_year != 2006 else main_dir / 'VIC-2006-LC-Votes-Electorate.xlsx',
+            'LA_PP_results': tally_room_dir / f'VIC-{data_year}-LA-Primary-Pollingplace.xlsx',
+            'Polling_Places': tally_room_dir / f'VIC-{data_year}-Pollingplaces.xlsx'
+        }
+
+        for name, file_path in file_map.items():
+            new_file_path =  main_dir / f"{file_path.stem}-Formatted.csv"
+
+            if not new_file_path.exists():
 
             
+
+                df = pd.read_excel(file_path)
+
+                if name == 'Polling_Places':
+                    df.rename(columns={'district_name': 'div_nm', 'latitude': 'Lat','longitude':'Long'}, inplace=True)
+                else:
+                
+                    # Modify in place and map the standardized values
+                    df.rename(columns={'district_name': 'div_nm', 'party_code': 'PartyAb'}, inplace=True)
+                    df['PartyAb'] = df['PartyAb'].map(party_mapping)
+
+                    # adjust PartyAb of IND to INDX based on ballot order
+                    if 'LA' in name:
+                        if name != 'LA_PP_results':
+                            is_ind = df['PartyAb'] == 'IND'
+                            df.loc[is_ind, 'PartyAb'] = ('IND' + (df[is_ind].groupby('div_nm').cumcount() + 1).astype(str))  
+                        else:
+                            df['PartyAb'] = df.apply(format_specific_party, axis=1)
+                            import pdb; pdb.set_trace()
+                
+                #import pdb; pdb.set_trace()
+                df.to_csv(new_file_path, index=False)
+                print(f"Created: {new_file_path.name}")
+
+            else:
+                print(f"Already exists, skipping: {new_file_path.name}")
+            
+            #import pdb; pdb.set_trace()
+            
+
+        
+
+                
 
 # for pre-2022 add 2CP results
 

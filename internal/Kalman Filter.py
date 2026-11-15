@@ -263,7 +263,7 @@ def df_to_alr(df, ref_col):
 
 
 #df = obtain_kalman_polling_averages(pd.read_csv('Farrer_Byelection_Polling_for_Kalman_filter.csv'), is_Farrer_2026=True, to_plot=True)
-#df = obtain_kalman_polling_averages(pd.read_csv('/home/dania-freidgeim/Australian Election/Victorian Election/VIC-2026/VIC_2026_Polling_for_Kalman_filter.csv'), is_Farrer_2026=False, to_plot=True)
+df = obtain_kalman_polling_averages(pd.read_csv('/home/dania-freidgeim/Australian Election/Victorian Election/VIC-2026/VIC_2026_Polling_for_Kalman_filter.csv'), is_Farrer_2026=True, to_plot=True)
 import pdb; pdb.set_trace()
 
 Global_daily_polling_averages = obtain_kalman_polling_averages(Grand_CAGO_polling_df, to_plot=True)

@@ -490,25 +490,15 @@ def build_cumulative_lc_sequences(
 
                 u_m = lc_series.get(cand, 0.0)
                 
-                if u_m <= 1e-9 and cand in ['LP', 'NP', 'LNP']:
-                    coal_lc_mass = sum(lc_series.get(a, 0.0) for a in ['LP', 'NP', 'LNP'])
-                    coal_la_cands = [c for c in active_cands if c in ['LP', 'NP', 'LNP']]
-                    
-                    if len(coal_la_cands) == 1:
-                        u_m = coal_lc_mass
-                    elif len(coal_la_cands) > 1:
-                        emp_c = emp_shares.get(cand, 0.0)
-                        emp_tot = sum(emp_shares.get(c, 0.0) for c in coal_la_cands)
-                        u_m = coal_lc_mass * (emp_c / emp_tot) if emp_tot > 0 else (coal_lc_mass / len(coal_la_cands))
-
-                # COAL parties run in LC separately (2006 Specific Case)
-                elif cand in ['LP', 'NP', 'LNP']:
-                    coal_la_cands = [c for c in active_cands if c in ['LP', 'NP', 'LNP']]
-                    coal_lc_cands = [c for c in ['LP', 'NP', 'LNP'] if lc_series.get(c, 0.0) > 1e-9]
-                    
-                    # If 2 or more COAL parties in LC, but only 1 runs in LA -> Pool them
-                    if len(coal_lc_cands) >= 2 and len(coal_la_cands) == 1:
-                        u_m = sum(lc_series.get(a, 0.0) for a in ['LP', 'NP', 'LNP'])
+                if cand in ['LP', 'NP', 'LNP']: # NEW
+                    coal_lc_mass = sum(lc_series.get(a, 0.0) for a in ['LP', 'NP', 'LNP']) # NEW
+                    coal_la_cands = [c for c in active_cands if c in ['LP', 'NP', 'LNP']] # NEW
+                    if len(coal_la_cands) == 1: # NEW
+                        u_m = coal_lc_mass # NEW
+                    else: # NEW
+                        emp_c = emp_shares.get(cand, 0.0) # NEW
+                        emp_tot = sum(emp_shares.get(c, 0.0) for c in coal_la_cands) # NEW
+                        u_m = coal_lc_mass * (emp_c / emp_tot) if emp_tot > 0 else (coal_lc_mass / len(coal_la_cands)) # NEW
 
                 cand_demand[cand] = u_m
                 if b_idx in [2, 3, 4]:
@@ -629,8 +619,8 @@ def compute_flow_proportional_l2_loss(
         for b in [2, 3, 4]:
             orphan_vol += obs.lc_mass[b] * max(0.0, 1.0 - obs.c_cap[b])
         
-        # Floor O at 1% to prevent scaling explosions in near-perfect Count 0 states
-        O_safe = max(orphan_vol, 0.01)
+        # Floor O at 5% to prevent scaling explosions in near-perfect Count 0 states
+        O_safe = max(orphan_vol, 0.05)
 
         # 2. Evaluate candidate-level error relative to the Orphan Pool size
         cand_keys = set(emp.keys()) | set(pred.keys())
@@ -899,6 +889,61 @@ def calculate_global_dirichlet_precision(model, observations):
     print("=" * 65 + "\n")
     return global_nu
 
+def debug_2006_coal_and_loss(model: AggregateLatentLogit, observations: List[CumulativeObservation]): # NEW
+    alpha, beta, gamma = model.unpack_params(model.theta) # NEW
+    BLOCS = ['ALP', 'COAL', 'Left', 'Right', 'Centre'] # NEW
+    rows = [] # NEW
+
+    for obs in observations: # NEW
+        s_hat = model.evaluate_state_allocation( # NEW
+            obs.lc_mass, obs.active_cands, obs.c_cap, obs.menu_size, # NEW
+            obs.cand_to_bloc, obs.cand_demand, alpha, beta, gamma # NEW
+        ) # NEW
+        emp = obs.empirical_shares # NEW
+
+        # 1. Bloc-level sums (combines LP + NP)
+        emp_bloc = {b: 0.0 for b in BLOCS} # NEW
+        pred_bloc = {b: 0.0 for b in BLOCS} # NEW
+        for c in obs.active_cands: # NEW
+            b_name = BLOCS[obs.cand_to_bloc[c]] # NEW
+            emp_bloc[b_name] += emp.get(c, 0.0) # NEW
+            pred_bloc[b_name] += s_hat.get(c, 0.0) # NEW
+
+        # 2. Candidate-level max error inside COAL (checks if LP vs NP split is the culprit)
+        coal_cands = [c for c in obs.active_cands if obs.cand_to_bloc[c] == 1] # NEW
+        max_coal_cand_err = max([abs(s_hat.get(c, 0.0) - emp.get(c, 0.0)) for c in coal_cands], default=0.0) # NEW
+
+        # 3. Exact Loss Contribution
+        orphan_vol = sum(obs.lc_mass[b] * max(0.0, 1.0 - obs.c_cap[b]) for b in [2, 3, 4]) # NEW
+        O_safe = max(orphan_vol, 0.01) # NEW
+        
+        emp_fw, pred_fw = emp.copy(), s_hat.copy() # NEW
+        if ('LP' in emp_fw or 'LP' in pred_fw) and ('NP' in emp_fw or 'NP' in pred_fw): # NEW
+            emp_fw['COAL_COMBINED'] = emp_fw.pop('LP', 0.0) + emp_fw.pop('NP', 0.0) # NEW
+            pred_fw['COAL_COMBINED'] = pred_fw.pop('LP', 0.0) + pred_fw.pop('NP', 0.0) # NEW
+        obs_loss = sum(((pred_fw.get(c, 0.0) - emp_fw.get(c, 0.0)) / O_safe) ** 2 for c in (set(emp_fw) | set(pred_fw))) # NEW
+
+        rows.append({ # NEW
+            'district': obs.district, # NEW
+            'cnt': obs.count_index, # NEW
+            'cands': ','.join(obs.active_cands), # NEW
+            'lc_COAL': round(obs.lc_mass[1], 3), # NEW
+            'emp_COAL_bloc': round(emp_bloc['COAL'], 3), # NEW
+            'pred_COAL_bloc': round(pred_bloc['COAL'], 3), # NEW
+            'bloc_err_COAL': round(pred_bloc['COAL'] - emp_bloc['COAL'], 3), # NEW
+            'cand_err_COAL': round(max_coal_cand_err, 3), # NEW
+            'bloc_err_Centre': round(pred_bloc['Centre'] - emp_bloc['Centre'], 3), # NEW
+            'orphan_O': round(orphan_vol, 3), # NEW
+            'obs_loss': round(obs_loss, 2) # NEW
+        }) # NEW
+
+    df_diag = pd.DataFrame(rows) # NEW
+    print("\n--- TOP 15 BY CANDIDATE-LEVEL COAL ERROR (LP/NP Split vs Bloc Error) ---") # NEW
+    print(df_diag.sort_values('cand_err_COAL', ascending=False).head(15).to_string(index=False)) # NEW
+    print("\n--- TOP 15 BY OPTIMIZER LOSS CONTRIBUTION (obs_loss) ---") # NEW
+    print(df_diag.sort_values('obs_loss', ascending=False).head(15).to_string(index=False)) # NEW
+    import pdb; pdb.set_trace()
+    return df_diag # NEW
 
 # =====================================================================
 # EXECUTION BLOCK
@@ -928,6 +973,7 @@ if 1:
     if os.path.exists(THETA_FILE):
         print(f"Loading pre-trained parameters from {THETA_FILE}...")
         final_model.theta = np.load(THETA_FILE)
+        # HIJACKING for 2006: final_model.theta = np.array([-0.94748286, 0.05, -1, 0.32609389, 3, 2, 3, 1.20926125, -0.1977211 , -1.55463882,0.01473377,  0.55844421,  0.42967291,  0.75830687,  1.91614176, 0.2])
     else:
         print("No saved parameters found. Running L-BFGS-B optimization...")
         
@@ -950,6 +996,8 @@ if 1:
 
 
     dirichlet_nu = calculate_global_dirichlet_precision(final_model, full_obs)
+
+    debug_2006_coal_and_loss(final_model, full_obs)
     import pdb; pdb.set_trace()
 
     # Run the diagnostics on the final model using the full dataset!

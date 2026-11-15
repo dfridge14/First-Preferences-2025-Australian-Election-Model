@@ -96,6 +96,16 @@ ind_wiki_df['Candidate'] = ind_wiki_df['Candidate'].str.strip().str.title()
 ind_wiki_df['Candidate_Simple'] = ind_wiki_df['Candidate'].apply(simplify_name)
 ind_wiki_df['Electorate'] = ind_wiki_df['Electorate'].str.strip().str.title()
 
+# === NEW: Restore 2022 full VEC name (with middle names) for any 2026 repeat Independent === CHECK if correct
+vec_2022_full_names = (
+    inds_results.drop_duplicates(subset=['Electorate', 'Candidate_Simple'])
+    .set_index(['Electorate', 'Candidate_Simple'])['Candidate']
+    .to_dict()
+)
+ind_wiki_df['Candidate'] = [
+    vec_2022_full_names.get((elec, simp), orig)
+    for elec, simp, orig in zip(ind_wiki_df['Electorate'], ind_wiki_df['Candidate_Simple'], ind_wiki_df['Candidate'])
+]
 
 # CALCULATE ABSOLUTE VOTE SHARE
 
@@ -174,10 +184,8 @@ print("\nDetailed list:")
 print(missing_from_wiki[['Year', 'Electorate', 'Candidate', 'votes', 'Primary_Vote_Share']].to_string(index=False))
 
 
-# Exclude Top 4 as they contested previously
 pre_2014_inds = missing_from_wiki.loc[missing_from_wiki['Year']<2014,]
 missing_from_wiki = missing_from_wiki.loc[missing_from_wiki['Year']>2010,]
-missing_from_wiki = missing_from_wiki.iloc[4:,:]
 imputed_inds = missing_from_wiki.copy()
 
 # Assign 13 days to the remaining ballot-draw candidates
@@ -195,7 +203,6 @@ successful_matches = pd.concat([successful_matches, imputed_inds, pre_2014_inds]
 
 #import pdb; pdb.set_trace()
 
-# EXCLUDE REPEAT CONTENDERS
 
 # Map candidates who ran in the immediately prior cycle (2014 -> 2018, 2018 -> 2022)
 prev_year_map = {2010: 2006, 2014:2010, 2018: 2014, 2022: 2018, 2026: 2022}
@@ -260,9 +267,10 @@ final_IND_model_df['Is_Former_Councillor'] = final_IND_model_df.apply(
 
 teals = [
     'Tracie Lund', 'Tammy Atkins', 'Jacqui Hawkins', 'Don Firth', 'Michelle Dunscombe', 
-    'Melissa Lowe', 'Sophie Torney', 'Kate Lardner', 'Felicity Frederico', 'Nomi Kaltmann', 'Sarah Fenton', 'Clarke Martin'
+    'Melissa Lowe', 'Sophie Torney', 'Kate Lardner', 'Felicity Frederico', 'Nomi Kaltmann', 'Sarah Fenton', 'Clarke Martin',
+    'Shima Ibuki', 'Melissa Goffin','Jess Marsh'
 ]
-public_figures = ['Ali Cupper', 'Carol Altmann', "Jenny O'Connor", 'Darryn Lyons']
+public_figures = ['Ali Cupper', 'Carol Altmann', "Jenny O'Connor", 'Darryn Lyons', 'Catherine Cumming', 'William Fowles'] # Aidan Mclindon, 'Tony Briffa'
 
 # 2. Map them to a new column
 def get_candidate_archetype(name):
@@ -279,6 +287,8 @@ final_IND_model_df.loc[(final_IND_model_df['Candidate']=='Darryn Lyons') & (fina
 to_plot = 0
 
 if to_plot:
+
+    # ADD: exclude repeat contenders from plots
 
     # FIX - Currently only can plot post-2010 where Campaign_Length_Days is not None
 
@@ -521,166 +531,9 @@ global_party_dict['IND'] = 'IND'
 elec_df = generate_complete_elec_df(results_df, global_party_dict, rediv_2014, rediv_2022, excluded_contests)
 
 
-import pdb; pdb.set_trace()
+#import pdb; pdb.set_trace()
 
 # 3. DOP table flows from minor IND to other parties, grouped by bloc (NOTE: be careful with deeper eliminations and empty blocs!)
-
-
-
-def build_dop_flows_from_IND(year, DOP_table_dict, model_df, party_category_dict, counterfactual_df=None, MIN_CAT_NUM=4, results_df=None):
-    """
-    Extracts IND preference flows directly from wide DOP tables, replacing IND->IND flows with 0. Where not available, supplements this with IND defection flows (counterfactual_df). 
-    Computes electorate-wide average, imputing for missing category. Target categories: ALP, COAL, Left, Right, Centre.
-    """
-    target_cats = ['ALP', 'COAL', 'Left', 'Right', 'Centre']
-    flow_cols = [f'Flow_{c}' for c in target_cats]
-    candidate_flows = []
-
-    def clean_name(name):
-        return " ".join(str(name).strip().lower().split())
-
-    # Pre-build repeat lookup from model_df for the target year
-    year_cands = model_df[model_df['Year'] == year].copy()
-    if 'Cand_Clean' not in year_cands.columns:
-        year_cands['Cand_Clean'] = year_cands['Candidate'].apply(clean_name)
-    repeat_lookup = year_cands.set_index(['Electorate', 'Cand_Clean'])['is_repeat'].to_dict()
-
-    # Pre-build PartyAb -> Candidate mapping if results_df is provided
-    party_to_cand = {}
-    if results_df is not None:
-        r_year = results_df[results_df['Year'] == year]
-        for _, r in r_year.iterrows():
-            party_to_cand[(r['div_nm'], r['PartyAb'])] = r['candidate_name']
-
-    # -------------------------------------------------------------
-    # 1. PROCESS WIDE DOP TABLES
-    # -------------------------------------------------------------
-    for elec, dop in DOP_table_dict.items():
-        # Party columns are strictly between index 2 and -2
-        party_cols = list(dop.columns[2:-2])
-        
-        # Identify all IND columns in this electorate
-        ind_cols = [c for c in party_cols if c.startswith('IND') or party_category_dict.get(c) == 'IND']
-        if not ind_cols:
-            continue
-
-        for ind_col in ind_cols:
-            # An IND is eliminated in the TransferredVotes row where its column becomes NaN
-            # while having been non-NaN in the immediately preceding Votes row
-            elim_idx = None
-            for idx in range(1, len(dop)):
-                if (dop.loc[idx, 'CountType'] == 'TransferredVotes' and 
-                    pd.isna(dop.loc[idx, ind_col]) and 
-                    pd.notna(dop.loc[idx - 1, ind_col])):
-                    elim_idx = idx
-                    break
-
-            if elim_idx is None:
-                continue
-
-            elim_row = dop.loc[elim_idx]
-
-            # Determine which receiving parties are active (non-NaN in this transfer row)
-            # Exclude the eliminated IND and any other INDs on the ballot
-            active_party_cols = [
-                c for c in party_cols 
-                if c != ind_col 
-                and not c.startswith('IND') 
-                and party_category_dict.get(c) != 'IND'
-                and pd.notna(elim_row[c])
-            ]
-
-            # Map active receiving parties to target categories
-            active_target_cats = set(
-                party_category_dict[c] for c in active_party_cols 
-                if c in party_category_dict and party_category_dict[c] in target_cats
-            )
-
-            # Check threshold: require at least MIN_CAT_NUM target categories
-            if len(active_target_cats) >= MIN_CAT_NUM:
-                # Sum transferred votes strictly across the target categories
-                cat_transfers = {cat: 0.0 for cat in target_cats}
-                for c in active_party_cols:
-                    cat = party_category_dict.get(c)
-                    if cat in target_cats:
-                        val = elim_row[c]
-                        if pd.notna(val) and val > 0:
-                            cat_transfers[cat] += float(val)
-
-                valid_total = sum(cat_transfers.values())
-                if valid_total > 0:
-                    # Resolve candidate name and is_repeat status
-                    cand_name = party_to_cand.get((elec, ind_col), ind_col)
-                    cand_key = (elec, clean_name(cand_name))
-                    is_rep = repeat_lookup.get(cand_key, False)
-
-                    # If cand_name was just 'IND1' and not found in lookup, fallback to electorate's known repeat status
-                    if cand_key not in repeat_lookup:
-                        elec_matches = year_cands[year_cands['Electorate'] == elec]
-                        if not elec_matches.empty:
-                            is_rep = bool(elec_matches['is_repeat'].iloc[0])
-
-                    row_record = {
-                        'Year': year,
-                        'Electorate': elec,
-                        'Candidate': cand_name,
-                        'is_repeat': is_rep
-                    }
-
-                    # Assign normalized flow where category was active, NaN where absent
-                    for cat in target_cats:
-                        if cat in active_target_cats:
-                            row_record[f'Flow_{cat}'] = cat_transfers[cat] / valid_total
-                        else:
-                            row_record[f'Flow_{cat}'] = np.nan
-
-                    candidate_flows.append(row_record)
-
-    flow_df = pd.DataFrame(candidate_flows)
-
-    # -------------------------------------------------------------
-    # 2. APPEND COUNTERFACTUAL DEFECTION FLOWS
-    # -------------------------------------------------------------
-    if counterfactual_df is not None and not counterfactual_df.empty:
-        cf = counterfactual_df.copy()
-        if 'Year' in cf.columns:
-            cf = cf[cf['Year'] == year]
-        else:
-            cf['Year'] = year
-
-        if 'is_repeat' not in cf.columns:
-            cf['is_repeat'] = cf.apply(
-                lambda r: repeat_lookup.get((r['Electorate'], clean_name(r.get('Candidate', ''))), False),
-                axis=1
-            )
-        flow_df = pd.concat([flow_df, cf], ignore_index=True)
-
-    if flow_df.empty:
-        return pd.DataFrame(columns=['Year', 'Electorate'] + flow_cols)
-
-    # -------------------------------------------------------------
-    # 3. AGGREGATE PER ELECTORATE (UNWEIGHTED MEAN & RENORMALIZE)
-    # -------------------------------------------------------------
-    electorate_records = []
-    for elec, group in flow_df.groupby('Electorate'):
-        # Filter: Prioritize fresh insurgencies over repeat candidates
-        fresh_cands = group[~group['is_repeat']]
-        pool = fresh_cands if not fresh_cands.empty else group
-
-        # Column-wise unweighted average; skipna=True leaves missing category as empty, is imputed from regional average later in the process
-        mean_flows = pool[flow_cols].mean(axis=0, skipna=True)
-
-        
-
-        # renormalisation step
-        total_sum = mean_flows.sum()
-        if total_sum > 0:
-            norm_flows = (mean_flows / total_sum).to_dict()
-            norm_flows['Year'] = year
-            norm_flows['Electorate'] = elec
-            electorate_records.append(norm_flows)
-
-    return pd.DataFrame(electorate_records)
 
 
 
@@ -714,8 +567,23 @@ def prepare_training_data(cand_df, elec_df, excluded_contests):
     # ---------------------------------------------------------
     # 3. CALCULATE "HIDDEN THREATS" (Track 2 Environment)
     # ---------------------------------------------------------
-    all_new_inds = train_cand[train_cand['is_repeat'] == False]
-    
+
+    # Strip ONLY the specific Step 5b archetype candidates so minor INDs in those seats remain
+    new_teal_cands = {
+        (2022, 'Brighton', 'Felicity Frederico'),
+        (2022, 'Caulfield', 'Nomi Kaltmann'),
+        (2022, 'Mornington', 'Kate Lardner'),
+        (2022, 'Kew', 'Sophie Torney'),
+        (2022, 'Hawthorn', 'Melissa Lowe'),
+        (2022, 'Bellarine', 'Sarah Fenton'),
+        (2026, 'Mornington', 'Melissa Goffin'),
+        (2026, 'Footscray', 'Jess Marsh'),
+        (2026, 'Hawthorn', 'Shima Ibuki')
+    }
+    is_new_teal_cands = train_cand.set_index(['Year', 'Electorate', 'Candidate']).index.isin(new_teal_cands)
+
+    all_new_inds = train_cand[(train_cand['is_repeat'] == False) & (~is_new_teal_cands)].copy()
+
     threat_pool = all_new_inds.groupby(['Year', 'Electorate']).agg(
         Sum_New_Days=('Effective_Days', 'sum'),
         Has_New_Councillor=('Is_Former_Councillor', 'max'),
@@ -723,7 +591,6 @@ def prepare_training_data(cand_df, elec_df, excluded_contests):
     ).reset_index()
     
     threat_pool['Log_Sum_New_Days'] = np.log(threat_pool['Sum_New_Days'] + 1)
-
     train_cand = train_cand.drop(columns=['Min_Days', 'Effective_Days'])
 
     # ---------------------------------------------------------
@@ -740,9 +607,8 @@ def prepare_training_data(cand_df, elec_df, excluded_contests):
     # ---------------------------------------------------------
     # 5. TRACK 2 & 3: THE INSURGENCY POOL
     # ---------------------------------------------------------
-    # ENFORCE THE RULE: Excluded contests must NEVER touch Track 2 or 3 training.
-    new_inds = train_cand[(train_cand['is_repeat'] == False) & (~train_cand['Is_Excluded_Seat'])].copy()
-    
+    # Keep all_new_inds (including Is_Excluded_Seat) so exported CSVs have Mildura & Teal-seat minor INDs
+    new_inds = all_new_inds.copy()
     new_pool = new_inds.groupby(['Year', 'Electorate']).agg(
         Total_New_IND_Share=('Primary_Vote_Share', 'sum')
     ).reset_index()
@@ -753,24 +619,24 @@ def prepare_training_data(cand_df, elec_df, excluded_contests):
     pool_df = elec_df[['Year', 'Electorate', 'Lag_Challenger_IND_Vote']].copy()
     pool_df['Is_Excluded_Seat'] = pool_df.set_index(['Year', 'Electorate']).index.isin(excluded_idx)
     
-    # Merge New Pool & Threat Pool
     pool_df = pool_df.merge(new_pool, on=['Year', 'Electorate'], how='left').fillna({'Total_New_IND_Share': 0})
     pool_df = pool_df.merge(threat_pool, on=['Year', 'Electorate'], how='left').fillna({'Log_Sum_New_Days': 0, 'Has_New_Councillor': False, 'Pool_Days_Missing': 0})    
-
-    # Merge Repeat Pool
     pool_df = pool_df.merge(repeat_pool, on=['Year', 'Electorate'], how='left').fillna({'Repeat_Past_Vote': 0})
     
-    # Define generic lags
+    # Generic lag strips full Repeat_Past_Vote (so Ali Cupper's 32.6% is not treated as orphaned lag)
     pool_df['Generic_Lag_Vote'] = (pool_df['Lag_Challenger_IND_Vote'] - pool_df['Repeat_Past_Vote']).clip(lower=0)
     pool_df['Log_Generic_Lag'] = np.log(1 + pool_df['Generic_Lag_Vote'])
     pool_df['Log_Repeat_Past'] = np.log(1 + pool_df['Repeat_Past_Vote']) 
+
+    # Optional: Pad Repeat_Past_Vote by 20.0 in Step 5b Teal seats to crowd out minor INDs in Step 5
+    if 0:
+        new_teal_cands_idx = pd.MultiIndex.from_tuples([(y, e) for y, e, _ in new_teal_cands], names=['Year', 'Electorate'])
+        has_new_teal = pool_df.set_index(['Year', 'Electorate']).index.isin(new_teal_cands_idx)
+        effective_repeat_crowd = pool_df['Repeat_Past_Vote'] + np.where(has_new_teal, 20.0, 0.0)
+        pool_df['Log_Repeat_Past'] = np.log(1 + effective_repeat_crowd)
     
-    # ENFORCE THE RULE: Drop excluded seats from pool_df so Track 2 never trains on them
-    pool_df = pool_df[~pool_df['Is_Excluded_Seat']].drop(columns=['Is_Excluded_Seat'])
-    
-    # Split prep for Track 3
+    # Merge Total_New_IND_Share for Track 3 without dropping Is_Excluded_Seat yet
     new_inds = new_inds.merge(pool_df[['Year', 'Electorate', 'Total_New_IND_Share']], on=['Year', 'Electorate'])
-    # For 2026, Total_New_IND_Share is 0/NaN, so clip to avoid zero division during setup
     new_inds['Share_of_New_Pool'] = (new_inds['Primary_Vote_Share'] / new_inds['Total_New_IND_Share'].replace(0, np.nan)).clip(lower=0.01)
     
     return new_inds, pool_df
@@ -812,8 +678,8 @@ excluded_contests = [
 new_inds, pool_df = prepare_training_data(final_IND_model_df, elec_df, excluded_contests)
 
 # 2. FILTER OUT 2010 AND 2026 FOR MODEL TRAINING
-train_pool_df = pool_df[(pool_df['Year'] != 2026)].copy()
-train_new_inds = new_inds[new_inds['Year'] != 2026].copy()
+train_pool_df = pool_df[(pool_df['Year'] != 2026) & (~pool_df['Is_Excluded_Seat'])].copy()
+train_new_inds = new_inds[(new_inds['Year'] != 2026) & (~new_inds['Is_Excluded_Seat'])].copy()
 
 pool_model, split_model = fit_generative_models(train_new_inds, train_pool_df)
 
@@ -828,6 +694,64 @@ with open("pool_model.pkl", "wb") as f:
 
 with open("split_model.pkl", "wb") as f:
     pickle.dump(split_model, f)
+
+
+def obtain_abnormally_recontesting_IND_priors(new_inds, final_IND_model_df):
+
+    ind_prior_search_df = pd.concat([new_inds[['Year','Electorate','Candidate','Primary_Vote_Share']], final_IND_model_df.loc[final_IND_model_df['Year']==2006,][['Year','Electorate','Candidate','Primary_Vote_Share']]], axis = 0)
+        
+    past_cands_2022 = ind_prior_search_df.loc[ind_prior_search_df['Candidate'].isin(ind_prior_search_df.loc[ind_prior_search_df['Year']==2022,'Candidate'].unique()),].sort_values('Year').head(10)['Candidate']
+    past_cands_2018 = ind_prior_search_df.loc[ind_prior_search_df['Candidate'].isin(ind_prior_search_df.loc[ind_prior_search_df['Year']==2018,'Candidate'].unique()),].sort_values('Year').head(3)['Candidate']
+    past_cands_2014 = ind_prior_search_df.loc[ind_prior_search_df['Candidate'].isin(ind_prior_search_df.loc[ind_prior_search_df['Year']==2014,'Candidate'].unique()),].sort_values('Year').head(5)['Candidate']
+    #past_cands_2010 = ind_prior_search_df.loc[ind_prior_search_df['Candidate'].isin(ind_prior_search_df.loc[ind_prior_search_df['Year']==2010,'Candidate'].unique()),].sort_values('Year').head(0)['Candidate']
+    past_cands_2026 = ind_prior_search_df.loc[ind_prior_search_df['Candidate'].isin(ind_prior_search_df.loc[ind_prior_search_df['Year']==2026,'Candidate'].unique()),].sort_values('Year').head(6)['Candidate']
+
+
+    past_cands_by_year = {
+        2014: past_cands_2014,
+        2018: past_cands_2018,
+        2022: past_cands_2022,
+        2026: past_cands_2026,
+    }
+
+    IND_CUSTOM_PRIORS = {}
+    default_strength = 0.75
+
+    for yr, cand_list in past_cands_by_year.items():
+        # 1. Historical mean share prior to `yr`, converted to proportion space (0.0 - 1.0)
+        hist_means = (
+            final_IND_model_df.loc[
+                (final_IND_model_df['Candidate'].isin(cand_list))
+                & (final_IND_model_df['Year'] < yr)
+            ]
+            .groupby('Candidate')['Primary_Vote_Share']
+            .mean()
+            .div(100.0)
+            .to_dict()
+        )
+
+        # 2. Get the electorate each candidate is contesting in target year `yr`
+        curr_rows = final_IND_model_df.loc[
+            (final_IND_model_df['Year'] == yr)
+            & (final_IND_model_df['Candidate'].isin(cand_list)),
+            ['Electorate', 'Candidate']
+        ]
+
+        for _, row in curr_rows.iterrows():
+            c_name = row['Candidate']
+            if c_name in hist_means:
+                ind_name = f"IND_{c_name.strip().replace(' ', '_')}"
+                IND_CUSTOM_PRIORS[(int(yr), row['Electorate'], ind_name)] = {
+                    'prior': round(float(hist_means[c_name]), 4),
+                    'info_strength': default_strength,
+                }
+    return IND_CUSTOM_PRIORS
+
+
+IND_CUSTOM_PRIORS = obtain_abnormally_recontesting_IND_priors(new_inds, final_IND_model_df)
+
+import pprint
+pprint.pprint(IND_CUSTOM_PRIORS, sort_dicts=False)
 
 import pdb; pdb.set_trace()
 
@@ -868,17 +792,6 @@ print(track2_diagnostics.tail(5))
 print("\nOver-predicted the Insurgency (New INDs got way less than expected):")
 print(track2_diagnostics.head(5))
 import pdb; pdb.set_trace()
-
-
-
-
-
-
-
-
-
-
-
 
 # ==============================================================================
 # 1. STATEWIDE IND -> IND PREFERENCE POOLING (Isolated by Year)
@@ -957,7 +870,173 @@ def extract_statewide_ind_to_ind_flow(dop_table_dict, party_category_dict, data_
 # ==============================================================================
 # 2. REGIONAL IMPUTATION, RENORMALIZATION & 3-TIER PRIORS (Isolated by Year)
 # ==============================================================================
-def impute_and_build_dop_priors(ind_dop_flows_df, elec_df, data_year, S_local=75, S_borrowed=35):
+
+
+def build_dop_flows_from_IND(year, DOP_table_dict, model_df, party_category_dict, counterfactual_df=None, MIN_CAT_NUM=4, results_df=None, MIN_VOTE_AT_ELIM=400):
+    """
+    Extracts IND preference flows directly from wide DOP tables, replacing IND->IND flows with 0. Where not available, supplements this with IND defection flows (counterfactual_df). 
+    Computes electorate-wide average, imputing for missing category. Target categories: ALP, COAL, Left, Right, Centre.
+    """
+    target_cats = ['ALP', 'COAL', 'Left', 'Right', 'Centre']
+    flow_cols = [f'Flow_{c}' for c in target_cats]
+    candidate_flows = []
+
+    def clean_name(name):
+        return " ".join(str(name).strip().lower().split())
+
+    # Pre-build repeat lookup from model_df for the target year
+    year_cands = model_df[model_df['Year'] == year].copy()
+    if 'Cand_Clean' not in year_cands.columns:
+        year_cands['Cand_Clean'] = year_cands['Candidate'].apply(clean_name)
+    repeat_lookup = year_cands.set_index(['Electorate', 'Cand_Clean'])['is_repeat'].to_dict()
+
+    # Pre-build PartyAb -> Candidate mapping if results_df is provided
+    party_to_cand = {}
+    if results_df is not None:
+        r_year = results_df[results_df['Year'] == year]
+        for _, r in r_year.iterrows():
+            party_to_cand[(r['div_nm'], r['PartyAb'])] = r['candidate_name']
+
+    # -------------------------------------------------------------
+    # 1. PROCESS WIDE DOP TABLES
+    # -------------------------------------------------------------
+    for elec, dop in DOP_table_dict.items():
+        # Party columns are strictly between index 2 and -2
+        party_cols = list(dop.columns[2:-2])
+        
+        # Identify all IND columns in this electorate
+        ind_cols = [c for c in party_cols if c.startswith('IND') or party_category_dict.get(c) == 'IND']
+        if not ind_cols:
+            continue
+
+        for ind_col in ind_cols:
+
+            ind_votes = dop.loc[0, ind_col] if pd.notna(dop.loc[0, ind_col]) else 0
+            if ind_votes < MIN_VOTE_AT_ELIM:
+                #print(elec, ind_votes)
+                #import pdb; pdb.set_trace()
+                continue
+            # An IND is eliminated in the TransferredVotes row where its column becomes NaN
+            # while having been non-NaN in the immediately preceding Votes row
+            elim_idx = None
+            for idx in range(1, len(dop)):
+                if (dop.loc[idx, 'CountType'] == 'TransferredVotes' and 
+                    pd.isna(dop.loc[idx, ind_col]) and 
+                    pd.notna(dop.loc[idx - 1, ind_col])):
+                    elim_idx = idx
+                    break
+
+            if elim_idx is None:
+                continue
+
+            elim_row = dop.loc[elim_idx]
+
+            # Determine which receiving parties are active (non-NaN in this transfer row)
+            # Exclude the eliminated IND and any other INDs on the ballot
+            active_party_cols = [
+                c for c in party_cols 
+                if c != ind_col 
+                and not c.startswith('IND') 
+                and party_category_dict.get(c) != 'IND'
+                and pd.notna(elim_row[c])
+            ]
+
+            # Map active receiving parties to target categories
+            active_target_cats = set(
+                party_category_dict[c] for c in active_party_cols 
+                if c in party_category_dict and party_category_dict[c] in target_cats
+            )
+
+            # Check threshold: require at least MIN_CAT_NUM target categories
+            if len(active_target_cats) >= MIN_CAT_NUM:
+                # Sum transferred votes strictly across the target categories
+                cat_transfers = {cat: 0.0 for cat in target_cats}
+                for c in active_party_cols:
+                    cat = party_category_dict.get(c)
+                    if cat in target_cats:
+                        val = elim_row[c]
+                        if pd.notna(val) and val > 0:
+                            cat_transfers[cat] += float(val)
+
+                valid_total = sum(cat_transfers.values())
+                if valid_total > 0:
+                    # Resolve candidate name and is_repeat status
+                    cand_name = party_to_cand.get((elec, ind_col), ind_col)
+                    cand_key = (elec, clean_name(cand_name))
+                    is_rep = repeat_lookup.get(cand_key, False)
+
+                    # If cand_name was just 'IND1' and not found in lookup, fallback to electorate's known repeat status
+                    if cand_key not in repeat_lookup:
+                        elec_matches = year_cands[year_cands['Electorate'] == elec]
+                        if not elec_matches.empty:
+                            is_rep = bool(elec_matches['is_repeat'].iloc[0])
+
+                    row_record = {
+                        'Year': year,
+                        'Electorate': elec,
+                        'Candidate': cand_name,
+                        'is_repeat': is_rep
+                    }
+
+                    # Assign normalized flow where category was active, NaN where absent
+                    for cat in target_cats:
+                        if cat in active_target_cats:
+                            row_record[f'Flow_{cat}'] = cat_transfers[cat] / valid_total
+                        else:
+                            row_record[f'Flow_{cat}'] = np.nan
+
+                    candidate_flows.append(row_record)
+
+
+    flow_df = pd.DataFrame(candidate_flows)
+
+    # -------------------------------------------------------------
+    # 2. APPEND COUNTERFACTUAL DEFECTION FLOWS
+    # -------------------------------------------------------------
+    if counterfactual_df is not None and not counterfactual_df.empty:
+        cf = counterfactual_df.copy()
+        if 'Year' in cf.columns:
+            cf = cf[cf['Year'] == year]
+        else:
+            cf['Year'] = year
+
+        if 'is_repeat' not in cf.columns:
+            cf['is_repeat'] = cf.apply(
+                lambda r: repeat_lookup.get((r['Electorate'], clean_name(r.get('Candidate', ''))), False),
+                axis=1
+            )
+        flow_df = pd.concat([flow_df, cf], ignore_index=True)
+
+    if flow_df.empty:
+        return pd.DataFrame(columns=['Year', 'Electorate'] + flow_cols)
+
+    # -------------------------------------------------------------
+    # 3. AGGREGATE PER ELECTORATE (UNWEIGHTED MEAN & RENORMALIZE)
+    # -------------------------------------------------------------
+    electorate_records = []
+    for elec, group in flow_df.groupby('Electorate'):
+        # Filter: Prioritize fresh insurgencies over repeat candidates
+        fresh_cands = group[~group['is_repeat']]
+        pool = fresh_cands if not fresh_cands.empty else group
+
+        # Column-wise unweighted average; skipna=True leaves missing category as empty, is imputed from regional average later in the process
+        mean_flows = pool[flow_cols].mean(axis=0, skipna=True)
+
+        
+
+        # renormalisation step
+        total_sum = mean_flows.sum()
+        if total_sum > 0:
+            norm_flows = (mean_flows / total_sum).to_dict()
+            norm_flows['Year'] = year
+            norm_flows['Electorate'] = elec
+            electorate_records.append(norm_flows)
+
+    return pd.DataFrame(electorate_records)
+
+
+
+def impute_and_build_dop_priors(ind_dop_flows_df, elec_df, data_year, S_local=75, S_borrowed=35, Centre_fallback = 0.306):
     """
     Strictly filters flows and electorate baselines to data_year.
     Imputes missing categories, renormalizes, and establishes the 3-Tier S lookup.
@@ -978,6 +1057,29 @@ def impute_and_build_dop_priors(ind_dop_flows_df, elec_df, data_year, S_local=75
     reg_means = df.groupby('Region')[flow_cols].mean()
     state_means = df[flow_cols].mean()
 
+    # --- 1. Impute and rescale state_means using scalar Centre_fallback ---
+    for col in flow_cols:
+        if pd.isna(state_means[col]):
+            if col == 'Flow_Centre':
+                state_means[col] = float(Centre_fallback)
+            else:
+                state_means[col] = 0.0
+    
+    st_sum = state_means.sum()
+    if st_sum > 0:
+        state_means = state_means / st_sum
+
+    # --- 2. Impute and rescale reg_means ---
+    for reg in reg_means.index:
+        for col in flow_cols:
+            if pd.isna(reg_means.loc[reg, col]):
+                reg_means.loc[reg, col] = state_means[col] # Safe fallback to rescaled state_means
+        
+        r_sum = reg_means.loc[reg, flow_cols].sum()
+        if r_sum > 0:
+            reg_means.loc[reg, flow_cols] = reg_means.loc[reg, flow_cols] / r_sum
+
+    # --- 3. Impute individual rows from the now-perfect macro averages ---
     cleaned_rows = []
     for _, row in df.iterrows():
         reg = row['Region']
@@ -985,11 +1087,12 @@ def impute_and_build_dop_priors(ind_dop_flows_df, elec_df, data_year, S_local=75
 
         for col in flow_cols:
             if pd.isna(clean_row[col]):
-                if pd.notna(reg) and reg in reg_means.index and not pd.isna(reg_means.loc[reg, col]):
+                if pd.notna(reg) and reg in reg_means.index:
                     clean_row[col] = reg_means.loc[reg, col]
                 else:
                     clean_row[col] = state_means[col]
 
+        # Row-level proportional rescaling naturally balances the injected mass
         row_sum = sum(clean_row[flow_cols])
         if row_sum > 0:
             clean_row[flow_cols] = clean_row[flow_cols] / row_sum
@@ -1024,7 +1127,7 @@ dop_lookups_by_year = {}
 mu_ind_to_ind_dict = {}
 
 
-all_years = [2006, 2010, 2014, 2018, 2022]
+all_years = [2022, 2006, 2010, 2014, 2018]
 
 for data_year in all_years: 
 
@@ -1055,22 +1158,25 @@ for data_year in all_years:
     # Inspect the extracted electorate preference flows
     print(IND_DOP_flows.head(10))
 
-    dop_lookup = impute_and_build_dop_priors(
-        IND_DOP_flows, 
-        elec_df, 
-        data_year=data_year, 
-        S_local=75, 
-        S_borrowed=35
-    )
-
-    dop_lookups_by_year[data_year] = dop_lookup
-
 
     mu_ind_to_ind_dict[data_year] = extract_statewide_ind_to_ind_flow(
         DOP_table_dict, 
         global_party_dict, 
         data_year=data_year
     )
+
+    dop_lookup = impute_and_build_dop_priors(
+        IND_DOP_flows, 
+        elec_df, 
+        data_year=data_year, 
+        S_local=75, 
+        S_borrowed=35,
+        Centre_fallback = mu_ind_to_ind_dict[data_year].mean()
+    )
+
+    dop_lookups_by_year[data_year] = dop_lookup
+
+
 
 
 import pdb; pdb.set_trace()

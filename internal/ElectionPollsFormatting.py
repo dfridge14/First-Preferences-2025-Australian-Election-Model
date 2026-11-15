@@ -900,7 +900,7 @@ def format_2026_VIC_election_for_Kalman():
     # Load data
     os.chdir('/home/dania-freidgeim/Australian Election/StateElectionPolls')
     formatted_df = pd.read_csv("StateVICPolls2026.csv")
-    election_date = pd.Timestamp('2026-10-12') # adjust to recency
+    election_date = pd.Timestamp('2026-11-28') # adjust to recency
 
     dates = pd.to_datetime(formatted_df.iloc[:, 0].apply(parse_date_range))
     formatted_df['Day_index'] = (dates - election_date).dt.days

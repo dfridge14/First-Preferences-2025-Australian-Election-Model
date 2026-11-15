@@ -30,7 +30,7 @@ sys.excepthook = exception_handler
 
 os.chdir(Path.home() / 'Australian Election' / 'Victorian Election')
 
-data_year = 2018
+data_year = 2010
 election_year = data_year+4
 
 PollingPlaces = pd.read_csv(f'VIC-{data_year}/VIC-{data_year}-Pollingplaces-Formatted.csv')
@@ -220,7 +220,22 @@ for pair in accidental_transfers:
         if data_year == 2018 and pair == ('Gembrook', 'Narre Warren North'):
             rediv_pb_routing[('Gembrook', 'Berwick')] += pbs
             del rediv_pb_routing[pair]
+
+        elif data_year == 2010 and pair == ('Clayton', 'Keysborough'):
+            rediv_pb_routing[('Clayton', 'Clarinda')] += pbs
+            del rediv_pb_routing[pair]
+
+        elif data_year == 2010 and pair == ('Keilor', 'Kororoit'):
+            rediv_pb_routing[('Keilor', 'Sydenham')] += pbs
+            del rediv_pb_routing[pair]
+
+        elif data_year == 2010 and pair == ('Lyndhurst', 'Clarinda'):
+            rediv_pb_routing[('Lyndhurst', 'Dandenong')] += pbs
+            del rediv_pb_routing[pair]
         else:
+            print(pair)
+            print(pbs)
+            print(rediv_transfer_props_df.loc[rediv_transfer_props_df['existing_div']==pair[0],])
             import pdb; pdb.set_trace()
         continue
 
@@ -229,7 +244,7 @@ for pair in accidental_transfers:
 
 print([key for key in rediv_pb_routing.keys() if key not in transfer_pairs])
 assert not [key for key in rediv_pb_routing.keys() if key not in transfer_pairs]
-#import pdb; pdb.set_trace()
+
 print([key for key in transfer_pairs if key not in rediv_pb_routing.keys()])
 extra_keys = [key for key in transfer_pairs if key not in rediv_pb_routing.keys()]
 # mask = rediv_transfer_props_df[['existing_div', 'new_div']].apply(tuple, axis=1).isin(extra_keys)
@@ -257,11 +272,32 @@ for pair in extra_keys: # no booths transferred
     pb_votes_df = PP_votes_dict[pair[0]]
     rediv_votes_by_pp_id[pair] = pb_votes_df.loc[[0]].copy()
 
-rediv_votes_by_pp_id
 #rediv_transfer_props_df.to_csv(f'rediv_transfer_props_df_for_{election_year}.csv', index = False)
 rediv_transfer_props_dict = rediv_transfer_props_df.set_index(['existing_div', 'new_div'])['donation_prop'].to_dict()
+# create rediv_seg_votes_dict = {}
+
+rediv_seg_votes_dict = {}
+
+for (old_div, new_div), df_raw in rediv_votes_by_pp_id.items():
+    # 1. Look up the proportion of postal/early votes that flow to this segment
+    donation_prop = rediv_transfer_props_dict[(old_div, new_div)]
+    
+    # 2. Sum the 100% physical booths (all rows where index != 0)
+    seg_series = df_raw.loc[df_raw.index != 0].sum(axis=0).astype(float)
+    
+    # 3. Add the proportionally scaled 'Other/Postal' row (if it exists)
+    if 0 in df_raw.index:
+        seg_series = seg_series.add(df_raw.loc[0] * donation_prop, fill_value=0.0)
+    else:
+        import pdb; pdb.set_trace()
+        
+    rediv_seg_votes_dict[(old_div, new_div)] = seg_series.to_dict()
+
+
 with open(f'rediv_votes_by_pp_id_for_{election_year}.pkl', "wb") as f:
         pickle.dump(rediv_votes_by_pp_id, f, protocol=pickle.HIGHEST_PROTOCOL)
 with open(f'rediv_transfer_props_dict_for_{election_year}.pkl', "wb") as f:
         pickle.dump(rediv_transfer_props_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+with open(f'rediv_seg_votes_dict_for_{election_year}.pkl', "wb") as f:
+        pickle.dump(rediv_seg_votes_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
 import pdb; pdb.set_trace()
