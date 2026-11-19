@@ -412,7 +412,7 @@ for _, row in final_IND_model_df.iterrows():
 final_IND_model_df['is_repeat'] = is_repeat_list
 final_IND_model_df['Past_Vote_Share'] = past_vote_list
 final_IND_model_df['Past_Electorate'] = past_elec_list
-
+import pdb; pdb.set_trace()
 # 1b. Get is_incumbent (manually apply to really strong repeat contenders - ) # Ali Cupper 2018-22, Jacqui Hawinks 22, Suzanna Sheed 18-22, Russel Northe 18? Plus the well-funded 2022 Teals
 
 excluded_contests = [
