@@ -42,7 +42,7 @@ SIGMA_ARCHETYPE_DEFECTION = 0.15
 SIGMA_SQ_OTHER = 0.1627  # Sigma_hat['OTH', 'OTH'] # OLD value: 0.123
 NU_MINOR_PRECISION = {2022: 795, 2018: 748, 2014: 812,2010:762, 2006: 901}
 
-DIRICHLET_OTH_SPLIT_POLL = 25.0
+DIRICHLET_OTH_SPLIT_POLL = 14
 DIRICHLET_ALPHA= 14
 
 IND_FLOWS_DIRICHLET_ALPHA = 25
@@ -56,9 +56,11 @@ SIGMA_JOINT = 0.03
 SIGMA_IND = 0.02
 EXTERNAL_UNCERTAINTY_PENALTY = 1.25
 
-num_simulations = 1000
+W_XCP_PROPORTIONAL_DEFECTION = 0.7
 
-days_to_election = 0
+num_simulations = 10
+
+days_to_election = 10
 
 #base_dir = os.path.dirname(os.path.abspath(__file__))
 #os.chdir(base_dir)
@@ -91,7 +93,6 @@ ORPHAN_POOLS = ['Left','Right','Centre']
 DEEPEST_CAND_NO = 4
 
 
-
 with open(f'VIC-{data_year}/{data_year}_complete_DOP_table_dict.pkl', 'rb') as f:
     DOP_table_dict = pickle.load(f)
     if data_year == 2022:
@@ -99,6 +100,7 @@ with open(f'VIC-{data_year}/{data_year}_complete_DOP_table_dict.pkl', 'rb') as f
 
 #with open(f'VIC-{data_year}/ia_adjustments_dict.pkl', 'rb') as f:
 #    ia_adjustments_dict = pickle.load(f)
+
 
 LC_FPs_df = pd.read_csv(f'VIC-{data_year}/{data_year}-LC-First-Prefs-df.csv', index_col = 'PartyAb')
 
@@ -111,6 +113,9 @@ ia_csv_path = f"VIC-{data_year}/VIC-{data_year}-IA-adjustments.csv"
 # Load the Demographic mappings for the next election (all info for data_year already baked into ia_params)
 demo_df = pd.read_csv(f'VIC-{election_year}/Demographic-classification-{election_year}.csv')
 demo_lookup = demo_df.set_index('district_name')['classification'].to_dict()
+
+
+
 
 new_inds_df = pd.read_csv("new_inds_features.csv")
 pool_df = pd.read_csv("pool_df_features.csv")
@@ -125,9 +130,14 @@ dop_lookups_by_year = add_new_IND_data['dop_lookups_by_year']
 mu_ind_to_ind_dict = add_new_IND_data['mu_ind_to_ind_dict']
 global_party_dict = add_new_IND_data['global_party_dict']
 
+for p in Ideology_map.index:
+    if p not in global_party_dict:
+        global_party_dict[p] = Ideology_map.loc[p]
+
 mu_ind_to_ind_array = mu_ind_to_ind_dict[data_year]
 dop_lookup = dop_lookups_by_year[data_year]
 
+#import pdb; pdb.set_trace()
 
 # obtain covariance matrices
 with open(Path.home() / "Australian Election/Farrer_byelection_covms.pkl", "rb") as f:
@@ -136,21 +146,28 @@ with open(Path.home() / "Australian Election/Farrer_byelection_covms.pkl", "rb")
 raw_poll_covm = covm_data["Nat_poll_covm"]
 
 if election_year == 2026:
+    #CovM = np.array([
+    #    [0.0509, 0.0248, 0.0141, 0.0174],
+    #    [0.0248, 0.0686, 0.0200, 0.0275],
+    #    [0.0141, 0.0200, 0.1200, 0.0121],
+    #    [0.0174, 0.0275, 0.0121, 0.1230]
+    #])
+
     CovM = np.array([
-        [0.0509, 0.0248, 0.0141, 0.0174],
-        [0.0248, 0.0686, 0.0200, 0.0275],
-        [0.0141, 0.0200, 0.1200, 0.0121],
-        [0.0174, 0.0275, 0.0121, 0.1230]
+        [0.0509, 0.0248, 0.0141, 0.0200],  # ALP
+        [0.0248, 0.0686, 0.0200, 0.0316],  # GRN
+        [0.0141, 0.0200, 0.1200, 0.0139],  # ON
+        [0.0200, 0.0316, 0.0139, 0.1627]   # OTH
     ])
 
     parties = ['ALP', 'GRN', 'ON', 'OTH']
     raw_res_covm = pd.DataFrame(CovM, index=parties, columns=parties)
 else:
-    CovM = np.array([
-        [0.0307, 0.0146, 0.0136],
-        [0.0146, 0.0397, 0.0211],
-        [0.0136, 0.0211, 0.1230]
-    ])
+    #CovM = np.array([
+    #    [0.0307, 0.0146, 0.0136],
+    #    [0.0146, 0.0397, 0.0211],
+    #    [0.0136, 0.0211, 0.1230]
+    #])
 
     CovM = np.array([
         [0.0388, 0.0209, 0.0207],
@@ -331,13 +348,35 @@ ALR_COLS = ['ALP', 'GRN', 'ON', 'OTH'] if data_year == 2022 else ['ALP','GRN','O
 
 # build the electorate_pairs and next_contesting_parties dictionaries; rename independents from INDX to IND_First_Last for easier tracking 
 
-def format_specific_party(row):
+def clean_ind_name(raw_name: str) -> str:
+    """
+    Forces any name into the strict IND_First_Last convention.
+    Drops middle words. Preserves non-space punctuation (e.g., J.D. or Tosh-Jake).
+    """
+    if pd.isna(raw_name) or str(raw_name).strip() == 'nan':
+        return "UNKNOWN_PARTY"
+        
+    # Strip 'IND_' if it somehow already exists
+    name = re.sub(r'^IND_', '', str(raw_name).strip())
+    
+    # Split by spaces or underscores
+    tokens = re.split(r'[\s_]+', name)
+    
+    # Take strictly the first and last tokens
+    if len(tokens) > 1:
+        return f"IND_{tokens[0].title()}_{tokens[-1].title()}"
+    return f"IND_{tokens[0].title()}"
+
+
+def format_specific_party(row, strip_middle_names=False):
     """
     Helper function to convert 'IND' into 'IND_First_Last'.
     Leaves standard parties (e.g., 'ALP', 'ON') untouched.
     """
     ab = str(row['PartyAb']).strip()
     if ab.startswith('IND'):
+        if strip_middle_names:  # NEW
+            return clean_ind_name(f"{row['first_name']} {row['surname']}")  # NEW
         # Title case and replace spaces with underscores (e.g. "Ali Cupper" -> "Ali_Cupper")
         first = str(row['first_name']).strip().title().replace(' ', '_')
         last = str(row['surname']).strip().title().replace(' ', '_')
@@ -346,7 +385,7 @@ def format_specific_party(row):
 
 # old contesting parties for calibration for kappas
 LA_Candidates_prev = LA_Candidates.copy()
-LA_Candidates_prev['PartyAb_Specific'] = LA_Candidates_prev.apply(format_specific_party, axis=1)
+LA_Candidates_prev['PartyAb_Specific'] = LA_Candidates_prev.apply(format_specific_party, axis=1, strip_middle_names=(election_year == 2026))
 old_contesting_parties = LA_Candidates_prev.groupby('div_nm')['PartyAb_Specific'].agg(list).to_dict()
 old_contesting_parties = {(div, div): old_contesting_parties[div] for div in old_contesting_parties.keys()} # for the calibration data
 
@@ -411,7 +450,7 @@ else:
         #    next_contesting_parties[div] += ['NP']
 
     next_contesting_parties['Werribee'] = [p if p != 'TWP' else 'IND_Paul_Hopper' for p in next_contesting_parties['Werribee']]
-    next_contesting_parties['Brighton'] = [p if p != 'IND_John_Casley' else 'IND_John_Tiger_Casley' for p in next_contesting_parties['Brighton'] ] # Tiger Casley clause
+    #next_contesting_parties['Brighton'] = [p if p != 'IND_John_Casley' else 'IND_John_Tiger_Casley' for p in next_contesting_parties['Brighton'] ] # Tiger Casley clause
 
     old_contesting_parties[('Narracan','Narracan')] = next_contesting_parties['Narracan'] # overwrite old Narracan
 
@@ -441,7 +480,6 @@ for pair, new_parties in next_contesting_parties.items():
             }
 
             next_contesting_parties[pair] = [p for p in next_contesting_parties[pair] if p not in COAL_party_change_dict[pair]['added']] + [p for p in COAL_party_change_dict[pair]['removed']]
-
 
 
 
@@ -477,66 +515,45 @@ def align_lc_coalition(lc_series: pd.Series, target_cands: list) -> pd.Series:
             
     return mod_lc
 
-
-def clean_ind_name(raw_name: str) -> str:
-    """
-    Forces any name into the strict IND_First_Last convention.
-    Drops middle words. Preserves non-space punctuation (e.g., J.D. or Tosh-Jake).
-    """
-    if pd.isna(raw_name) or str(raw_name).strip() == 'nan':
-        return "UNKNOWN_PARTY"
-        
-    # Strip 'IND_' if it somehow already exists
-    name = re.sub(r'^IND_', '', str(raw_name).strip())
-    
-    # Split by spaces or underscores
-    tokens = re.split(r'[\s_]+', name)
-    
-    # Take strictly the first and last tokens
-    if len(tokens) > 1:
-        return f"IND_{tokens[0].title()}_{tokens[-1].title()}"
-    return f"IND_{tokens[0].title()}"
-
-def sync_dop_table_inds(dop_table_dict: dict, la_candidates_df: pd.DataFrame) -> dict:
+def sync_dop_table_inds(dop_table_dict: dict, la_candidates_df: pd.DataFrame, strip_middle_names: bool = False) -> dict:
     """
     Scans the LA_Candidates dataframe, isolates Independents per district, sorts them by ballot order, and translates 'IND1', 'IND2', etc. in the DOP_table_dict DataFrames to explicit 'IND_First_Last' column headers.
     """
     synced_dop_dict = {}
     
     for div, df in dop_table_dict.items():
-        # Isolate candidates for this specific district
         div_cands = la_candidates_df[la_candidates_df['div_nm'] == div].copy()
-        
-        # Filter for Independents and sort chronologically by ballot order
         inds = div_cands[div_cands['PartyAb'].astype(str).str.startswith('IND')].sort_values('ballot_order')
-        
-        # Build the renaming mapping for this district
+
         rename_map = {}
+        seen_names = set()  # NEW
         for idx, (_, row) in enumerate(inds.iterrows()):
-            # Format the specific name
-            first = str(row['first_name']).strip().title().replace(' ', '_')
-            last = str(row['surname']).strip().title().replace(' ', '_')
-            full_ind_name = f"IND_{first}_{last}"
-            
-            # Map the chronological tag (IND1, IND2, IND3...) to the new name
+            if strip_middle_names:  # NEW
+                full_ind_name = clean_ind_name(f"{row['first_name']} {row['surname']}")  # NEW
+            else:  # NEW
+                first = str(row['first_name']).strip().title().replace(' ', '_')
+                last = str(row['surname']).strip().title().replace(' ', '_')
+                full_ind_name = f"IND_{first}_{last}"
+
+            if full_ind_name in seen_names:  # NEW: Guard against same-seat IND name collisions
+                raise ValueError(f"Duplicate cleaned IND name '{full_ind_name}' in {div}")  # NEW
+            seen_names.add(full_ind_name)  # NEW
+
             rename_map[f"IND{idx + 1}"] = full_ind_name
-            
-            # Fallback: In case a single Independent is just labelled "IND" in the DataFrame
             if idx == 0:
                 rename_map["IND"] = full_ind_name
-                
-            # Fallback: If LA_Candidates explicitly stores the tag (like "IND1") in PartyAb, map that too
+
             party_ab = str(row['PartyAb']).strip()
             if party_ab.startswith('IND'):
                 rename_map[party_ab] = full_ind_name
 
-        # 4. Rename the DataFrame columns and store it
         synced_dop_dict[div] = df.rename(columns=rename_map)
-        
+
     return synced_dop_dict
 
-DOP_table_dict = sync_dop_table_inds(DOP_table_dict, LA_Candidates)
-
+DOP_table_dict = sync_dop_table_inds(  # NEW
+    DOP_table_dict, LA_Candidates, strip_middle_names=(election_year == 2026)  # NEW
+)  # NEW
 #################################################### Step 1: Remove Incumbency advantage (Simulated) ##################################################
 
 
@@ -1976,10 +1993,10 @@ NEW_PARTY_PRIORS[2022] = {
     'SAL': {'prior': 0.02, 'pseudo_N': 6}, 
     'CEC': {'prior': 0.0103, 'pseudo_N': 19},
     'AUD': {'prior': 0.0067, 'pseudo_N': 2}, # 2022 and 2025 federal result in NSW
-    'MAGA': {'prior': 0.008, 'pseudo_N': 0},
-    'FPAL': {'prior': 0.008, 'pseudo_N': 0},
-    'ATF': {'prior': 0.008, 'pseudo_N': 0},
-    'CAN': {'prior': 0.008, 'pseudo_N': 0},
+    'MAGA': {'prior': 0.01, 'pseudo_N': 0},
+    'FPAL': {'prior': 0.01, 'pseudo_N': 0},
+    'ATF': {'prior': 0.01, 'pseudo_N': 0},
+    'CAN': {'prior': 0.01, 'pseudo_N': 0},
 }
 
 NEW_PARTY_PRIORS[2018] = {
@@ -3407,8 +3424,10 @@ def execute_reapply_incumbency(
             inc_party = next_party
 
         if target_ia <= 1e-9:
+            #print(div, next_name_clean, next_tenure, demo_class, x_dict, pred_ia)
             #import pdb; pdb.set_trace()
             continue
+        
 
         # 2. Identify Incumbent and Challengers at Count 0
         coal_aliases = ['LP', 'NP', 'LNP', 'COAL'] if inc_party in ['LP', 'NP', 'COAL'] else [inc_party]
@@ -3462,8 +3481,152 @@ if not os.path.exists(f'inc_next_lookup_for_{election_year}.pkl'):
     with open(f'inc_next_lookup_for_{election_year}.pkl', 'wb') as f:
             pickle.dump(inc_next_lookup, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+if 0:
+    def run_incumbency_audit(
+        inc_next_lookup,
+        ia_tracker,
+        params_dict,
+        demo_lookup,
+        all_district_steps=None,
+        show_all=False,
+    ):
+        rows = []
 
-########################## Step 6 Polling ###################
+        for div, inc_list in sorted(inc_next_lookup.items()):
+            if not inc_list or inc_list[0].get('is_open', True):
+                continue
+
+            demo_class = demo_lookup.get(div, 'MISSING')
+            tracker_list = ia_tracker.get(div)
+
+            for inc in inc_list:
+                party = inc['party']
+                clean_name = str(inc.get('inc_clean_name', '')).strip().lower()
+
+                # Clean 2-key baseline so calling execute_reapply_incumbency yields exact target_ia
+                base_c0 = {party: 0.40, '_CHALL': 0.60}
+                out_c0 = execute_reapply_incumbency(
+                    div=div,
+                    cf_c0_step5=base_c0,
+                    ia_tracker_list=tracker_list,
+                    inc_next_info_list=[inc],
+                    params_dict=params_dict,
+                    demo_class=demo_class,
+                    simulate=False,
+                )
+                ia_pp = (out_c0[party] - base_c0[party]) * 100.0
+
+                # Check whether this MP actually matched an entry in ia_tracker
+                matched = bool(tracker_list) and any(
+                    str(tr.get('inc_name', '')).lower() == clean_name
+                    and str(tr.get('inc_party', '')) == party
+                    for tr in tracker_list
+                )
+
+                # Optional cross-check against the final step of all_district_steps
+                table_d8_pp = None
+                n_rows = None
+                if all_district_steps and div in all_district_steps and all_district_steps[div] is not None:
+                    df = all_district_steps[div]
+                    n_rows = len(df)
+                    scale = 100.0 if df.iloc[0].sum() <= 1.5 else 1.0
+                    table_d8_pp = float((df.iloc[-1] - df.iloc[-2]).max() * scale)
+
+                rows.append({
+                    'district': div,
+                    'bloc': 'COAL' if party in ('LP', 'NP', 'LNP', 'COAL') else party,
+                    'party': party,
+                    'name': clean_name,
+                    'source': 'returning' if matched else 'new_linear',
+                    'tenure': inc.get('years_tenure'),
+                    'demo': demo_class,
+                    'ia_pp': round(ia_pp, 2),
+                    'table_d8_pp': round(table_d8_pp, 2) if table_d8_pp is not None else None,
+                    'n_rows': n_rows,
+                })
+
+        df_out = pd.DataFrame(rows)
+
+        print("=== 2026 RE-APPLIED IA SUMMARY BY BLOC ===")
+        summary = df_out.groupby('bloc').agg(
+            total=('district', 'count'),
+            returning=('source', lambda s: (s == 'returning').sum()),
+            new_linear=('source', lambda s: (s == 'new_linear').sum()),
+            zero_ia=('ia_pp', lambda s: (s <= 0.0).sum()),
+            under_05pp=('ia_pp', lambda s: ((s > 0.0) & (s <= 0.5)).sum()),
+            over_05pp=('ia_pp', lambda s: (s > 0.5).sum()),
+            sum_pp=('ia_pp', 'sum'),
+            mean_pp=('ia_pp', 'mean'),
+        ).round(2)
+        print(summary.to_string())
+
+        if show_all:
+            print("\n=== ALL 2026 RECONTESTING INCUMBENTS ===")
+            print(df_out.sort_values(['bloc', 'ia_pp']).to_string(index=False))
+        else:
+            flagged = df_out[
+                (df_out['ia_pp'] <= 0.5)
+                | (df_out['table_d8_pp'].notna() & ((df_out['ia_pp'] - df_out['table_d8_pp']).abs() > 0.25))
+                | (df_out['n_rows'].notna() & (df_out['n_rows'] < 8))
+            ].sort_values(['bloc', 'ia_pp'])
+
+            print(f"\n=== FLAGGED INCUMBENTS (IA <= 0.5 pp, table mismatch, or sparse rows) [{len(flagged)}] ===")
+            print(flagged.to_string(index=False))
+
+        return df_out
+
+    # --- CALL IT ---
+    ia_audit_df = run_incumbency_audit(
+        inc_next_lookup=inc_next_lookup,
+        ia_tracker=ia_tracker_dict,
+        params_dict=ia_params_dict,           # whatever dict holds 'VIC-IA-Model-Params.json'
+        demo_lookup=demo_lookup,
+        all_district_steps=None,  # pass None if calling before traces exist
+        show_all=False,                    # set True to inspect all 69 rows
+    )
+
+
+    coefs = ia_params_dict['coefficients']
+    for yrs in (4, 8, 12, 16):
+        preds = [max(0.0, coefs['const'] + coefs['log_tenure']*np.log(yrs) + coefs.get(d, 0.0)) for d in demo_lookup.values()]
+        print(f"{yrs:2d} yrs ({yrs//4} term): mean = {np.mean(preds)*100:.2f}%")
+
+    def model_ia_pp(div, yrs):
+        d = demo_lookup.get(div, '')
+        val = coefs['const'] + coefs['log_tenure'] * np.log(max(1.0, float(yrs))) + coefs.get(d, 0.0)
+        return round(max(0.0, val) * 100, 1)
+
+    # 1. Retiring MPs: compare actual stripped_ia (shrunk) vs pure modelled IA
+    ret_rows = []
+    for div, lst in sorted(inc_next_lookup.items()):
+        if lst and lst[0].get('is_open', False) and div in ia_tracker_dict:
+            tr = ia_tracker_dict[div][0]
+            yrs = tr.get('tenure', 4.0)
+            ret_rows.append({
+                'district': div,
+                'party': tr['inc_party'],
+                'name': tr['inc_name'].title(),
+                'demo': demo_lookup.get(div),
+                'terms': round(float(yrs) / 4.0, 1),
+                'shrunk_ia_pp': round(-float(tr['stripped_ia']) * 100, 1),
+                'model_ia_pp': round(-model_ia_pp(div, yrs), 1),
+            })
+
+    print("=== RETIRING MPs (pick ones where shrunk_ia_pp ≈ model_ia_pp) ===")
+    print(pd.DataFrame(ret_rows).sort_values(['party', 'terms'], ascending=[True, False]).to_string(index=False))
+
+    # 2. First-term 2022 MPs gaining IA in 2026 (from ia_audit_df)
+    new_1st = ia_audit_df[(ia_audit_df['source'] == 'new_linear') & (ia_audit_df['ia_pp'] > 1.0)]
+    print("\n=== 1ST-TERM GAIN EXAMPLES (2022 FRESHMEN) ===")
+    print(new_1st[['district', 'party', 'name', 'demo', 'ia_pp']].sort_values(['ia_pp', 'party'], ascending=[False, True]).to_string(index=False))
+
+
+
+
+    import pdb; pdb.set_trace()
+
+    
+################################################################### Step 6 Polling #####################################################################################################
 
 def get_poll_bucket(cand_name: str, data_year: int) -> str:
     party = cand_name.split('_')[0] if '_' in cand_name else cand_name
@@ -3659,17 +3822,17 @@ def apply_district_alr_shift(
     if data_year == 2022:
         # Statewide Step 5 prior proportions within OTH (s_g^(0), sums to 1.0)
         OTH_SUB_PRIOR_2022 = {
-            'IND': 0.315,
-            'Left': 0.332,
-            'Right': 0.310,
-            'Centre': 0.043,
+            'IND': 0.329,
+            'Left': 0.328,
+            'Right': 0.309,
+            'Centre': 0.033,
         }
         # 2026 LC/LA poll target proportions within OTH (pi_g, sums to 1.0)
         OTH_SUB_POLL_2026 = {
             'IND': 6.0 / 13.0,                      # ~0.4615
-            'Left': (10.0 / 20.0) * (7.0 / 13.0),   # ~0.2692
-            'Right': (7.0 / 20.0) * (7.0 / 13.0),   # ~0.1885
-            'Centre': (3.0 / 20.0) * (7.0 / 13.0),  # ~0.0808
+            'Left': (10.5 / 20.0) * (7.0 / 13.0),   # ~0.2827
+            'Right': (7.5 / 20.0) * (7.0 / 13.0),   # ~0.202
+            'Centre': (2.0 / 20.0) * (7.0 / 13.0),  # ~0.054 # Split 3% for 'OTH' into 2% Centre, 0.5% eahc Left/Right
         }
         sub_keys = ['IND', 'Left', 'Right', 'Centre']
 
@@ -3857,10 +4020,10 @@ def append_polling_alr_step(
         post_pct = post_shares[b] * 100
         print(f"{b:<8} | {prior_pct:>10.2f}% | {target_pct:>10.2f}% | {post_pct:>10.2f}%")
     print("=" * 52 + "\n")
-
+    #import pdb; pdb.set_trace()
     return deterministic_traces, post_shares
 
-########################## Redistribution step #######################################33
+########################## Redistribution step #########################################
 
 def apply_elimination_flows(df_start: pd.DataFrame, start_c0: dict, reduced_c0: dict) -> pd.DataFrame:
     """
@@ -4772,7 +4935,6 @@ def generate_deterministic_trace_run(
     # =========================================================
     # APPLY ALR POLLING SHIFT (STEP 6)
     # =========================================================
-    #import pdb; pdb.set_trace()
     
 
     print("Applying Kalman ALR Polling Shift to Count 5...")
@@ -4792,7 +4954,7 @@ def generate_deterministic_trace_run(
     # =========================================================
     # SECOND LOOP: RE-APPLY INCUMBENCY ADVANTAGE (STEP 7)
     # =========================================================
-    for div in target_districts:
+    for div in target_districts + ['Narracan'] if data_year == 2022 else target_districts:
         # Extract the ALR-swung baseline from the trace
         step7_series = debug_traces[div].loc['7_Step7 (State Polling ALR)'].dropna()
         cf_c0_step7 = {k: float(v) for k, v in step7_series.items() if v > 0}
@@ -4816,6 +4978,34 @@ def generate_deterministic_trace_run(
 
 mean_kappas = draw_stochastic_kappas(calibration_data, simulate=False)
 
+def apply_manual_ia_poll_adjustment(
+    kalman_poll: Dict[str, float],
+    ia_shifts_pp: Dict[str, float],
+    theta: float = 0.0,
+    min_share: float = 0.005,
+) -> Dict[str, float]:
+    """
+    Pre-offsets kalman_poll by subtracting `theta * (ia_shifts_pp / 100)`,
+    preserving exact key order, scale (0..1 or 0..100), and total sum.
+    """
+    if theta == 0.0:
+        return dict(kalman_poll)
+
+    kp_sum = float(sum(kalman_poll.values()))
+    kp_scale = 100.0 if kp_sum > 1.5 else 1.0
+
+    adj_frac = {
+        b: max(min_share, (float(v) / kp_scale) - float(theta) * (float(ia_shifts_pp.get(b, 0.0)) / 100.0))
+        for b, v in kalman_poll.items()
+    }
+    tot = sum(adj_frac.values())
+    adj_poll = {b: (v / tot) * kp_sum for b, v in adj_frac.items()}
+
+    print(f"[IA POLL OFFSET | theta={theta:.2f}]")
+    print("  Raw (%):", {k: round(v * 100.0 / kp_scale, 2) for k, v in kalman_poll.items()})
+    print("  Adj (%):", {k: round(v * 100.0 / kp_scale, 2) for k, v in adj_poll.items()})
+    return adj_poll
+
 def load_kalman_poll(csv_path: str, election_year: int, ref_col: str = 'COAL') -> Tuple[dict, List[str]]:
     df = pd.read_csv(csv_path, index_col='election_year')
     row = df.loc[election_year].dropna()
@@ -4831,6 +5021,12 @@ kalman_poll, alr_cols = load_kalman_poll('kalman_polls.csv', election_year, ref_
 #kalman_poll['GRN'] = 0.136
 #kalman_poll['ON'] = 0.237
 #kalman_poll['OTH'] = 0.107
+ADJUST_POLLS_FOR_IA = 1
+if ADJUST_POLLS_FOR_IA and election_year == 2026:
+    manual_ia_shifts_pp = {'COAL': 0.64, 'ALP': 0.93, 'GRN': -0.36, 'ON': -0.57, 'OTH': -0.64}
+    kalman_poll = apply_manual_ia_poll_adjustment(kalman_poll, manual_ia_shifts_pp, theta=0.5)
+
+
 assert alr_cols == ALR_COLS
 print("Running deterministic structural trace...")
 
@@ -4871,8 +5067,29 @@ print(f"Trace completed for {len(deterministic_traces)} districts.")
 print("Step 7 Complete. Traces updated.")
 
 
+# evaluate ia_shifts
+meta = ['div_nm', 'CandRemaining', 'TOTAL', 'CountType']
+raw_w = {
+    d: (45132.0 if (d == 'Narracan' and data_year == 2022)
+        else float(pd.to_numeric(DOP_table_dict[d].iloc[0].drop(labels=meta, errors='ignore'), errors='coerce').sum()))
+    for d in deterministic_traces if (d in DOP_table_dict or (d == 'Narracan' and data_year == 2022))
+}
+avg_w = float(np.mean(list(raw_w.values())))
+w_tot = sum(raw_w.get(d, avg_w) for d in deterministic_traces)
 
+ia_pp = {b: 0.0 for b in kalman_poll}
+for d, df_tr in deterministic_traces.items():
+    r7 = df_tr.loc['7_Step7 (State Polling ALR)'].fillna(0.0)
+    r8 = df_tr.loc['8_Step8 (Add 2026 IA)'].fillna(0.0)
+    scale = 1.0 if r7.sum() > 1.5 else 100.0
+    wd = raw_w.get(d, avg_w) / w_tot
+    for c in df_tr.columns:
+        b = get_poll_bucket(c, data_year)
+        ia_pp[b if b in ia_pp else 'OTH'] += wd * float(r8.get(c, 0.0) - r7.get(c, 0.0)) * scale
 
+print("manual_ia_shifts_pp =", {k: round(v, 2) for k, v in ia_pp.items()})
+
+#import pdb; pdb.set_trace()
 
 # diagnostics
 # np.array(sorted([np.round(deterministic_traces[div].iloc[-1,:]['ON'], 3)*100 for div in deterministic_traces.keys()]))
@@ -4943,6 +5160,11 @@ def build_defection_rates(
         for k in BLOCS:
             clean_profile[k] = float(profile.get(k, 0.0))
         defection_rates[seat_cand] = clean_profile
+
+    # adjust Paul Hopper's defection rate to his personal one
+    if ('Werribee','TWP') in defection_rates.keys():
+
+        defection_rates[('Werribee','TWP')] = defection_rates[('Werribee', 'IND_Paul_Hopper')]
 
     return defection_rates, fallback_avg
 
@@ -5368,14 +5590,65 @@ if (not os.path.exists(f'pre_poll_sims_step6_for_{election_year}.pkl')) and (ele
         pickle.dump(global_ind_glm_meta, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
+RUN_THETA_EXPERIMENT = 0  # NEW: Keep False for normal runs; set True ONLY when testing theta
+
+if RUN_THETA_EXPERIMENT:  # NEW
+    # 1. Read-only: compute statewide IA shift (Step 8 - Step 7) from deterministic_traces  # NEW
+    meta_cols = ['div_nm', 'CandRemaining', 'TOTAL', 'CountType']  # NEW
+    raw_w = {  # NEW
+        d: (45132.0 if (d == 'Narracan' and data_year == 2022)  # NEW
+            else float(pd.to_numeric(DOP_table_dict[d].iloc[0].drop(labels=meta_cols, errors='ignore'), errors='coerce').sum()))  # NEW
+        for d in deterministic_traces if (d in DOP_table_dict or (d == 'Narracan' and data_year == 2022))  # NEW
+    }  # NEW
+    avg_w = float(np.mean(list(raw_w.values())))  # NEW
+    w_tot = sum(raw_w.get(d, avg_w) for d in deterministic_traces)  # NEW
+
+    ia_shifts = {b: 0.0 for b in kalman_poll}  # NEW
+    for d, df_tr in deterministic_traces.items():  # NEW
+        r7 = df_tr.loc['7_Step7 (State Polling ALR)'].fillna(0.0)  # NEW
+        r8 = df_tr.loc['8_Step8 (Add 2026 IA)'].fillna(0.0)  # NEW
+        scale = 100.0 if r7.sum() > 1.5 else 1.0  # NEW
+        wd = raw_w.get(d, avg_w) / w_tot  # NEW
+        for c in df_tr.columns:  # NEW
+            b = get_poll_bucket(c, data_year)  # NEW
+            ia_shifts[b if b in ia_shifts else 'OTH'] += wd * float(r8.get(c, 0.0) - r7.get(c, 0.0)) / scale  # NEW
+
+    print(f"\n[{election_year}] Statewide IA shifts (pp):", {k: round(v * 100, 2) for k, v in ia_shifts.items()})  # NEW
+
+    # 2. Run identical paired simulations for each theta and save to a separate folder  # NEW
+    out_dir = "ia_theta_experiments"  # NEW
+    os.makedirs(out_dir, exist_ok=True)  # NEW
+    kp_sum = float(sum(kalman_poll.values()))  # NEW
+    kp_scale = 100.0 if kp_sum > 1.5 else 1.0  # NEW
+
+    for theta in [0.0, 0.5, 0.75, 1.0]:  # NEW
+        adj_poll = {b: max(0.005, (float(v) / kp_scale) - theta * ia_shifts[b]) for b, v in kalman_poll.items()}  # NEW
+        adj_poll = {b: (v / sum(adj_poll.values())) * kp_sum for b, v in adj_poll.items()}  # NEW
+        print(f"  theta={theta:.2f} adj_poll (%):", {k: round(v * 100 / kp_scale, 2) for k, v in adj_poll.items()})  # NEW
+
+        fp_theta = simulate_First_Preference_model(  # NEW
+            data_year, num_simulations, stripped_tables, static_high_ind_districts,  # NEW
+            next_contesting_parties, LC_FPs_df, party_df, dop_lookup, electorate_to_region, final_model, copy.deepcopy(rng),  # NEW
+            narracan_dummy, calibration_data, global_step3_cache, anomalous_districts, global_step4_cache,  # NEW
+            new_ind_features, pool_model, split_model, mu_ind_to_ind_array, global_party_dict, election_year, IND_PRIORS,  # NEW
+            TARGET_TEALS, TARGET_WEST, teal_params, west_params, COAL_party_change_dict, tau_coal_per_election, np_share_prior_dict,  # NEW
+            right_leak_profile, is_redistribution, rediv_seg_votes_dict, raw_c0_dict, rediv_transfer_props_dict, adj_poll,  # NEW
+            DOP_table_dict, sim_poll_errors, sim_elec_errors, ALR_COLS, ia_tracker_dict, inc_next_lookup, ia_params_dict, demo_lookup,  # NEW
+            return_before_polling=False  # NEW
+        )  # NEW
+
+        tag = f"{theta:.2f}".replace(".", "p")  # NEW
+        out_path = os.path.join(out_dir, f"FP_pred_for_{election_year}_theta_{tag}.pkl")  # NEW
+        with open(out_path, "wb") as f:  # NEW
+            pickle.dump(fp_theta, f, protocol=pickle.HIGHEST_PROTOCOL)  # NEW
+        print("  Saved ->", out_path)  # NEW
+
+    sys.exit(0)  # NEW: Exits cleanly before your normal FP_pred_for_{election_year}.pkl save or downstream TCP code
+
 
 #import pdb; pdb.set_trace()
 
-
-
-if not os.path.exists(f'FP_pred_for_{election_year}.pkl'):
-
-    FP_results_c0 = simulate_First_Preference_model(data_year, num_simulations, stripped_tables, static_high_ind_districts, 
+FP_results_c0 = simulate_First_Preference_model(data_year, num_simulations, stripped_tables, static_high_ind_districts, 
                         next_contesting_parties, LC_FPs_df,party_df, dop_lookup, electorate_to_region, final_model, rng, 
                         narracan_dummy, calibration_data, global_step3_cache, anomalous_districts, global_step4_cache, 
                         new_ind_features, pool_model, split_model, mu_ind_to_ind_array, global_party_dict, election_year,IND_PRIORS,
@@ -5384,6 +5657,8 @@ if not os.path.exists(f'FP_pred_for_{election_year}.pkl'):
                         DOP_table_dict, sim_poll_errors, sim_elec_errors, ALR_COLS, ia_tracker_dict, inc_next_lookup, ia_params_dict, demo_lookup,
                         return_before_polling=False
                         )
+
+if not os.path.exists(f'FP_pred_for_{election_year}.pkl'):
 
     with open(f'FP_pred_for_{election_year}.pkl', 'wb') as f:
             pickle.dump(FP_results_c0, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -5399,21 +5674,21 @@ if not os.path.exists(f'FP_pred_for_{election_year}.pkl'):
     with open(f'ALR_errors_for_{election_year}.pkl', 'wb') as f:
         pickle.dump(alr_error_bundle, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-pref_bundle = {
-        "party_df": party_df,
-        "is_redistribution": is_redistribution,  # True for redistribution years (e.g., 2014, 2022)
-        "LC_FPs_df": LC_FPs_df,
-        "LC_FPs_df_rediv": LC_FPs_df_rediv if is_redistribution else LC_FPs_df,
-        "final_model": final_model,
-        "compositions_dict": compositions_dict,
-        "specific_defection_dict": specific_defection_dict,
-        "fallback_defection_profile": fallback_defection_profile,
-    }
+    pref_bundle = {
+            "party_df": party_df,
+            "is_redistribution": is_redistribution,  # True for redistribution years (e.g., 2014, 2022)
+            "LC_FPs_df": LC_FPs_df,
+            "LC_FPs_df_rediv": LC_FPs_df_rediv if is_redistribution else LC_FPs_df,
+            "final_model": final_model,
+            "compositions_dict": compositions_dict,
+            "specific_defection_dict": specific_defection_dict,
+            "fallback_defection_profile": fallback_defection_profile,
+        }
 
-with open(f'pref_model_bundle_for_{election_year}.pkl', 'wb') as f:
-    pickle.dump(pref_bundle, f)
+    with open(f'pref_model_bundle_for_{election_year}.pkl', 'wb') as f:
+        pickle.dump(pref_bundle, f)
 
-import pdb; pdb.set_trace()
+#import pdb; pdb.set_trace()
 # pd.DataFrame([result['Bentleigh'] for result in FP_results_c0])
 
 electorates = FP_results_c0[0].keys()
@@ -5421,7 +5696,7 @@ FP_pred = {e: pd.DataFrame([res[e] for res in FP_results_c0]) for e in electorat
 
 
 
-import pdb; pdb.set_trace()
+#import pdb; pdb.set_trace()
 
 
 ######################################################################### Winner from First Preferences model #########################################################
@@ -5600,6 +5875,8 @@ def adjust_TCP_state_dict(TCP_state_dict, party_df, SIGMA_JOINT):
 
     # 2. Shift the baselines
     adjusted_TCP_state_dict = apply_tcp_adjustments(TCP_state_dict, avg_tcp_df, UPDATED_FLOWS_ELECTION, party_df)
+
+    #import pdb; pdb.set_trace()
 
     # 3. Build the noise matrix
     row_joint_sigmas = build_joint_noise_vector(N_SOURCES, EXTERNAL_ROWS, SIGMA_JOINT, EXTERNAL_UNCERTAINTY_PENALTY)
@@ -6058,6 +6335,7 @@ def process_preference_distribution(
             ind_cands = [c for c in top_cands if is_ind_map[c]]
             non_ind_cands = [c for c in top_cands if not is_ind_map[c]]
             num_inds = len(ind_cands)
+            base_thetas = None  # NEW
 
             if num_inds == 0:
                 cache_key = (tuple(top_cands), tuple(elim_minors))
@@ -6088,8 +6366,27 @@ def process_preference_distribution(
 
             # 4. Broadcast `thetas` across all M simulations in this group. If theta is none, use HACK: proportional split won't change order
             if thetas is not None:
-                theta_vec = np.array([thetas[c] for c in top_cands]) # Aligned with top_cands!
-                totals_mat += elim_minor_pool[:, None] * theta_vec[None, :]
+                if num_inds == 0:  # NEW
+                    theta_vec = np.array([thetas[c] for c in top_cands]) # Aligned with top_cands!
+                    totals_mat += elim_minor_pool[:, None] * theta_vec[None, :]
+                else:  # NEW
+                    top_fp_sum = np.maximum(totals_mat.sum(axis=1), 1e-6)  # NEW: Shape (M,)
+                    theta_mat = np.zeros((len(rows), K), dtype=float)  # NEW
+
+                    prop_ind_total = np.zeros(len(rows), dtype=float)  # NEW
+                    for ind_c in ind_cands:  # NEW
+                        pos = top_cands.index(ind_c)  # NEW
+                        prop_i = totals_mat[:, pos] / top_fp_sum  # NEW
+                        prop_ind_total += prop_i  # NEW
+                        theta_mat[:, pos] = (1.0 - W_XCP_PROPORTIONAL_DEFECTION) * thetas[ind_c] + W_XCP_PROPORTIONAL_DEFECTION * prop_i  # NEW
+
+                    rem_share = 1.0 - prop_ind_total  # NEW
+                    for c in non_ind_cands:  # NEW
+                        pos = top_cands.index(c)  # NEW
+                        prop_c = rem_share * base_thetas[c]  # NEW
+                        theta_mat[:, pos] = (1.0 - W_XCP_PROPORTIONAL_DEFECTION) * thetas[c] + W_XCP_PROPORTIONAL_DEFECTION * prop_c  # NEW
+
+                    totals_mat += elim_minor_pool[:, None] * theta_mat  # NEW
 
         # 5. Find weakest candidate per row and assign the K-1 survivors
         weakest_col_idx = np.argmin(totals_mat, axis=1) # Shape: (M,), values in 0..K-1
@@ -6309,7 +6606,6 @@ def run_statewide_preference_simulation(
             joint_noise=global_joint_noise,rng=rng,SIGMA_IND=SIGMA_IND,simulate=True
         )
         
-        
         # Step 6: Populate Trackers
         winners = final_2cp_df['Winner'].tolist()
         runners = final_2cp_df['RunnerUp'].tolist()
@@ -6342,7 +6638,7 @@ def run_statewide_preference_simulation(
 ordered_electorates = list(FP_pred.keys()) 
 sim_local_alr_dict = {electorate: sim_elec_errors[:, i, :] for i, electorate in enumerate(ordered_electorates)}
 
-
+import pdb; pdb.set_trace()
 TCP_state_dict, row_joint_sigmas, avg_tcp_df = adjust_TCP_state_dict(TCP_state_dict, party_df, SIGMA_JOINT)
 
 simulation_results = run_statewide_preference_simulation(
@@ -6377,7 +6673,19 @@ simulation_bundle = {
     'simulation_winners': per_simulation_winners
 }
 
+coal_parties = {'LP','NP'}
+parties_out = ['ALP', 'COAL', 'GRN', 'ON', 'OTH']
+party_name_dict = {'ALP': 'Labor', 'LP': 'Liberal', 'NP': 'National', 'COAL': 'Coalition','LNP': 'Liberal National', 'GRN': 'Greens'}
+clean = pd.DataFrame(per_simulation_winners).astype(str).apply(lambda s: s.str.strip()).replace(list(coal_parties), 'COAL'); df = clean.where(clean.isin(parties_out), 'OTH').apply(pd.Series.value_counts, axis=1).reindex(columns=parties_out).fillna(0).astype(int).rename(columns=party_name_dict); party_means = df.mean().to_dict(); print(party_means)
+div_weights = {div: (45132.0 if div == "Narracan" else float(pd.to_numeric(DOP_table_dict[div].iloc[0], errors="coerce").sum())) for div in FP_pred.keys()}
+sm = pd.DataFrame({s: d.mean() for s, d in FP_pred.items()}).T.fillna(0.0).rename(columns=lambda c: 'IND' if str(c).startswith('IND_') else c).T.groupby(level=0).sum().T; wt = pd.Series(div_weights, dtype=float).reindex(sm.index); assert not wt.isna().any(); statewide_avg = sm.mul(wt / wt.sum(), axis=0).sum().sort_values(ascending=False); print((statewide_avg * 100).round(2))
+med = pd.DataFrame({s: d.median() for s, d in FP_pred.items()}).T.fillna(0.0).rename(columns=lambda c: 'COAL' if c in ('LP','NP') else (c if c in ('ALP','GRN','ON') else 'OTH')).T.groupby(level=0).sum().T; wt = pd.Series(div_weights, dtype=float).reindex(med.index); print((med.mul(wt/wt.sum(), axis=0).sum()*100).round(2))
+import pdb; pdb.set_trace()
+import pdb; pdb.set_trace()
+
 if election_year == 2026:
+
+
     os.chdir(Path.home() / 'Australian Election/Victorian Election/Website-files/')
     with open("vic2026_simulation_bundle.pkl", "wb") as f:
         pickle.dump(simulation_bundle, f)

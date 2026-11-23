@@ -5,6 +5,8 @@ from pathlib import Path
 import pickle
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
+from matplotlib.lines import Line2D
 import seaborn as sns
 import statsmodels.api as sm
 
@@ -272,90 +274,446 @@ teals = [
 ]
 public_figures = ['Ali Cupper', 'Carol Altmann', "Jenny O'Connor", 'Darryn Lyons', 'Catherine Cumming', 'William Fowles'] # Aidan Mclindon, 'Tony Briffa'
 
+elected_politicians = ['Russell Northe','Geoff Shaw','Phil Cleary', 'James Purcell','Darryn Lyons']
+
 # 2. Map them to a new column
 def get_candidate_archetype(name):
     if name in teals:
         return 'Teal'
-    elif name in public_figures:
-        return 'Public Figure'
+    if name in elected_politicians:
+        return 'Elected Politician'
+    #elif name in public_figures:
+    #    return 'Public Figure'
     return 'Standard'
 
 final_IND_model_df['Candidate_Archetype'] = final_IND_model_df['Candidate'].apply(get_candidate_archetype)
 final_IND_model_df.loc[(final_IND_model_df['Candidate']=='Darryn Lyons') & (final_IND_model_df['Year']==2018),'Is_Former_Councillor'] = True # Mayor of Geelong
 
-
-to_plot = 0
+final_IND_model_df[['Year','Electorate','Candidate','First_Wiki_Date','Campaign_Length_Days','votes','Primary_Vote_Share','PartyAb','is_repeat','Is_Former_Councillor','Candidate_Archetype']].sort_values(by = ['Year','Electorate','Candidate'], ascending = [False, True, True]).to_csv('Independent_candidate_features.csv')
+import pdb; pdb.set_trace()
+to_plot = 1
+INCLUDE_REPEATS = False   # Toggle True to include repeat contenders with gold rings
+SPLIT_TREND_AT_15 = False # Toggle True to fit separate trendlines for <=15 and >15 days
 
 if to_plot:
 
-    # ADD: exclude repeat contenders from plots
+    import numpy as np
+    import pandas as pd
+    import plotly.graph_objects as go
 
-    # FIX - Currently only can plot post-2010 where Campaign_Length_Days is not None
+    # ==========================================================
+    # 0. CONFIG — MATCH TO YOUR DATAFRAME COLUMN NAMES
+    # ==========================================================
+    COL_NAME = 'Candidate'      # e.g. 'Candidate_Name'
+    COL_SEAT = 'Electorate'     # e.g. 'District'
+    COL_YEAR = 'Year'           # e.g. 'Election_Year'
+    INCLUDE_REPEATS = False
+    PREVIEW_HTML = 'ind_campaign_preview.html'
+    EXPORT_JSON_PATH = 'Website-files/vic2026_web/ind_campaign_length.json'     # e.g. 'vic2026_web/ind_campaign_length.json'
 
-    # 1. Create a categorical grouping column for the facets
-    final_IND_model_df['Campaign_Phase'] = np.where(
-        final_IND_model_df['Campaign_Length_Days'] <= 15, 
-        '<= 15 Days (Ballot Draw / Late)', 
-        '> 15 Days (Early Campaign)'
+    # ==========================================================
+    # 1. CLEAN DATA & ASSIGN 4 MUTUALLY EXCLUSIVE COLOURS
+    # ==========================================================
+    plot_df = final_IND_model_df.copy()
+    plot_df['Campaign_Length_Days'] = pd.to_numeric(plot_df['Campaign_Length_Days'], errors='coerce').astype(float)
+    plot_df['Primary_Vote_Share'] = pd.to_numeric(plot_df['Primary_Vote_Share'], errors='coerce').astype(float)
+
+    mask = plot_df['Campaign_Length_Days'].notna() & plot_df['Primary_Vote_Share'].notna()
+    if not INCLUDE_REPEATS and 'is_repeat' in plot_df.columns:
+        mask &= (plot_df['is_repeat'] == False)
+
+    plot_df = plot_df.loc[mask].copy()
+    plot_df['Is_Former_Councillor'] = plot_df['Is_Former_Councillor'].fillna(False).astype(bool)
+
+    if plot_df['Primary_Vote_Share'].max() <= 1.0:
+        plot_df['Primary_Vote_Share'] *= 100.0
+
+    plot_df['_name'] = plot_df[COL_NAME].astype(str) if COL_NAME in plot_df.columns else 'Independent'
+    plot_df['_seat'] = plot_df[COL_SEAT].astype(str) if COL_SEAT in plot_df.columns else ''
+    plot_df['_year'] = (
+        pd.to_numeric(plot_df[COL_YEAR], errors='coerce').fillna(0).astype(int).astype(str).replace('0', '')
+        if COL_YEAR in plot_df.columns else ''
     )
 
-    # 2. Explicitly create a standard matplotlib figure
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
-    phases = ['<= 15 Days (Ballot Draw / Late)', '> 15 Days (Early Campaign)']
+    def assign_group(row):
+        arch = str(row.get('Candidate_Archetype', 'Standard')).strip()
+        is_cllr = bool(row.get('Is_Former_Councillor', False))
 
-    for i, phase in enumerate(phases):
-        subset = final_IND_model_df[final_IND_model_df['Campaign_Phase'] == phase]
-        ax = axes[i]
-        
-        # A. Draw the regression line ONLY (scatter=False)
-        sns.regplot(
-            data=subset,
-            x='Campaign_Length_Days',
-            y='Primary_Vote_Share',
-            ax=ax,
-            scatter=False,
-            line_kws={'color': 'red', 'linewidth': 2}
+        if arch == 'Teal':
+            return 'Teal'
+        if arch.lower() in ('elected politician', 'former mp', 'ex-politician', 'public figure'):
+            return 'Elected Politician'
+        if is_cllr:
+            return 'Former Councillor'
+        return 'Standard'
+
+    plot_df['Display_Group'] = plot_df.apply(assign_group, axis=1)
+
+    # Subtle deterministic jitter so exact integer-day dots (especially days 13–18) don't stack invisibly
+    rng = np.random.default_rng(42)
+    plot_df['X_Plotted'] = (plot_df['Campaign_Length_Days'] + rng.uniform(-0.25, 0.25, size=len(plot_df))).clip(lower=0)
+
+    # ==========================================================
+    # 2. CLEAN 4-COLOUR PALETTE & NEAR-UNIFORM DOT SIZES
+    # ==========================================================
+    GROUP_STYLE = [
+        # (Label,               Fill Hex,  Size, Opacity)
+        ('Standard',            '#64748B',  7.8,  0.72),  # Deeper slate & higher opacity
+        ('Former Councillor',   '#7C3AED',  8.5,  0.88),  # Brand violet
+        ('Elected Politician',   '#D97706',  9.0,  0.92),  # Warm amber-gold
+        ('Teal',                '#0D9488',  9.0,  0.92),  # Vibrant teal
+    ]
+
+    def trace_arrays(df_slice):
+        if df_slice.empty:
+            return [], [], []
+        seat_year = [
+            f"{s}, {y}" if (s and y) else (s or y)
+            for s, y in zip(df_slice['_seat'], df_slice['_year'])
+        ]
+        customdata = [[n, sy] for n, sy in zip(df_slice['_name'], seat_year)]
+        return (
+            df_slice['X_Plotted'].round(2).tolist(),
+            df_slice['Primary_Vote_Share'].round(2).tolist(),
+            customdata,
         )
-        
-        # B. Draw the scatter points with HUE for the councillors
-        sns.scatterplot(
-            data=subset,
-            x='Campaign_Length_Days',
-            y='Primary_Vote_Share',
-            hue='Is_Former_Councillor',
-            style='Candidate_Archetype',
-            markers={'Teal': 's', 'Public Figure': '^', 'Standard': 'o'}, # s=square, ^=triangle, o=circle
-            palette={True: 'purple', False: 'steelblue'},
-            alpha=0.8,
-            s=80, # Slightly larger to make shapes visible
-            ax=ax,
-            legend=(i == 1)
+
+    # ==========================================================
+    # 3. BUILD PLOTLY FIGURE
+    # ==========================================================
+    fig = go.Figure()
+
+    hover_template = (
+        "<b>%{customdata[0]}</b><br>"
+        "%{customdata[1]}"
+        "<extra></extra>"
+    )
+
+    for grp, color, size, opacity in GROUP_STYLE:
+        x_v, y_v, cdata = trace_arrays(plot_df[plot_df['Display_Group'] == grp])
+        fig.add_trace(go.Scatter(
+            x=x_v,
+            y=y_v,
+            mode='markers',
+            name=grp,
+            customdata=cdata,
+            hovertemplate=hover_template,
+            marker=dict(
+                color=color,
+                size=size,
+                opacity=opacity,
+                line=dict(color='#FFFFFF', width=0.9),
+            ),
+        ))
+
+    # ==========================================================
+    # 4. BALLOT DRAW BAND (13–18 DAYS)
+    # ==========================================================
+    x_max = float(plot_df['Campaign_Length_Days'].max()) * 1.04
+
+    fig.add_vrect(
+        x0=13, x1=18,
+        fillcolor='rgba(56, 189, 248, 0.13)',
+        line_width=0,
+        layer='below',
+    )
+    for edge in (13, 18):
+        fig.add_vline(
+            x=edge,
+            line_width=1,
+            line_dash='dot',
+            line_color='rgba(2, 132, 199, 0.42)',
+            layer='below',
         )
 
-        sns.scatterplot(
-            data=subset[subset['is_repeat']],
-            x='Campaign_Length_Days',
-            y='Primary_Vote_Share',
-            marker='o',
-            s=100,                 # bigger outer circle
-            facecolor='none',
-            edgecolor='gold',
-            linewidth=2,
-            alpha = 0.5,
-            ax=ax,
-            legend=False
+    fig.add_annotation(
+        x=18,           # # NEW: Anchored to the right edge of the corridor
+        xshift=6,       # # NEW: Small pixel gap to the right so it clears the dotted line cleanly
+        y=33.6,         # # NEW: Fits comfortably below the 34.5 top limit
+        text='Ballot Draw<br>(13–18d)',
+        showarrow=False,
+        xanchor='left', # # NEW: Extends rightward into open space, clear of Suzanna Sheed
+        align='left',
+        yanchor='top',
+        font=dict(family='Poppins, sans-serif', size=10.5, color='#0284C7'),  # # NEW: Matching sky blue
+    )
+    if 0:
+        # ==========================================================
+        # 5. SINGLE YEAR FILTER DROPDOWN (ISOLATES SELECTED YEAR)
+        # ==========================================================
+        years = sorted([y for y in plot_df['_year'].unique() if y], reverse=True)
+        updatemenus = []
+
+        if len(years) > 1:
+            year_buttons = []
+            for yr_label in ['All Years'] + years:
+                yr_df = plot_df if yr_label == 'All Years' else plot_df[plot_df['_year'] == yr_label]
+                xs, ys, cdatas = [], [], []
+                for grp, _, _, _ in GROUP_STYLE:
+                    x_v, y_v, cdata = trace_arrays(yr_df[yr_df['Display_Group'] == grp])
+                    xs.append(x_v)
+                    ys.append(y_v)
+                    cdatas.append(cdata)
+                year_buttons.append(dict(
+                    label=yr_label,
+                    method='restyle',
+                    args=[{'x': xs, 'y': ys, 'customdata': cdatas}, list(range(len(GROUP_STYLE)))],
+                ))
+
+            updatemenus.append(dict(
+                type='dropdown',
+                x=1.0, y=1.11,
+                xanchor='right', yanchor='top',
+                bgcolor='#ffffff',
+                bordercolor='#d8b4fe',
+                borderwidth=1,
+                font=dict(family='Poppins, sans-serif', size=11.5, color='#4c1d95'),
+                buttons=year_buttons,
+            ))
+
+    # ==========================================================
+    # 6. MINIMAL, LOCKED-DOWN LAYOUT
+    # ==========================================================
+    fig.update_layout(
+        title=dict(
+            text="<b>Independent Primary Vote vs. Campaign Length</b>",
+            x=0.01, xanchor='left', y=0.96,
+            font=dict(family='Poppins, sans-serif', size=19, color='#4c1d95'),
+        ),
+        font=dict(family='Poppins, sans-serif', color='#334155'),
+        paper_bgcolor='#fcfbff',
+        plot_bgcolor='#fcfbff',
+        height=540,
+        margin=dict(l=58, r=24, t=88, b=56),
+        dragmode=False,
+        hovermode='closest',
+        hoverlabel=dict(
+            bgcolor='rgba(255, 255, 255, 0.96)',
+            bordercolor='#cbd5e1',
+            font=dict(family='Poppins, sans-serif', size=12, color='#1e293b'),
+            align='left',
+        ),
+        xaxis=dict(
+            title=dict(text='Campaign Length (Days Before Election)', font=dict(size=12.5, color='#334155')),
+            range=[-2, x_max],
+            fixedrange=True,
+            showgrid=True,
+            gridcolor='rgba(148, 163, 184, 0.14)',
+            zeroline=False,
+            linecolor='#cbd5e1',
+            ticksuffix='d',
+        ),
+        yaxis=dict(
+            title=dict(text='Primary Vote Share', font=dict(size=12.5, color='#334155')),
+            range=[-1, 34.5],
+            tickvals=[0, 5, 10, 15, 20, 25, 30],
+            fixedrange=True,
+            showgrid=True,
+            gridcolor='rgba(148, 163, 184, 0.20)',
+            zeroline=True,
+            zerolinecolor='#cbd5e1',
+            ticksuffix='%',
+        ),
+        legend=dict(
+            orientation='h',
+            x=0.0, y=1.04,
+            xanchor='left', yanchor='bottom',
+            bgcolor='rgba(0,0,0,0)',
+            font=dict(family='Poppins, sans-serif', size=11.5),
+            itemsizing='constant',
+        ),
+        #updatemenus=updatemenus,
+    )
+
+    # ==========================================================
+    # 7. BROWSER PREVIEW (WITH POPPINS FONT) & OPTIONAL JSON
+    # ==========================================================
+    plot_config = {
+        'displayModeBar': False,
+        'scrollZoom': False,
+        'doubleClick': False,
+        'responsive': True,
+    }
+
+    html_str = fig.to_html(include_plotlyjs='cdn', config=plot_config, full_html=True)
+    poppins_link = '<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">'
+    html_str = html_str.replace('<head>', f'<head>\n{poppins_link}', 1)
+
+    with open(PREVIEW_HTML, 'w', encoding='utf-8') as f:
+        f.write(html_str)
+
+    import webbrowser, os
+    webbrowser.open('file://' + os.path.realpath(PREVIEW_HTML))
+
+    if EXPORT_JSON_PATH:
+        fig.write_json(EXPORT_JSON_PATH)
+
+    import pdb; pdb.set_trace()
+
+    # 1. Clean filtering (drops pre-2010 NaNs safely without SettingWithCopyWarning)
+    plot_df = final_IND_model_df.copy()
+    plot_df['Campaign_Length_Days'] = pd.to_numeric(plot_df['Campaign_Length_Days'], errors='coerce').astype(float)
+    plot_df['Primary_Vote_Share'] = pd.to_numeric(plot_df['Primary_Vote_Share'], errors='coerce').astype(float)
+
+    mask = plot_df['Campaign_Length_Days'].notna() & plot_df['Primary_Vote_Share'].notna()
+    if not INCLUDE_REPEATS:
+        mask &= (plot_df['is_repeat'] == False)
+
+    plot_df = plot_df.loc[mask].copy()
+    plot_df['Is_Former_Councillor'] = plot_df['Is_Former_Councillor'].astype(bool)
+
+    # Ensure Primary_Vote_Share is on a 0–100% scale for clean axis formatting
+    if plot_df['Primary_Vote_Share'].max() <= 1.0:
+        plot_df['Primary_Vote_Share'] = plot_df['Primary_Vote_Share'] * 100.0
+
+    # 2. Canvas & subtle styling
+    fig, ax = plt.subplots(figsize=(10.5, 6), dpi=150)
+    fig.patch.set_facecolor('#ffffff')
+    ax.set_facecolor('#fcfbff')
+    ax.set_axisbelow(True)
+
+    # Subtle shaded zone + dashed marker for the 15-day ballot draw window
+    ax.axvspan(-3, 15, color='#ede9fe', alpha=0.55, zorder=0)
+    ax.axvline(15, color='#9333ea', linestyle='--', linewidth=1.2, alpha=0.65, zorder=1)
+
+    # Palette & shapes
+    councillor_palette = {True: '#7c3aed', False: '#3b82f6'}  # Violet vs. soft cobalt
+    archetype_markers = {'Standard': 'o', 'Public Figure': '^', 'Teal': 's'}
+
+    # 3. Regression trendline(s)
+    reg_kwargs = dict(
+        x='Campaign_Length_Days',
+        y='Primary_Vote_Share',
+        ax=ax,
+        scatter=False,
+        ci=95,
+        color='#e11d48',
+        line_kws={'linewidth': 2.0, 'alpha': 0.85, 'zorder': 2}
+    )
+    if SPLIT_TREND_AT_15:
+        for seg in (plot_df[plot_df['Campaign_Length_Days'] <= 15],
+                    plot_df[plot_df['Campaign_Length_Days'] > 15]):
+            if len(seg) >= 3:
+                sns.regplot(data=seg, **reg_kwargs)
+    else:
+        # Tip: swap to lowess=True (and drop ci=95) if the relationship curves sharply after 15 days
+        sns.regplot(data=plot_df, **reg_kwargs)
+
+    # 4. Crisp, smaller scatter dots with white edges so overlapping points separate cleanly
+    sns.scatterplot(
+        data=plot_df,
+        x='Campaign_Length_Days',
+        y='Primary_Vote_Share',
+        hue='Is_Former_Councillor',
+        hue_order=[True, False],
+        style='Candidate_Archetype',
+        style_order=['Standard', 'Public Figure', 'Teal'],
+        markers=archetype_markers,
+        palette=councillor_palette,
+        s=46,
+        alpha=0.88,
+        edgecolor='white',
+        linewidth=0.75,
+        ax=ax,
+        legend=False,
+        zorder=3
+    )
+
+    # Optional gold halo for repeat candidates (active only if INCLUDE_REPEATS = True)
+    if INCLUDE_REPEATS:
+        repeats = plot_df[plot_df['is_repeat'] == True]
+        if not repeats.empty:
+            ax.scatter(
+                repeats['Campaign_Length_Days'],
+                repeats['Primary_Vote_Share'],
+                s=95,
+                facecolors='none',
+                edgecolors='#f59e0b',
+                linewidths=1.6,
+                alpha=0.85,
+                zorder=4
+            )
+
+    # 5. Annotate the 15-day threshold neatly near the top of the plot
+    y_top = ax.get_ylim()[1]
+    ax.text(
+        17, y_top * 0.96,
+        '15 days\n(Ballot draw)',
+        color='#6b21a8',
+        fontsize=8.5,
+        fontweight='semibold',
+        va='top',
+        ha='left'
+    )
+
+    # 6. Clean, human-readable custom legend
+    legend_handles = [
+        Line2D([0], [0], linestyle='none', label='Council Background'),
+        Line2D([0], [0], marker='o', linestyle='none', markersize=7,
+               markerfacecolor='#7c3aed', markeredgecolor='white', markeredgewidth=0.7,
+               label='Former Councillor'),
+        Line2D([0], [0], marker='o', linestyle='none', markersize=7,
+               markerfacecolor='#3b82f6', markeredgecolor='white', markeredgewidth=0.7,
+               label='Not Former Councillor'),
+        Line2D([0], [0], linestyle='none', label=''),
+        Line2D([0], [0], linestyle='none', label='Candidate Archetype'),
+        Line2D([0], [0], marker='o', linestyle='none', markersize=6.5,
+               markerfacecolor='#64748b', markeredgecolor='white', markeredgewidth=0.7,
+               label='Standard'),
+        Line2D([0], [0], marker='^', linestyle='none', markersize=7,
+               markerfacecolor='#64748b', markeredgecolor='white', markeredgewidth=0.7,
+               label='Public Figure'),
+        Line2D([0], [0], marker='s', linestyle='none', markersize=6.5,
+               markerfacecolor='#64748b', markeredgecolor='white', markeredgewidth=0.7,
+               label='Teal'),
+    ]
+    if INCLUDE_REPEATS:
+        legend_handles.append(
+            Line2D([0], [0], marker='o', linestyle='none', markersize=8,
+                   markerfacecolor='none', markeredgecolor='#f59e0b', markeredgewidth=1.6,
+                   label='Repeat Candidate')
         )
-        
-        ax.set_title(phase, fontweight='bold')
-        ax.set_xlabel("Campaign Length (Days Before Election)")
-        ax.set_ylabel("Primary Vote Share (%)" if i == 0 else "")
-        ax.grid(True, linestyle='--', alpha=0.5)
 
-    # Fix legend title and placement
-    axes[1].legend(title="Former Councillor", loc='upper left')
+    leg = ax.legend(
+        handles=legend_handles,
+        loc='upper right',
+        frameon=True,
+        facecolor='white',
+        edgecolor='#e2e8f0',
+        framealpha=0.94,
+        fontsize=9,
+        handletextpad=0.6,
+        borderpad=0.8
+    )
+    # Bold the two section headers inside the legend
+    for text in leg.get_texts():
+        if text.get_text() in ('Council Background', 'Candidate Archetype'):
+            text.set_fontweight('bold')
+            text.set_color('#334155')
 
-    # 3. Final layout adjustments
-    fig.suptitle("Independent Candidate Vote Share vs. Wikipedia Insertion Date", y=1.03, fontsize=14, fontweight='bold')
+    # 7. Axes, gridlines, and typography
+    ax.set_xlim(left=-3)
+    ax.set_ylim(bottom=0)
+    ax.yaxis.set_major_formatter(mtick.PercentFormatter(decimals=0))
+    ax.grid(axis='y', linestyle='--', linewidth=0.7, color='#cbd5e1', alpha=0.65)
+    ax.grid(axis='x', linestyle=':', linewidth=0.6, color='#e2e8f0', alpha=0.6)
+    sns.despine(ax=ax, top=True, right=True)
+    ax.spines['left'].set_color('#94a3b8')
+    ax.spines['bottom'].set_color('#94a3b8')
+    ax.tick_params(colors='#334155', labelsize=9.5)
+
+    ax.set_title(
+        "Independent Candidate Primary Vote vs. Campaign Length",
+        fontsize=13.5, fontweight='bold', color='#4c1d95', loc='left', pad=18
+    )
+    ax.text(
+        0, 1.015,
+        "Measured by Wikipedia insertion date (first-time post-2010 independents)",
+        transform=ax.transAxes, fontsize=9.5, color='#64748b'
+    )
+    ax.set_xlabel("Campaign Length (Days Before Election)", fontsize=10.5, fontweight='semibold', color='#1e293b', labelpad=8)
+    ax.set_ylabel("Primary Vote Share", fontsize=10.5, fontweight='semibold', color='#1e293b', labelpad=8)
+
     plt.tight_layout()
     plt.show()
 

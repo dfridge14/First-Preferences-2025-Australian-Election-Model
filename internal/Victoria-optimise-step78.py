@@ -1253,6 +1253,118 @@ def deep_dive_minor_failures(STEP6_BY_YEAR, RESULTS_FP_BY_YEAR, df_t, dirichlet_
 #deep_dive_minor_failures(STEP6_BY_YEAR, RESULTS_FP_BY_YEAR,  df_t=np.inf, dirichlet_alpha=15)
 #import pdb; pdb.set_trace()
 
+
+def compute_historical_mae( # NEW
+    STEP6_BY_YEAR: dict, # NEW
+    RESULTS_FP_BY_YEAR: dict, # NEW
+    df_t: float = np.inf, # NEW
+    dirichlet_alpha: float = 14.0, # NEW
+    years: list = ['2010', '2014', '2018', '2022'], # NEW
+    use_median: bool = False # NEW
+) -> Tuple[pd.DataFrame, pd.DataFrame]: # NEW
+    """Computes historical FP MAE (in percentage points) across elections and party buckets.""" # NEW
+    records = [] # NEW
+    seat_tvds_by_year = defaultdict(list) # NEW
+
+    for yr in years: # NEW
+        samples = simulate_step78_for_election( # NEW
+            election_year=yr, # NEW
+            step6_bundle=STEP6_BY_YEAR[yr], # NEW
+            results_dict=RESULTS_FP_BY_YEAR[yr], # NEW
+            df_t=df_t, # NEW
+            dirichlet_alpha_split=dirichlet_alpha # NEW
+        ) # NEW
+
+        for div, pred_raw in samples.items(): # NEW
+            cols = list(RESULTS_FP_BY_YEAR[yr][div].columns) # NEW
+            actual = RESULTS_FP_BY_YEAR[yr][div].iloc[0].to_numpy(dtype=float) # NEW
+            if actual.sum() <= 1.05: # NEW
+                actual = actual * 100.0 # NEW
+
+            pred = pred_raw * 100.0 if np.nanmax(pred_raw) <= 1.05 else pred_raw # NEW
+            point_pred = np.median(pred, axis=0) if use_median else np.mean(pred, axis=0) # NEW
+            abs_err = np.abs(point_pred - actual) # NEW
+
+            seat_tvds_by_year[yr].append(float(0.5 * np.sum(abs_err))) # NEW
+
+            for cand, p_hat, y_true, err in zip(cols, point_pred, actual, abs_err): # NEW
+                c_str = str(cand).strip().upper() # NEW
+                if c_str.startswith('ALP'): # NEW
+                    bucket = 'ALP' # NEW
+                elif any(c_str.startswith(p) for p in ['LP', 'NP', 'LNP', 'COAL', 'CLP']): # NEW
+                    bucket = 'COAL' # NEW
+                elif c_str.startswith('GRN'): # NEW
+                    bucket = 'GRN' # NEW
+                elif c_str.startswith('IND'): # NEW
+                    bucket = 'IND' # NEW
+                else: # NEW
+                    bucket = 'Minor' # NEW
+
+                records.append({ # NEW
+                    'year': yr, # NEW
+                    'div': div, # NEW
+                    'cand': cand, # NEW
+                    'bucket': bucket, # NEW
+                    'pred': float(p_hat), # NEW
+                    'actual': float(y_true), # NEW
+                    'abs_err': float(err) # NEW
+                }) # NEW
+
+    err_df = pd.DataFrame(records) # NEW
+
+    # 1. Per-year and pooled summary # NEW
+    year_rows = [] # NEW
+    for yr in years: # NEW
+        sub = err_df[err_df['year'] == yr] # NEW
+        maj = sub[sub['bucket'].isin(['ALP', 'COAL', 'GRN'])] # NEW
+        seat_mae = sub.groupby('div')['abs_err'].mean().mean() # NEW
+        year_rows.append({ # NEW
+            'Year': yr, # NEW
+            'All_Cand_MAE': sub['abs_err'].mean(), # NEW
+            'Seat_Avg_MAE': seat_mae, # NEW
+            'Major_MAE': maj['abs_err'].mean(), # NEW
+            'Point_TVD': float(np.mean(seat_tvds_by_year[yr])), # NEW
+            'N_Cands': len(sub) # NEW
+        }) # NEW
+
+    all_maj = err_df[err_df['bucket'].isin(['ALP', 'COAL', 'GRN'])] # NEW
+    all_seat_mae = err_df.groupby(['year', 'div'])['abs_err'].mean().mean() # NEW
+    all_tvd = float(np.mean([v for yr in years for v in seat_tvds_by_year[yr]])) # NEW
+    year_rows.append({ # NEW
+        'Year': 'POOLED', # NEW
+        'All_Cand_MAE': err_df['abs_err'].mean(), # NEW
+        'Seat_Avg_MAE': all_seat_mae, # NEW
+        'Major_MAE': all_maj['abs_err'].mean(), # NEW
+        'Point_TVD': all_tvd, # NEW
+        'N_Cands': len(err_df) # NEW
+    }) # NEW
+    summary_df = pd.DataFrame(year_rows) # NEW
+
+    # 2. Breakdown by party bucket x year # NEW
+    bucket_order = ['ALP', 'COAL', 'GRN', 'IND', 'Minor'] # NEW
+    pivot = err_df.pivot_table(index='bucket', columns='year', values='abs_err', aggfunc='mean') # NEW
+    pivot['POOLED'] = err_df.groupby('bucket')['abs_err'].mean() # NEW
+    pivot['N'] = err_df.groupby('bucket')['abs_err'].count() # NEW
+    pivot = pivot.reindex([b for b in bucket_order if b in pivot.index]) # NEW
+
+    print(f"\n=== HISTORICAL FP MAE (df_t={df_t}, DIRICHLET_ALPHA={dirichlet_alpha}) ===") # NEW
+    print(summary_df.to_string(index=False, float_format=lambda x: f"{x:.2f}")) # NEW
+    print("\n=== MAE BY PARTY BUCKET (% pts) ===") # NEW
+    print(pivot.to_string(float_format=lambda x: f"{x:.2f}")) # NEW
+
+    return err_df, summary_df # NEW
+
+
+err_df, mae_summary = compute_historical_mae( # NEW
+    STEP6_BY_YEAR=STEP6_BY_YEAR, # NEW
+    RESULTS_FP_BY_YEAR=RESULTS_FP_BY_YEAR, # NEW
+    df_t=np.inf, # NEW
+    dirichlet_alpha=14.0 # NEW
+) # NEW
+
+import pdb; pdb.set_trace()
+
+
 df_t_grid  = [4.0, 8.0, 15.0, 30.0, np.inf]
 dirichlet_alpha_grid = [4,6, 8,10.0, 12,14,16,18,20,22] # [10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0, 65.0, 80.0, 100.0]
 
